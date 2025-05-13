@@ -3,7 +3,7 @@
 #include "layout.h"
 #include "vector.h"
 
-int main(int argc, char *argv[]) {
+int main(int argc, char* argv[]) {
   using T = double;
 
   using Component = mdgo::CartPoleComponent<T>;
@@ -20,8 +20,7 @@ int main(int argc, char *argv[]) {
   int N = 201;  // Number of time levels
   mdgo::Vector<int, Component::ncomp> indices(N);
 
-  indices.host_initialize();
-  int *array = indices.get_host_array();
+  int* array = indices.get_host_array();
   for (int i = 0; i < indices.get_size(); i++) {
     array[i] = i;
   }
@@ -33,41 +32,39 @@ int main(int argc, char *argv[]) {
   mdgo::SerialCollection<T, Component, Layout> collect(cart, layout);
 
   mdgo::Vector<T> x(ndof);
-  mdgo::Vector<T> grad(ndof);
+  mdgo::Vector<T> grad1(ndof);
+  mdgo::Vector<T> grad2(ndof);
   mdgo::Vector<T> p(ndof);
-
-  x.host_initialize();
-  grad.host_initialize();
-  p.host_initialize();
+  mdgo::Vector<T> hprod(ndof);
 
   x.set_random();
   p.set_random();
-  grad.zero();
+  grad1.zero();
+  grad2.zero();
+  hprod.zero();
 
   T L1 = collect.lagrangian(x);
-  collect.add_gradient(x, grad);
+  collect.add_gradient(x, grad1);
+  collect.add_hessian_product(x, p, hprod);
 
   double dh = 1e-6;
   x.axpy(dh, p);
   T L2 = collect.lagrangian(x);
+  collect.add_gradient(x, grad2);
 
   T fd = (L2 - L1) / dh;
-  T ans = grad.dot(p);
-
+  T ans = grad1.dot(p);
   std::printf("%12.4e   %12.4e    %12.4e\n", ans, fd, (ans - fd) / fd);
 
-  // double dh = 1e-6;
-  // for (int i = 0; i < Input::ncomp; i++) {
-  //   T tmp = input[i];
-  //   input[i] = tmp + dh;
-  //   T L2 = cart.lagrange(input);
-  //   input[i] = tmp;
+  grad2.axpy(-1.0, grad1);
+  grad2.scale(1.0 / dh);
 
-  //   T fd = (L2 - L1) / dh;
-
-  //   std::printf("%12.4e   %12.4e    %12.4e\n", grad[i], fd,
-  //               (grad[i] - fd) / fd);
-  // }
+  T* fd_array = grad2.get_host_array();
+  T* ans_array = hprod.get_host_array();
+  for (int i = 0; i < hprod.get_size(); i++) {
+    std::printf("%12.4e   %12.4e    %12.4e\n", ans_array[i], fd_array[i],
+                (ans_array[i] - fd_array[i]) / fd_array[i]);
+  }
 
   return 0;
 }

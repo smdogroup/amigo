@@ -68,26 +68,67 @@ class CartPoleComponent {
     A2D::ADObj<T1&> x(A2D::get<2>(input), A2D::get<2>(grad));
     A2D::ADObj<A2D::Vec<T1, nstates>&> lam(A2D::get<3>(input),
                                            A2D::get<3>(grad));
-
-    A2D::ADObj<A2D::Vec<T1, nstates>> res;
     A2D::ADObj<T1> cost, sint, result;
 
     auto stack = A2D::MakeStack(
-        A2D::Eval(A2D::cos(q[1]), cost),    // cost = cos(q[1])
-        A2D::Eval(A2D::sin(q[1]), sint),    // sint = sin(q[1])
-        A2D::Eval(q[2] - qdot[0], res[0]),  // qdot[0] = q[2]
-        A2D::Eval(q[3] - qdot[1], res[1]),  // qdot[1] = q[3]
-        A2D::Eval(((m1 + m2 * (1.0 - cost * cost)) * qdot[2] -
-                   (L * m2 * sint * q[3] * q[3] * x + m2 * g * cost * sint)),
-                  res[2]),
-        A2D::Eval(L * (m1 + m2 * (1.0 - cost * cost)) * qdot[3] +
-                      (L * m2 * cost * sint * q[3] * q[3] + x * cost +
-                       (m1 + m2) * g * sint),
-                  res[3]),
-        A2D::VecDot(res, lam, result));
+        A2D::Eval(A2D::cos(q[1]), cost),        // cost = cos(q[1])
+        A2D::Eval(A2D::sin(q[1]), sint),        // sint = sin(q[1])
+        A2D::Eval((lam[0] * (q[2] - qdot[0]) +  // First equation
+                   lam[1] * (q[3] - qdot[1]) +  // Secont equation
+                   lam[2] * ((m1 + m2 * (1.0 - cost * cost)) * qdot[2] -
+                             (L * m2 * sint * q[3] * q[3] * x +
+                              m2 * g * cost * sint)) +
+                   lam[3] * (L * (m1 + m2 * (1.0 - cost * cost)) * qdot[3] +
+                             (L * m2 * cost * sint * q[3] * q[3] + x * cost +
+                              (m1 + m2) * g * sint))),
+                  result));
 
     result.bvalue() = 1.0;
     stack.reverse();
+  }
+
+  /**
+   * @brief Compute a Hessian vector product
+   *
+   * @tparam T1 The type for the computation
+   * @param input
+   * @param grad
+   */
+  template <typename T1>
+  void hessian_product(Input<T1>& input, Input<T1>& dir, Input<T1>& grad,
+                       Input<T1>& prod) const {
+    A2D::A2DObj<A2D::Vec<T1, nstates>&> qdot(
+        A2D::get<0>(input), A2D::get<0>(grad), A2D::get<0>(dir),
+        A2D::get<0>(prod));
+    A2D::A2DObj<A2D::Vec<T1, nstates>&> q(A2D::get<1>(input), A2D::get<1>(grad),
+                                          A2D::get<1>(dir), A2D::get<1>(prod));
+    A2D::A2DObj<T1&> x(A2D::get<2>(input), A2D::get<2>(grad), A2D::get<2>(dir),
+                       A2D::get<2>(prod));
+    A2D::A2DObj<A2D::Vec<T1, nstates>&> lam(A2D::get<3>(input),
+                                            A2D::get<3>(grad), A2D::get<3>(dir),
+                                            A2D::get<3>(prod));
+    A2D::A2DObj<T1> cost, sint, result;
+
+    auto stack = A2D::MakeStack(
+        A2D::Eval(A2D::cos(q[1]), cost),        // cost = cos(q[1])
+        A2D::Eval(A2D::sin(q[1]), sint),        // sint = sin(q[1])
+        A2D::Eval((lam[0] * (q[2] - qdot[0]) +  // First equation
+                   lam[1] * (q[3] - qdot[1]) +  // Secont equation
+                   lam[2] * ((m1 + m2 * (1.0 - cost * cost)) * qdot[2] -
+                             (L * m2 * sint * q[3] * q[3] * x +
+                              m2 * g * cost * sint)) +
+                   lam[3] * (L * (m1 + m2 * (1.0 - cost * cost)) * qdot[3] +
+                             (L * m2 * cost * sint * q[3] * q[3] + x * cost +
+                              (m1 + m2) * g * sint))),
+                  result));
+
+    // Set the seed value and compute the forward derivatives
+    result.bvalue() = 1.0;
+    stack.reverse();
+
+    // Set the seed and compute the Hessian-vector product
+    stack.hforward();
+    stack.hreverse();
   }
 
  private:

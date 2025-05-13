@@ -5,10 +5,22 @@
 
 namespace mdgo {
 
+enum class VectorType { HOST_AND_DEVICE, DEVICE_ONLY, HOST_ONLY };
+
 template <typename T, int dim = 1>
 class Vector {
  public:
-  Vector(int length) : length(length), h_array(nullptr), d_array(nullptr) {}
+  Vector(int length, VectorType vtype = VectorType::HOST_AND_DEVICE)
+      : length(length), vtype(vtype), h_array(nullptr), d_array(nullptr) {
+    if (vtype == VectorType::HOST_AND_DEVICE ||
+        vtype == VectorType::HOST_ONLY) {
+      h_array = new T[length * dim];
+    }
+    if (vtype == VectorType::HOST_AND_DEVICE ||
+        vtype == VectorType::DEVICE_ONLY) {
+      // cudaMalloc((void **)&d_array, length * dim * sizeof(T));
+    }
+  }
 
   ~Vector() {
     if (d_array) {
@@ -16,18 +28,6 @@ class Vector {
     }
     if (h_array) {
       delete[] h_array;
-    }
-  }
-
-  void host_initialize() {
-    if (!h_array) {
-      h_array = new T[length * dim];
-    }
-  }
-
-  void device_initialize() {
-    if (!d_array) {
-      // cudaMalloc((void **)&d_array, length * dim * sizeof(T));
     }
   }
 
@@ -77,6 +77,14 @@ class Vector {
     return value;
   }
 
+  void scale(T alpha) {
+    if (h_array) {
+      for (int i = 0; i < length * dim; i++) {
+        h_array[i] *= alpha;
+      }
+    }
+  }
+
   int get_length() const { return length; }
   int get_size() const { return length * dim; }
 
@@ -88,6 +96,7 @@ class Vector {
 
  private:
   int length;
+  VectorType vtype;
   T* h_array;  // Host data
   T* d_array;  // Device data
 };
