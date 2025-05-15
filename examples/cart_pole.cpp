@@ -1,70 +1,87 @@
 #include "cart_component.h"
+#include "cart_pole_problem.h"
 #include "component_group.h"
+#include "constraint_component.h"
+#include "csr_matrix.h"
 #include "layout.h"
+#include "trapezoid_component.h"
 #include "vector.h"
 
 int main(int argc, char* argv[]) {
   using T = double;
 
-  using Component = mdgo::CartPoleComponent<T>;
-  using Input = Component::template Input<T>;
-  using Layout = mdgo::IndexLayout<Component>;
+  using Vec = std::shared_ptr<mdgo::Vector<T>>;
+  using Mat = std::shared_ptr<mdgo::CSRMat<T>>;
 
-  T g = 9.81;
-  T L = 0.5;
-  T m1 = 1.0;
-  T m2 = 0.5;
+  int N = 201;
+  mdgo::CartPoleProblem<T> cart(N);
 
-  mdgo::CartPoleComponent<T> cart(g, L, m1, m2);
+  Vec x = cart.create_vector();
+  Vec g1 = cart.create_vector();
+  Vec g2 = cart.create_vector();
+  Vec p = cart.create_vector();
+  Vec h = cart.create_vector();
 
-  int N = 201;  // Number of time levels
-  mdgo::Vector<int, Component::ncomp> indices(N);
+  x->set_random();
+  p->set_random();
+  g1->zero();
+  g2->zero();
+  h->zero();
 
-  int* array = indices.get_host_array();
-  for (int i = 0; i < indices.get_size(); i++) {
-    array[i] = i;
-  }
+  T L1 = cart.lagrangian(x);
+  cart.gradient(x, g1);
+  cart.hessian_product(x, p, h);
 
-  int ndof = indices.get_size();
+  Mat jac = cart.create_csr_matrix();
+  cart.hessian(x, jac);
 
-  mdgo::IndexLayout<mdgo::CartPoleComponent<T>> layout(indices);
-
-  mdgo::SerialCollection<T, Component, Layout> collect(cart, layout);
-
-  mdgo::Vector<T> x(ndof);
-  mdgo::Vector<T> grad1(ndof);
-  mdgo::Vector<T> grad2(ndof);
-  mdgo::Vector<T> p(ndof);
-  mdgo::Vector<T> hprod(ndof);
-
-  x.set_random();
-  p.set_random();
-  grad1.zero();
-  grad2.zero();
-  hprod.zero();
-
-  T L1 = collect.lagrangian(x);
-  collect.add_gradient(x, grad1);
-  collect.add_hessian_product(x, p, hprod);
-
-  double dh = 1e-6;
-  x.axpy(dh, p);
-  T L2 = collect.lagrangian(x);
-  collect.add_gradient(x, grad2);
+  double dh = 1e-7;
+  x->axpy(dh, *p);
+  T L2 = cart.lagrangian(x);
+  cart.gradient(x, g2);
 
   T fd = (L2 - L1) / dh;
-  T ans = grad1.dot(p);
+  T ans = g1->dot(*p);
+  std::printf("Gradient error: \n");
   std::printf("%12.4e   %12.4e    %12.4e\n", ans, fd, (ans - fd) / fd);
 
-  grad2.axpy(-1.0, grad1);
-  grad2.scale(1.0 / dh);
+  g2->axpy(-1.0, *g1);
+  g2->scale(1.0 / dh);
 
-  T* fd_array = grad2.get_host_array();
-  T* ans_array = hprod.get_host_array();
-  for (int i = 0; i < hprod.get_size(); i++) {
-    std::printf("%12.4e   %12.4e    %12.4e\n", ans_array[i], fd_array[i],
-                (ans_array[i] - fd_array[i]) / fd_array[i]);
+  T* fd_array = g2->get_host_array();
+  T* ans_array = h->get_host_array();
+  T max_err = 0.0;
+  int max_component = 0;
+  for (int i = 0; i < h->get_size(); i++) {
+    T rel_err = (ans_array[i] - fd_array[i]) / fd_array[i];
+    if (std::fabs(rel_err) > max_err) {
+      max_err = rel_err;
+      max_component = i;
+    }
   }
+  std::printf("Max Hessian product error: \n");
+  std::printf("%12.4e   %12.4e    %12.4e\n", ans_array[max_component],
+              fd_array[max_component],
+              (ans_array[max_component] - fd_array[max_component]) /
+                  fd_array[max_component]);
+
+  jac->mult(p, g2);
+
+  max_err = 0.0;
+  max_component = 0;
+  for (int i = 0; i < h->get_size(); i++) {
+    T rel_err = (ans_array[i] - fd_array[i]) / fd_array[i];
+    if (std::fabs(rel_err) > max_err) {
+      max_err = rel_err;
+      max_component = i;
+    }
+  }
+
+  std::printf("Max Hessian consistency error: \n");
+  std::printf("%12.4e   %12.4e    %12.4e\n", ans_array[max_component],
+              fd_array[max_component],
+              (ans_array[max_component] - fd_array[max_component]) /
+                  fd_array[max_component]);
 
   return 0;
 }

@@ -1,7 +1,10 @@
 #ifndef MDGO_COMPONENT_COLLECTION_H
 #define MDGO_COMPONENT_COLLECTION_H
 
+#include <set>
+
 #include "a2dcore.h"
+#include "csr_matrix.h"
 #include "vector.h"
 
 namespace mdgo {
@@ -45,6 +48,40 @@ class SerialCollection {
       layout.get_values(i, dir, direction);
       comp.hessian_product(input, direction, gradient, result);
       layout.add_values(i, result, res);
+    }
+  }
+
+  void add_nonzero_pattern(std::set<std::pair<int, int>> &map) const {
+    for (int i = 0; i < layout.get_length(); i++) {
+      int index[ncomp];
+      layout.get_indices(i, index);
+
+      for (int j = 0; j < ncomp; j++) {
+        for (int k = 0; k < ncomp; k++) {
+          map.insert(std::pair<int, int>(index[j], index[k]));
+        }
+      }
+    }
+  }
+
+  void add_hessian(const Vector<T> &vec, CSRMat<T> &jac) const {
+    Input input, gradient, direction, result;
+    for (int i = 0; i < layout.get_length(); i++) {
+      int index[ncomp];
+      layout.get_indices(i, index);
+      layout.get_values(i, vec, input);
+
+      for (int j = 0; j < Component::ncomp; j++) {
+        direction.zero();
+        gradient.zero();
+        result.zero();
+
+        direction[j] = 1.0;
+
+        comp.hessian_product(input, direction, gradient, result);
+
+        jac.add_row(index[j], Component::ncomp, index, result);
+      }
     }
   }
 

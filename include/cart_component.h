@@ -1,6 +1,8 @@
 #ifndef MDGO_CART_COMPONENT_H
 #define MDGO_CART_COMPONENT_H
 
+#include <map>
+
 #include "a2dcore.h"
 
 namespace mdgo {
@@ -9,18 +11,39 @@ template <typename T>
 class CartPoleComponent {
  public:
   // Number of equations = number of states for the cart-pole system
-  static constexpr int nstates = 4;
+  static constexpr int num_states = 4;
 
   // Define the input: The state and design variables and the Lagrange
   // multipliers
   template <typename T1>
-  using Input = A2D::VarTuple<T1, A2D::Vec<T1, nstates>, A2D::Vec<T1, nstates>,
-                              T1, A2D::Vec<T1, nstates>>;
+  using Input =
+      A2D::VarTuple<T1, A2D::Vec<T1, num_states>, A2D::Vec<T1, num_states>, T1,
+                    A2D::Vec<T1, num_states>>;
 
-  // The number of components
+  // The total number of variables (components in the input)
   static constexpr int ncomp = Input<T>::ncomp;
 
-  // Create the CartPole class
+  /**
+   * @brief Get the number of variables associated with this component
+   *
+   * @return std::map<std::string, int> Mapping of the variables
+   */
+  static std::map<std::string, int> get_variable_names() {
+    std::map<std::string, int> map = {{"states", num_states},
+                                      {"rates", num_states},
+                                      {"control", 1},
+                                      {"lambda_rates", num_states}};
+    return map;
+  }
+
+  /**
+   * @brief Construct a new Cart Pole Component object
+   *
+   * @param g Acceleration due to gravity
+   * @param L Length of the pole
+   * @param m1 Mass of the cart
+   * @param m2 Mass at the end of the pole
+   */
   CartPoleComponent(T g, T L, T m1, T m2) : g(g), L(L), m1(m1), m2(m2) {}
 
   /**
@@ -32,10 +55,10 @@ class CartPoleComponent {
    */
   template <typename T1>
   T1 lagrange(const Input<T1>& input) const {
-    const A2D::Vec<T1, nstates>& qdot = A2D::get<0>(input);
-    const A2D::Vec<T1, nstates>& q = A2D::get<1>(input);
+    const A2D::Vec<T1, num_states>& qdot = A2D::get<0>(input);
+    const A2D::Vec<T1, num_states>& q = A2D::get<1>(input);
     const T1& x = A2D::get<2>(input);
-    const A2D::Vec<T1, nstates>& lam = A2D::get<3>(input);
+    const A2D::Vec<T1, num_states>& lam = A2D::get<3>(input);
 
     // Add the contributions to the Lagrangian
     T1 cost = A2D::cos(q[1]);
@@ -62,12 +85,13 @@ class CartPoleComponent {
    */
   template <typename T1>
   void gradient(Input<T1>& input, Input<T1>& grad) const {
-    A2D::ADObj<A2D::Vec<T1, nstates>&> qdot(A2D::get<0>(input),
-                                            A2D::get<0>(grad));
-    A2D::ADObj<A2D::Vec<T1, nstates>&> q(A2D::get<1>(input), A2D::get<1>(grad));
+    A2D::ADObj<A2D::Vec<T1, num_states>&> qdot(A2D::get<0>(input),
+                                               A2D::get<0>(grad));
+    A2D::ADObj<A2D::Vec<T1, num_states>&> q(A2D::get<1>(input),
+                                            A2D::get<1>(grad));
     A2D::ADObj<T1&> x(A2D::get<2>(input), A2D::get<2>(grad));
-    A2D::ADObj<A2D::Vec<T1, nstates>&> lam(A2D::get<3>(input),
-                                           A2D::get<3>(grad));
+    A2D::ADObj<A2D::Vec<T1, num_states>&> lam(A2D::get<3>(input),
+                                              A2D::get<3>(grad));
     A2D::ADObj<T1> cost, sint, result;
 
     auto stack = A2D::MakeStack(
@@ -91,22 +115,25 @@ class CartPoleComponent {
    * @brief Compute a Hessian vector product
    *
    * @tparam T1 The type for the computation
-   * @param input
-   * @param grad
+   * @param input Input variables
+   * @param dir The input direction vector
+   * @param grad The gradient at the point
+   * @param prod The Hessian-vector product
    */
   template <typename T1>
   void hessian_product(Input<T1>& input, Input<T1>& dir, Input<T1>& grad,
                        Input<T1>& prod) const {
-    A2D::A2DObj<A2D::Vec<T1, nstates>&> qdot(
+    A2D::A2DObj<A2D::Vec<T1, num_states>&> qdot(
         A2D::get<0>(input), A2D::get<0>(grad), A2D::get<0>(dir),
         A2D::get<0>(prod));
-    A2D::A2DObj<A2D::Vec<T1, nstates>&> q(A2D::get<1>(input), A2D::get<1>(grad),
-                                          A2D::get<1>(dir), A2D::get<1>(prod));
+    A2D::A2DObj<A2D::Vec<T1, num_states>&> q(
+        A2D::get<1>(input), A2D::get<1>(grad), A2D::get<1>(dir),
+        A2D::get<1>(prod));
     A2D::A2DObj<T1&> x(A2D::get<2>(input), A2D::get<2>(grad), A2D::get<2>(dir),
                        A2D::get<2>(prod));
-    A2D::A2DObj<A2D::Vec<T1, nstates>&> lam(A2D::get<3>(input),
-                                            A2D::get<3>(grad), A2D::get<3>(dir),
-                                            A2D::get<3>(prod));
+    A2D::A2DObj<A2D::Vec<T1, num_states>&> lam(
+        A2D::get<3>(input), A2D::get<3>(grad), A2D::get<3>(dir),
+        A2D::get<3>(prod));
     A2D::A2DObj<T1> cost, sint, result;
 
     auto stack = A2D::MakeStack(

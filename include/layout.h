@@ -51,16 +51,6 @@ class IndexLayout {
   Vector<int, Component::ncomp> &indices;
 };
 
-// /**
-//  * @brief
-//  *
-//  * @tparam Component
-//  */
-// template <class Component>
-// class IndependentLayout {
-//  public:
-// };
-
 }  // namespace mdgo
 
 #endif  // MDGO_LAYOUT_H
