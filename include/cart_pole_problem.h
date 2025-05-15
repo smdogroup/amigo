@@ -28,7 +28,7 @@ class CartPoleProblem {
   using Vec = std::shared_ptr<Vector<T>>;
 
   CartPoleProblem(int N = 201, T tf = 2.0, T g = 9.81, T L = 0.5, T m1 = 1.0,
-                  T m2 = 0.5)
+                  T m2 = 0.3)
       : N(N),
         cart(g, L, m1, m2),
         cart_indices(N),
@@ -106,12 +106,14 @@ class CartPoleProblem {
   }
 
   void gradient(const Vec& x, Vec& g) const {
+    g->zero();
     cart_collect.add_gradient(*x, *g);
     trap_collect.add_gradient(*x, *g);
     con_collect.add_gradient(*x, *g);
   }
 
   void hessian_product(const Vec& x, const Vec& p, Vec& h) const {
+    h->zero();
     cart_collect.add_hessian_product(*x, *p, *h);
     trap_collect.add_hessian_product(*x, *p, *h);
     con_collect.add_hessian_product(*x, *p, *h);

@@ -55,8 +55,8 @@ class CartPoleComponent {
    */
   template <typename T1>
   T1 lagrange(const Input<T1>& input) const {
-    const A2D::Vec<T1, num_states>& qdot = A2D::get<0>(input);
-    const A2D::Vec<T1, num_states>& q = A2D::get<1>(input);
+    const A2D::Vec<T1, num_states>& q = A2D::get<0>(input);
+    const A2D::Vec<T1, num_states>& qdot = A2D::get<1>(input);
     const T1& x = A2D::get<2>(input);
     const A2D::Vec<T1, num_states>& lam = A2D::get<3>(input);
 
@@ -85,10 +85,10 @@ class CartPoleComponent {
    */
   template <typename T1>
   void gradient(Input<T1>& input, Input<T1>& grad) const {
-    A2D::ADObj<A2D::Vec<T1, num_states>&> qdot(A2D::get<0>(input),
-                                               A2D::get<0>(grad));
-    A2D::ADObj<A2D::Vec<T1, num_states>&> q(A2D::get<1>(input),
-                                            A2D::get<1>(grad));
+    A2D::ADObj<A2D::Vec<T1, num_states>&> q(A2D::get<0>(input),
+                                            A2D::get<0>(grad));
+    A2D::ADObj<A2D::Vec<T1, num_states>&> qdot(A2D::get<1>(input),
+                                               A2D::get<1>(grad));
     A2D::ADObj<T1&> x(A2D::get<2>(input), A2D::get<2>(grad));
     A2D::ADObj<A2D::Vec<T1, num_states>&> lam(A2D::get<3>(input),
                                               A2D::get<3>(grad));
@@ -123,10 +123,10 @@ class CartPoleComponent {
   template <typename T1>
   void hessian_product(Input<T1>& input, Input<T1>& dir, Input<T1>& grad,
                        Input<T1>& prod) const {
-    A2D::A2DObj<A2D::Vec<T1, num_states>&> qdot(
+    A2D::A2DObj<A2D::Vec<T1, num_states>&> q(
         A2D::get<0>(input), A2D::get<0>(grad), A2D::get<0>(dir),
         A2D::get<0>(prod));
-    A2D::A2DObj<A2D::Vec<T1, num_states>&> q(
+    A2D::A2DObj<A2D::Vec<T1, num_states>&> qdot(
         A2D::get<1>(input), A2D::get<1>(grad), A2D::get<1>(dir),
         A2D::get<1>(prod));
     A2D::A2DObj<T1&> x(A2D::get<2>(input), A2D::get<2>(grad), A2D::get<2>(dir),

@@ -50,7 +50,7 @@ class TrapezoidComponent {
     const T1& q2dot = A2D::get<3>(input);
     const T1& lam = A2D::get<4>(input);
 
-    T1 result = lam * (q2 - q1 + 0.5 * dt * (q1dot + q2dot));
+    T1 result = lam * (q2 - q1 - 0.5 * dt * (q1dot + q2dot));
 
     return result;
   }
@@ -73,7 +73,7 @@ class TrapezoidComponent {
     A2D::ADObj<T1> result;
 
     auto stack = A2D::MakeStack(
-        A2D::Eval(lam * (q2 - q1 + 0.5 * dt * (q1dot + q2dot)), result));
+        A2D::Eval(lam * (q2 - q1 - 0.5 * dt * (q1dot + q2dot)), result));
 
     result.bvalue() = 1.0;
     stack.reverse();
@@ -105,7 +105,7 @@ class TrapezoidComponent {
     A2D::A2DObj<T1> result;
 
     auto stack = A2D::MakeStack(
-        A2D::Eval(lam * (q2 - q1 + 0.5 * dt * (q1dot + q2dot)), result));
+        A2D::Eval(lam * (q2 - q1 - 0.5 * dt * (q1dot + q2dot)), result));
 
     result.bvalue() = 1.0;
     stack.reverse();
