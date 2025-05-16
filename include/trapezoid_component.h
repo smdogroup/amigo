@@ -22,13 +22,13 @@ class TrapezoidComponent {
    *
    * @return std::map<std::string, int> Mapping of the variables
    */
-  static std::map<std::string, int> get_variable_names() {
-    std::map<std::string, int> map = {{"state1", 1},
-                                      {"state2", 1},
-                                      {"rate1", 1},
-                                      {"rate2", 1},
-                                      {"lambda_trapezoid", 1}};
-    return map;
+  static std::vector<std::pair<std::string, int>> get_variable_names() {
+    std::vector<std::pair<std::string, int>> vars = {{"state1", 1},
+                                                     {"state2", 1},
+                                                     {"rate1", 1},
+                                                     {"rate2", 1},
+                                                     {"lambda_trapezoid", 1}};
+    return vars;
   }
 
   TrapezoidComponent(T dt) : dt(dt) {}

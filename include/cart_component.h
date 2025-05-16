@@ -60,13 +60,13 @@ class CartPoleComponent {
     const T1& x = A2D::get<2>(input);
     const A2D::Vec<T1, num_states>& lam = A2D::get<3>(input);
 
-    // Add the contributions to the Lagrangian
+    // Pre-compute sin/cos of the pole angle
     T1 cost = A2D::cos(q[1]);
     T1 sint = A2D::sin(q[1]);
 
+    // Compute the contribution to the Lagrangian
     T1 result =
-        lam[0] * (q[2] - qdot[0]) +  // First equation
-        lam[1] * (q[3] - qdot[1]) +  // Secont equation
+        lam[0] * (q[2] - qdot[0]) + lam[1] * (q[3] - qdot[1]) +
         lam[2] * ((m1 + m2 * (1.0 - cost * cost)) * qdot[2] -
                   (L * m2 * sint * q[3] * q[3] * x + m2 * g * cost * sint)) +
         lam[3] * (L * (m1 + m2 * (1.0 - cost * cost)) * qdot[3] +
@@ -95,10 +95,9 @@ class CartPoleComponent {
     A2D::ADObj<T1> cost, sint, result;
 
     auto stack = A2D::MakeStack(
-        A2D::Eval(A2D::cos(q[1]), cost),        // cost = cos(q[1])
-        A2D::Eval(A2D::sin(q[1]), sint),        // sint = sin(q[1])
-        A2D::Eval((lam[0] * (q[2] - qdot[0]) +  // First equation
-                   lam[1] * (q[3] - qdot[1]) +  // Secont equation
+        A2D::Eval(A2D::cos(q[1]), cost),  // cost = cos(q[1])
+        A2D::Eval(A2D::sin(q[1]), sint),  // sint = sin(q[1])
+        A2D::Eval((lam[0] * (q[2] - qdot[0]) + lam[1] * (q[3] - qdot[1]) +
                    lam[2] * ((m1 + m2 * (1.0 - cost * cost)) * qdot[2] -
                              (L * m2 * sint * q[3] * q[3] * x +
                               m2 * g * cost * sint)) +

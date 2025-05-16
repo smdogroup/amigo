@@ -5,8 +5,6 @@ from mdgo import mdgo
 import matplotlib.pylab as plt
 import niceplots
 
-# niceplots.set_style("light")
-
 
 class CartProblem:
     def __init__(self):
@@ -22,8 +20,10 @@ class CartProblem:
         )
 
         self.ncomp = 13  # 3 * number of states + 1
-
         self.xctrl_indices = np.arange(8, self.ncomp * self.N, self.ncomp)
+        self.xctrl_weights = np.ones(self.xctrl_indices.shape)
+        self.xctrl_weights[0] = 0.5
+        self.xctrl_weights[-1] = 0.5
 
     def get_init_point(self):
         x = np.zeros(self.ndof)
@@ -39,8 +39,8 @@ class CartProblem:
     def lagrangian(self, x):
         lagrange = self.cart.gradient(x)
 
-        xctrl = x[8 : self.ncomp : self.ncomp * self.N]
-        lagrange += 0.5 * np.dot(xctrl, xctrl)
+        xctrl = x[self.xctrl_indices]
+        lagrange += 0.5 * np.sum(self.xctrl_weights * xctrl**2)
 
         return lagrange
 
@@ -48,7 +48,7 @@ class CartProblem:
         g = self.cart.gradient(x)
 
         xctrl = x[self.xctrl_indices]
-        g[self.xctrl_indices] += xctrl
+        g[self.xctrl_indices] += self.xctrl_weights * xctrl
 
         return g
 
@@ -56,10 +56,10 @@ class CartProblem:
         self.cart.hessian(x, self.mat_obj)
         data = self.mat_obj.get_data()
 
-        for row in self.xctrl_indices:
+        for k, row in enumerate(self.xctrl_indices):
             for jp in range(self.rowp[row], self.rowp[row + 1]):
                 if self.cols[jp] == row:
-                    data[jp] += 1.0
+                    data[jp] += self.xctrl_weights[k]
                     break
 
         jac = csr_matrix((data, self.cols, self.rowp), shape=(self.nrows, self.ncols))
@@ -91,10 +91,10 @@ class CartProblem:
             gnrm = np.linalg.norm(g)
             gnrms.append(gnrm)
 
+            print("||g[%3d]||: " % (i), gnrm)
             if gnrm < 1e-10:
                 break
 
-            print("||g[%3d]||: " % (i), gnrm)
             H = self.hessian(x)
             p = spsolve(H, g)
 
@@ -116,35 +116,105 @@ class CartProblem:
         v = x[2 : self.ncomp * self.N : self.ncomp]
         xctrl = x[8 : self.ncomp * self.N : self.ncomp]
 
-        with plt.style.context(niceplots.get_style("doumont-light")):
-            fig, ax = plt.subplots(3, 1, figsize=(10, 8))
-            # plt.subplots_adjust(hspace=1.0)
+        with plt.style.context(niceplots.get_style()):
+            data = {}
+            data["Cart pos."] = d
+            data["Pole angle"] = (180 / np.pi) * theta
+            data["Control force"] = xctrl
 
-            ax[0].plot(t, d)
-            ax[0].set_ylabel("Cart pos.")
+            fig, ax = niceplots.stacked_plots(
+                "Time (s)",
+                t,
+                [data],
+                lines_only=True,
+                figsize=(10, 6),
+                line_scaler=0.5,
+            )
 
-            ax[1].plot(t, (180 / np.pi) * theta)
-            ax[1].set_ylabel("Pole angle")
-
-            ax[2].plot(t, xctrl)
-            ax[2].set_ylabel("Control force")
-            ax[2].set_xlabel("time")
-
+            fontname = "Helvetica"
             for axis in ax:
-                niceplots.adjust_spines(axis)
+                axis.xaxis.label.set_fontname(fontname)
+                axis.yaxis.label.set_fontname(fontname)
 
+                # Update tick labels
+                for tick in axis.get_xticklabels():
+                    tick.set_fontname(fontname)
+
+                for tick in axis.get_yticklabels():
+                    tick.set_fontname(fontname)
+
+            fig.savefig("cart_stacked.svg")
+            fig.savefig("cart_stacked.png")
         return
 
     def plot_convergence(self, gnrms):
 
-        with plt.style.context(niceplots.get_style("doumont-light")):
+        with plt.style.context(niceplots.get_style()):
             fig, ax = plt.subplots(1, 1)
 
-            ax.semilogy(gnrms)
-            ax.set_ylabel(r"$||\nabla \mathcal{L}||_{2}$")
+            ax.semilogy(gnrms, marker="o", clip_on=False, lw=2.0)
+            ax.set_ylabel("KKT residual norm")
             ax.set_xlabel("Iteration")
 
             niceplots.adjust_spines(ax)
+
+            fontname = "Helvetica"
+            ax.xaxis.label.set_fontname(fontname)
+            ax.yaxis.label.set_fontname(fontname)
+
+            # Update tick labels
+            for tick in ax.get_xticklabels():
+                tick.set_fontname(fontname)
+
+            for tick in ax.get_yticklabels():
+                tick.set_fontname(fontname)
+
+            fig.savefig("cart_residual_norm.svg")
+            fig.savefig("cart_residual_norm.png")
+
+    def visualize(self, x, L=0.5):
+        with plt.style.context(niceplots.get_style()):
+
+            d = x[0 : self.ncomp * self.N : self.ncomp]
+            theta = x[1 : self.ncomp * self.N : self.ncomp]
+
+            # Create the time-lapse visualization
+            fig, ax = plt.subplots(1, figsize=(10, 4.5))
+            ax.axis("equal")
+            ax.axis("off")
+
+            values = np.linspace(0, 1.0, d.shape[0])
+            cmap = plt.get_cmap("viridis")
+
+            hx = 0.03
+            hy = 0.03
+            xpts = []
+            ypts = []
+            for i in range(0, d.shape[0]):
+                color = cmap(values[i])
+
+                x1 = d[i]
+                y1 = 0.0
+                x2 = d[i] + L * np.sin(theta[i])
+                y2 = -L * np.cos(theta[i])
+
+                xpts.append(x2)
+                ypts.append(y2)
+
+                if i % 3 == 0:
+                    ax.plot([x1, x2], [y1, y2], linewidth=2, color=color)
+                    ax.fill(
+                        [x1 - hx, x1 + hx, x1 + hx, x1 - hx, x1 - hx],
+                        [y1, y1, y1 + hy, y1 + hy, y1],
+                        alpha=0.5,
+                        linewidth=2,
+                        color=color,
+                    )
+
+                ax.plot([x2], [y2], color=color, marker="o")
+
+            fig.savefig("cart_pole_history.svg")
+            fig.savefig("cart_pole_history.png")
 
     def plot_nnz(self, x):
         H = self.hessian(x)
@@ -160,5 +230,6 @@ x, gnrms = problem.optimize()
 
 problem.plot(x)
 problem.plot_convergence(gnrms)
+problem.visualize(x)
 
 plt.show()
