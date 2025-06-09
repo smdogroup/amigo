@@ -1,213 +1,124 @@
-import math
+from expressions import *
+
+_cpp_type_map = {int: "int", float: "double", complex: "std::complex<double>"}
 
 
-class ExprNode:
-    def __init__(self):
-        self.name = None  # For output variable names
+def _generate_cpp_input_defs(
+    inputs,
+    mode="eval",
+    template_name="T__",
+    input_name="input__",
+    grad_name="boutput__",
+    prod_name="pinput__",
+    hprod_name="houtput__",
+):
+    lines = []
 
-    def evaluate(self, env):
-        raise NotImplementedError
+    if mode == "eval":
+        for index, name in enumerate(inputs):
+            node = inputs[name]
+            shape = node.shape
 
-    def generate_cpp(self):
-        raise NotImplementedError
+            decl = None
+            if shape is None:
+                decl = f"{template_name}& {name}"
+            elif len(shape) == 1:
+                decl = f"A2D::Vec<{template_name}, {shape[0]}>& {name}"
+            elif len(shape) == 2:
+                decl = f"A2D::Mat<{template_name}, {shape[0]}, {shape[1]}>& {name}"
+            lines.append(f"{decl} = A2D::get<{index}>({input_name});")
+    elif mode == "rev":
+        for index, name in enumerate(inputs):
+            node = inputs[name]
+            shape = node.shape
 
+            decl = None
+            if shape is None:
+                decl = f"A2D::ADObj<{template_name}&> {name}"
+            elif len(shape) == 1:
+                decl = f"A2D::ADObj<A2D::Vec<{template_name}, {shape[0]}>&> {name}"
+            elif len(shape) == 2:
+                decl = f"A2D::ADObj<A2D::Mat<{template_name}, {shape[0]}, {shape[1]}>&> {name}"
+            lines.append(
+                f"{decl}(A2D::get<{index}>({input_name}), A2D::get<{index}>({grad_name}));"
+            )
+    elif mode == "hprod":
+        for index, name in enumerate(inputs):
+            node = inputs[name]
+            shape = node.shape
 
-class ConstNode(ExprNode):
-    def __init__(self, value):
-        super().__init__()
-        self.value = value
+            decl = None
+            if shape is None:
+                decl = f"A2D::A2DObj<{template_name}&> {name}"
+            elif len(shape) == 1:
+                decl = f"A2D::A2DObj<A2D::Vec<{template_name}, {shape[0]}>&> {name}"
+            elif len(shape) == 2:
+                decl = f"A2D::A2DObj<A2D::Mat<{template_name}, {shape[0]}, {shape[1]}>&> {name}"
+            lines.append(
+                f"{decl}(A2D::get<{index}>({input_name}), A2D::get<{index}>({grad_name}), "
+                + f"A2D::get<{index}>({prod_name}), A2D::get<{index}>({hprod_name}),);"
+            )
 
-    def evaluate(self, env):
-        return self.value
-
-    def generate_cpp(self, index=None):
-        return str(self.value)
-
-
-class VarNode(ExprNode):
-    def __init__(self, name, shape=None, type=float):
-        super().__init__()
-        self.name = name
-        self.shape = shape  # e.g. (M, N) for 2D
-        self.type = type
-
-    def generate_cpp(self, index=None):
-        if index is None:
-            return self.name
-        elif isinstance(index, tuple):
-            # For 2D index like A[i][j]
-            i_str = index[0].generate_cpp()
-            j_str = index[1].generate_cpp()
-            return f"{self.name}[{i_str}][{j_str}]"
-        else:
-            return f"{self.name}[{index.generate_cpp()}]"
-
-
-class IndexNode(ExprNode):
-    def __init__(self, array_node, index_node):
-        super().__init__()
-        self.array_node = array_node
-        self.index_node = index_node  # can be ExprNode or tuple of ExprNodes
-
-    def evaluate(self, env):
-        array_val = self.array_node.evaluate(env)
-        if isinstance(self.index_node, tuple):
-            idx = tuple(i.evaluate(env) for i in self.index_node)
-            return array_val[idx[0]][idx[1]]
-        else:
-            idx = self.index_node.evaluate(env)
-            return array_val[idx]
-
-    def generate_cpp(self, index=None):
-        arr = self.array_node.generate_cpp()
-        if isinstance(self.index_node, tuple):
-            idxs = tuple(i.generate_cpp(index) for i in self.index_node)
-            return f"{arr}[{idxs[0]}][{idxs[1]}]"
-        else:
-            idx = self.index_node.generate_cpp(index)
-            return f"{arr}[{idx}]"
+    return lines
 
 
-class OpNode(ExprNode):
-    def __init__(self, op, left, right):
-        super().__init__()
-        self.op = op
-        self.left = left
-        self.right = right
+def _generate_cpp_var_defs(inputs, mode="eval", template_name="T__"):
+    lines = []
 
-    def evaluate(self, env):
-        lval = self.left.evaluate(env)
-        rval = self.right.evaluate(env)
-        # Broadcast-aware evaluation
-        if hasattr(lval, "__len__") and hasattr(rval, "__len__"):
-            return [self._op(a, b) for a, b in zip(lval, rval)]
-        elif hasattr(lval, "__len__"):
-            return [self._op(a, rval) for a in lval]
-        elif hasattr(rval, "__len__"):
-            return [self._op(lval, b) for b in rval]
-        else:
-            return self._op(lval, rval)
+    if mode == "eval":
+        for index, name in enumerate(inputs):
+            node = inputs[name]
+            shape = node.shape
 
-    def _op(self, a, b):
-        return {"+": a + b, "-": a - b, "*": a * b, "/": a / b}[self.op]
+            decl = None
+            if shape is None:
+                decl = f"{template_name} {name};"
+            elif len(shape) == 1:
+                decl = f"A2D::Vec<{template_name}, {shape[0]}> {name};"
+            elif len(shape) == 2:
+                decl = f"A2D::Mat<{template_name}, {shape[0]}, {shape[1]}> {name};"
+            lines.append(decl)
+    elif mode == "rev":
+        for index, name in enumerate(inputs):
+            node = inputs[name]
+            shape = node.shape
 
-    def generate_cpp(self, index=None):
-        a = self.left.generate_cpp(index)
-        b = self.right.generate_cpp(index)
-        return f"({a} {self.op} {b})"
+            decl = None
+            if shape is None:
+                decl = f"A2D::ADObj<{template_name}> {name};"
+            elif len(shape) == 1:
+                decl = f"A2D::ADObj<A2D::Vec<{template_name}, {shape[0]}>> {name};"
+            elif len(shape) == 2:
+                decl = f"A2D::ADObj<A2D::Mat<{template_name}, {shape[0]}, {shape[1]}>> {name};"
+            lines.append(decl)
+    elif mode == "hprod":
+        for index, name in enumerate(inputs):
+            node = inputs[name]
+            shape = node.shape
 
+            decl = None
+            if shape is None:
+                decl = f"A2D::A2DObj<{template_name}> {name};"
+            elif len(shape) == 1:
+                decl = f"A2D::A2DObj<A2D::Vec<{template_name}, {shape[0]}>> {name};"
+            elif len(shape) == 2:
+                decl = f"A2D::A2DObj<A2D::Mat<{template_name}, {shape[0]}, {shape[1]}>> {name};"
+            lines.append(decl)
 
-class UnaryNode(ExprNode):
-    def __init__(self, func_name, func, operand):
-        super().__init__()
-        self.func_name = func_name
-        self.func = func
-        self.operand = operand
-
-    def evaluate(self, env):
-        val = self.operand.evaluate(env)
-        if hasattr(val, "__len__"):
-            return [self.func(v) for v in val]
-        return self.func(val)
-
-    def generate_cpp(self, index=None):
-        a = self.operand.generate_cpp(index)
-        return f"{self.func_name}({a})"
-
-
-class UnaryNegNode(ExprNode):
-    def __init__(self, operand):
-        super().__init__()
-        self.operand = operand
-
-    def evaluate(self, env):
-        val = self.operand.evaluate(env)
-        if hasattr(val, "__len__"):
-            return [-v for v in val]
-        return -val
-
-    def generate_cpp(self, index=None):
-        a = self.operand.generate_cpp(index)
-        return f"-({a})"
-
-
-class Expr:
-    def __init__(self, node: ExprNode):
-        self.node = node
-
-    def __neg__(self):
-        return Expr(UnaryNegNode(self.node))
-
-    def __add__(self, other):
-        return Expr(OpNode("+", self.node, self._to_node(other)))
-
-    def __sub__(self, other):
-        return Expr(OpNode("-", self.node, self._to_node(other)))
-
-    def __mul__(self, other):
-        return Expr(OpNode("*", self.node, self._to_node(other)))
-
-    def __truediv__(self, other):
-        return Expr(OpNode("/", self.node, self._to_node(other)))
-
-    def __radd__(self, other):
-        return Expr(OpNode("+", self._to_node(other), self.node))
-
-    def __rsub__(self, other):
-        return Expr(OpNode("-", self._to_node(other), self.node))
-
-    def __rmul__(self, other):
-        return Expr(OpNode("*", self._to_node(other), self.node))
-
-    def __rtruediv__(self, other):
-        return Expr(OpNode("/", self._to_node(other), self.node))
-
-    def __getitem__(self, idx):
-        if isinstance(idx, tuple):
-            idx_node = tuple(self._to_node(i) for i in idx)
-        else:
-            idx_node = self._to_node(idx)
-        return Expr(IndexNode(self.node, idx_node))
-
-    def evaluate(self, env):
-        return self.node.evaluate(env)
-
-    def generate_cpp(self):
-        return self.node.generate_cpp()
-
-    def _to_node(self, val):
-        if isinstance(val, Expr):
-            return val.node
-        if isinstance(val, ExprNode):
-            return val
-        if isinstance(val, (int, float)):
-            return ConstNode(val)
-        raise TypeError(f"Unsupported value: {val}")
-
-
-def sin(expr):
-    return Expr(UnaryNode("sin", math.sin, expr.node))
-
-
-def cos(expr):
-    return Expr(UnaryNode("cos", math.cos, expr.node))
-
-
-def exp(expr):
-    return Expr(UnaryNode("exp", math.exp, expr.node))
-
-
-def log(expr):
-    return Expr(UnaryNode("log", math.log, expr.node))
+    return lines
 
 
 class InputSet:
+    """
+    The set of input values that are
+    """
+
     def __init__(self):
         self.inputs = {}
 
     def add(self, name, shape=None, type=float):
         node = VarNode(name, shape=shape, type=type)
-        self.inputs[name] = Expr(node)
+        self.inputs[name] = node
         return
 
     def __iter__(self):
@@ -216,7 +127,26 @@ class InputSet:
     def __getitem__(self, name):
         if name not in self.inputs:
             raise KeyError(f"{name} not in declared inputs")
-        return self.inputs[name]
+        return Expr(self.inputs[name])
+
+    def generate_cpp_defs(
+        self,
+        mode="eval",
+        template_name="T__",
+        input_name="input__",
+        grad_name="boutput__",
+        prod_name="pinput__",
+        hprod_name="houtput__",
+    ):
+        return _generate_cpp_input_defs(
+            self.inputs,
+            mode=mode,
+            template_name=template_name,
+            input_name=input_name,
+            grad_name=grad_name,
+            prod_name=prod_name,
+            hprod_name=hprod_name,
+        )
 
 
 class ConstantSet:
@@ -224,8 +154,8 @@ class ConstantSet:
         self.inputs = {}
 
     def add(self, name, value=0.0, type=float):
-        node = ConstNode(value)
-        self.inputs[name] = Expr(node)
+        node = ConstNode(value, type=type)
+        self.inputs[name] = node
         return
 
     def __iter__(self):
@@ -234,30 +164,65 @@ class ConstantSet:
     def __getitem__(self, name):
         if name not in self.inputs:
             raise KeyError(f"{name} not in declared constants")
-        return self.inputs[name]
+        return Expr(self.inputs[name])
+
+    def generate_cpp_defs(self):
+        lines = []
+        for name in self.inputs:
+            node = self.inputs[name]
+            lines.append(
+                f"static constexpr {_cpp_type_map[node.type]} {name} = {node.value};"
+            )
+        return lines
 
 
 class VarSet:
     def __init__(self):
         self.vars = {}
+        self.expr = {}
 
     def add(self, name, shape=None, type=float):
         node = VarNode(name, shape=shape, type=type)
-        self.vars[name] = Expr(node)
+        self.vars[name] = node
+        self.expr[name] = None
         return
 
     def __iter__(self):
         return iter(self.vars)
 
     def __getitem__(self, name):
-        return self.vars[name]
+        return Expr(self.vars[name])
 
     def __setitem__(self, name, expr):
         if name not in self.vars:
             raise KeyError(f"{name} not in declared variables")
         expr.node.name = name
-        self.vars[name] = expr
+        self.expr[name] = expr
 
+    def generate_cpp_defs(self, mode="eval", template_name="T__"):
+        return _generate_cpp_var_defs(self.vars, mode=mode, template_name=template_name)
+
+    def generate_cpp(self, mode="eval"):
+        lines = []
+
+        if mode == "eval":
+            for item in self.outputs:
+                if self.outputs[item].shape is None:
+                    rhs = self.expr[item].generate_cpp()
+                    lines.append(f"{self.outputs[item].name} = {rhs}")
+                elif len(self.outputs[item].shape) == 1:
+                    for i in range(self.outputs[item].shape[0]):
+                        rhs = self.expr[item].expr[i].generate_cpp()
+                        lines.append(f"{self.outputs[item].name}[{i}] = {rhs};")
+                elif len(self.outputs[item].shape) == 2:
+                    for i in range(self.outputs[item].shape[0]):
+                        for j in range(self.outputs[item].shape[1]):
+                            rhs = self.outputs[item].expr[i][j].generate_cpp()
+                            lines.append(
+                                f"{self.outputs[item].name}({i}, {j}) = {rhs};"
+                            )
+
+        return lines
 
 class OutputSet:
     class OutputExpr:
@@ -309,24 +274,25 @@ class OutputSet:
     def evaluate(self, name, env):
         return self.outputs[name].node.evaluate(env)
 
-    def generate_cpp(self):
+    def generate_cpp(self, mode="eval"):
         lines = []
-        for item in self.outputs:
-            if self.outputs[item].shape is None:
-                lines.append(
-                    f"{self.outputs[item].name} = {self.outputs[item].expr.generate_cpp()}"
-                )
-            elif len(self.outputs[item].shape) == 1:
-                for i in range(self.outputs[item].shape[0]):
-                    lines.append(
-                        f"{self.outputs[item].name}[{i}] = {self.outputs[item].expr[i].generate_cpp()};"
-                    )
-            elif len(self.outputs[item].shape) == 2:
-                for i in range(self.outputs[item].shape[0]):
-                    for j in range(self.outputs[item].shape[1]):
-                        lines.append(
-                            f"{self.outputs[item].name}({i}, {j}) = {self.outputs[item].expr[i][j].generate_cpp()};"
-                        )
+
+        if mode == "eval":
+            for item in self.outputs:
+                if self.outputs[item].shape is None:
+                    rhs = self.outputs[item].expr.generate_cpp()
+                    lines.append(f"{self.outputs[item].name} = {rhs}")
+                elif len(self.outputs[item].shape) == 1:
+                    for i in range(self.outputs[item].shape[0]):
+                        rhs = self.outputs[item].expr[i].generate_cpp()
+                        lines.append(f"{self.outputs[item].name}[{i}] = {rhs};")
+                elif len(self.outputs[item].shape) == 2:
+                    for i in range(self.outputs[item].shape[0]):
+                        for j in range(self.outputs[item].shape[1]):
+                            rhs = self.outputs[item].expr[i][j].generate_cpp()
+                            lines.append(
+                                f"{self.outputs[item].name}({i}, {j}) = {rhs};"
+                            )
 
         return lines
 
@@ -357,8 +323,17 @@ class Component:
         Generate the code for a c++ implementation
         """
 
+        # Perform the computation to get the outputs as a function of the inputs
         self.compute()
-        lines = self.outputs.generate_cpp()
+
+        lines = []
+        lines.extend(self.constants.generate_cpp_defs())
+
+        for mode in ["eval", "rev", "hprod"]:
+            lines.extend(self.inputs.generate_cpp_defs(mode=mode))
+            lines.extend(self.vars.generate_cpp_defs(mode=mode))
+
+            lines.extend(self.outputs.generate_cpp(mode=mode))
 
         for line in lines:
             print(line)
@@ -422,41 +397,3 @@ class CartComponent(Component):
 cart = CartComponent()
 cart.generate_cpp()
 
-
-# class CodeBuilder:
-#     def __init__(self):
-#         self.inputs = {}
-#         self.outputs = {}
-#         self.loop_size = None
-
-#     def var(self, name, shape=None):
-#         node = VarNode(name, shape=shape)
-#         self.inputs[name] = node
-#         if shape:
-#             self.loop_size = shape[0]
-#         return CppExpr(node)
-
-#     def assign(self, name, expr: CppExpr):
-#         expr.node.name = name
-#         self.outputs[name] = expr.node
-
-#     def evaluate(self, name, env):
-#         return self.outputs[name].evaluate(env)
-
-# def generate_cpp(self, result_name, return_type="double"):
-#     lines = []
-#     size = self.loop_size or 1
-
-#     if self.loop_size:
-#         lines.append(f"{return_type} {result_name}[{size}];")
-#         lines.append(f"for (int i = 0; i < {size}; ++i) {{")
-#         lines.append(f"    {result_name}[i] = {self.outputs[result_name].generate_cpp(index='i')};")
-#         lines.append("}")
-#         lines.append(f"return 0;")
-#     else:
-#         lines.append(f"{return_type} {result_name} = {self.outputs[result_name].generate_cpp()};")
-#         lines.append(f"return {result_name};")
-
-#     args = ", ".join(f"{return_type} {name}[{self.loop_size}]" if self.inputs[name].shape else f"{return_type} {name}"
-#                      for name in self.inputs)
-#     return f"{return_type} compute({args}) {{\n    " + "\n    ".join(lines) + "\n}"
