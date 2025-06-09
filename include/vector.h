@@ -1,9 +1,9 @@
-#ifndef MDGO_VECTOR_H
-#define MDGO_VECTOR_H
+#ifndef AMIGO_VECTOR_H
+#define AMIGO_VECTOR_H
 
 #include <random>
 
-namespace mdgo {
+namespace amigo {
 
 enum class VectorType { HOST_AND_DEVICE, DEVICE_ONLY, HOST_ONLY };
 
@@ -59,7 +59,7 @@ class Vector {
     }
   }
 
-  void axpy(T alpha, Vector<T, dim>& x) {
+  void axpy(T alpha, Vector<T>& x) {
     if (h_array && x.h_array) {
       for (int i = 0; i < size; i++) {
         h_array[i] += alpha * x.h_array[i];
@@ -67,7 +67,7 @@ class Vector {
     }
   }
 
-  T dot(const Vector<T, dim>& x) const {
+  T dot(const Vector<T>& x) const {
     T value = 0.0;
     if (h_array && x.h_array) {
       for (int i = 0; i < size; i++) {
@@ -100,6 +100,6 @@ class Vector {
   T* d_array;  // Device data
 };
 
-}  // namespace mdgo
+}  // namespace amigo
 
-#endif  // MDGO_VECTOR_H
+#endif  // AMIGO_VECTOR_H

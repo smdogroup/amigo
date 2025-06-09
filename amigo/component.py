@@ -1,4 +1,4 @@
-from expressions import *
+from .expressions import *
 
 _cpp_type_map = {int: "int", float: "double", complex: "std::complex<double>"}
 
@@ -142,10 +142,12 @@ class InputSet:
 
     def __init__(self):
         self.inputs = {}
+        self.labels = {}
 
-    def add(self, name, shape=None, type=float):
+    def add(self, name, shape=None, type=float, label="input"):
         node = VarNode(name, shape=shape, type=type)
         self.inputs[name] = node
+        self.labels[name] = label
         return
 
     def get_num_inputs(self):
@@ -158,6 +160,9 @@ class InputSet:
         if name not in self.inputs:
             raise KeyError(f"{name} not in declared inputs")
         return Expr(self.inputs[name])
+
+    def get_info(self, name):
+        return self.inputs[name].shape, self.inputs[name].type, self.labels[name]
 
     def generate_cpp_types(self, template_name="T__"):
         return _generate_cpp_types(self.inputs, template_name=template_name)
@@ -187,10 +192,12 @@ class InputSet:
 class ConstantSet:
     def __init__(self):
         self.inputs = {}
+        self.labels = {}
 
-    def add(self, name, value, type=float):
+    def add(self, name, value, type=float, label="const"):
         node = ConstNode(value, type=type)
         self.inputs[name] = node
+        self.labels[name] = label
         return
 
     def __iter__(self):
@@ -200,6 +207,9 @@ class ConstantSet:
         if name not in self.inputs:
             raise KeyError(f"{name} not in declared constants")
         return Expr(self.inputs[name])
+
+    def get_info(self, name):
+        return self.inputs[name].shape, self.inputs[name].type, self.labels[name]
 
     def generate_cpp_const_decl(self):
         lines = []
@@ -233,6 +243,7 @@ class VarSet:
             raise KeyError(f"{name} not in declared variables")
         expr.node.name = name
         self.expr[name] = expr
+        return
 
     def generate_cpp_types(self, template_name="T__"):
         return _generate_cpp_types(self.vars, template_name=template_name)
@@ -282,10 +293,12 @@ class OutputSet:
 
     def __init__(self, lagrangian_name="lagrangian__"):
         self.outputs = {}
+        self.labels = {}
         self.lagrangian_name = lagrangian_name
 
-    def add(self, name, type=float, shape=None):
+    def add(self, name, type=float, shape=None, label="output"):
         self.outputs[name] = self.OutputExpr(name, shape=shape, type=type)
+        self.labels[name] = label
         return
 
     def __iter__(self):
@@ -310,6 +323,11 @@ class OutputSet:
             else:
                 for i in range(shape):
                     self.outputs[name].expr[i] = expr[i]
+
+        return
+
+    def get_info(self, name):
+        return self.outputs[name].shape, self.outputs[name].type, self.labels[name]
 
     def evaluate(self, name, env):
         return self.outputs[name].node.evaluate(env)
@@ -441,20 +459,20 @@ class Component:
         self.vars = VarSet()
         self.outputs = OutputSet()
 
-    def add_constant(self, name, value, type=float):
-        self.constants.add(name, value, type=type)
+    def add_constant(self, name, value, type=float, label="const"):
+        self.constants.add(name, value, type=type, label=label)
         return
 
-    def add_input(self, name, type=float, shape=None):
-        self.inputs.add(name, type=type, shape=shape)
+    def add_input(self, name, type=float, shape=None, label="input"):
+        self.inputs.add(name, type=type, shape=shape, label=label)
         return
 
     def add_var(self, name, type=float, shape=None):
         self.vars.add(name, type=type, shape=shape)
         return
 
-    def add_output(self, name, type=float, shape=None):
-        self.outputs.add(name, type=type, shape=shape)
+    def add_output(self, name, type=float, shape=None, label="output"):
+        self.outputs.add(name, type=type, shape=shape, label=label)
         return
 
     def _get_input_statement(self, template_name="T__"):
@@ -506,18 +524,22 @@ class Component:
         # Add the contributions for each of the functions
         for mode in ["eval", "rev", "hprod"]:
             if mode == "eval":
-                cpp += "  " + f"T lagrange(const Input& {input_name}) const" + " {\n"
+                cpp += (
+                    "  "
+                    + f"static T lagrange(const Input& {input_name}) const"
+                    + " {\n"
+                )
             elif mode == "rev":
                 cpp += (
                     "  "
-                    f"void gradient(Input& {input_name}, Input& {grad_name}) const"
+                    f"static void gradient(Input& {input_name}, Input& {grad_name}) const"
                     + " {\n"
                 )
             elif mode == "hprod":
                 cpp += (
                     "  "
-                    f"void hessian(Input& {input_name}, Input& {grad_name}, Input& {prod_name}, Input& {hprod_name}) const"
-                    + " {\n"
+                    f"static void hessian(Input& {input_name}, Input& {prod_name}, "
+                    f"Input& {grad_name}, Input& {hprod_name}) const" + " {\n"
                 )
 
             in_decl = self.inputs.generate_cpp_input_decl(
@@ -576,63 +598,14 @@ class Component:
 
         cpp += "};\n"
 
-        print(cpp)
-
         return cpp
 
+    def generate_pybind11(self, module_name="mod"):
+        cls = f"amigo::SerialComponentSet<double, {self.name}<double>>"
 
-class CartComponent(Component):
-    def __init__(self, g=9.81, L=0.5, m1=0.5, m2=0.3):
-        super().__init__()
+        module_class_name = f'"{self.name}"'
 
-        self.add_constant("g", value=g)
-        self.add_constant("L", value=L)
-        self.add_constant("m1", value=m1)
-        self.add_constant("m2", value=m2)
+        cpp = f"py::class_<{cls}, amigo::ComponentSet<double>, std::shared_ptr<{cls}>>"
+        cpp += f"({module_name}, {module_class_name}).def(py::init<>())"
 
-        self.add_input("x")
-        self.add_input("q", shape=(4))
-        self.add_input("qdot", shape=(4))
-
-        self.add_var("cost")
-        self.add_var("sint")
-
-        self.add_output("res", shape=(4))
-
-        return
-
-    def compute(self):
-        g = self.constants["g"]
-        L = self.constants["L"]
-        m1 = self.constants["m1"]
-        m2 = self.constants["m2"]
-
-        x = self.inputs["x"]
-        q = self.inputs["q"]
-        qdot = self.inputs["qdot"]
-
-        # Compute the declared variable values
-        self.vars["sint"] = sin(q[1])
-        self.vars["cost"] = cos(q[1])
-
-        # Extract a reference to the variable values
-        sint = self.vars["sint"]
-        cost = self.vars["cost"]
-
-        res = 4 * [None]
-        res[0] = q[2] - qdot[0]
-        res[1] = q[3] - qdot[1]
-        res[2] = (m1 + m2 * (1.0 - cost * cost)) * qdot[2] - (
-            L * m2 * sint * q[3] * q[3] * x + m2 * g * cost * sint
-        )
-        res[3] = L * (m1 + m2 * (1.0 - cost * cost)) * qdot[3] + (
-            L * m2 * cost * sint * q[3] * q[3] + x * cost + (m1 + m2) * g * sint
-        )
-
-        self.outputs["res"] = res
-
-        return
-
-
-cart = CartComponent()
-cart.generate_cpp()
+        return cpp

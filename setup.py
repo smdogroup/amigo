@@ -65,18 +65,18 @@ if sys.platform == "darwin":
 # Create the Extension
 ext_modules = [
     Extension(
-        "mdgo.mdgo",
-        sources=["mdgo/mdgo.cpp"],
+        "amigo.amigo",
+        sources=["amigo/amigo.cpp"],
         depends=headers,
         include_dirs=inc_dirs,
         libraries=libs,
         library_dirs=lib_dirs,
-        extra_compile_args=["-std=c++17", "-O0", "-g"],
+        extra_compile_args=["-std=c++17"],
     )
 ]
 
 setup(
-    name="mdgo",
+    name="amigo",
     ext_modules=ext_modules,
     include_dirs=[pybind11_include, a2d_include],
 )

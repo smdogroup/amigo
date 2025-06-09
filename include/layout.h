@@ -1,7 +1,7 @@
-#ifndef MDGO_LAYOUT_H
-#define MDGO_LAYOUT_H
+#ifndef AMIGO_LAYOUT_H
+#define AMIGO_LAYOUT_H
 
-namespace mdgo {
+namespace amigo {
 
 /**
  * @brief Index layout object. This is for a general layout of variables with
@@ -50,6 +50,6 @@ class IndexLayout {
   Vector<int> indices;
 };
 
-}  // namespace mdgo
+}  // namespace amigo
 
-#endif  // MDGO_LAYOUT_H
+#endif  // AMIGO_LAYOUT_H

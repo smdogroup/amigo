@@ -1,9 +1,9 @@
-#ifndef MDGO_CSR_MATRIX_H
-#define MDGO_CSR_MATRIX_H
+#ifndef AMIGO_CSR_MATRIX_H
+#define AMIGO_CSR_MATRIX_H
 
 #include "vector.h"
 
-namespace mdgo {
+namespace amigo {
 
 template <typename T>
 class CSRMat {
@@ -64,6 +64,6 @@ class CSRMat {
   T* data;
 };
 
-}  // namespace mdgo
+}  // namespace amigo
 
-#endif  // MDGO_CSR_MATRIX_H
+#endif  // AMIGO_CSR_MATRIX_H
