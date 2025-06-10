@@ -74,10 +74,11 @@ void bind_vector(py::module_ &m, const std::string &name) {
              }
            })
       .def("__len__", &amigo::Vector<T>::get_size)
-      .def("get_array", [](const amigo::Vector<T> &self) -> py::array_t<T> {
-        return py::array_t<T>({self.get_size()}, {sizeof(T)},
-                              self.get_host_array(), py::cast(self));
-      });
+      .def("get_array",
+           [](std::shared_ptr<amigo::Vector<T>> self) -> py::array_t<T> {
+             return py::array_t<T>({self->get_size()}, {sizeof(T)},
+                                   self->get_host_array(), py::cast(self));
+           });
 }
 
 PYBIND11_MODULE(amigo, mod) {

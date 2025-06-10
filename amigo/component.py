@@ -378,7 +378,7 @@ class OutputSet:
             lines.append(f"A2D::A2DObj<{template_name}> {self.lagrangian_name}")
         return lines
 
-    def _lagrangian_evaluation(self):
+    def _lagrangian_evaluation(self, obj_expr=None):
         expr_list = []
 
         mult_names = self._get_multiplier_names()
@@ -398,7 +398,10 @@ class OutputSet:
                 for i in range(shape):
                     expr_list.append(f"{name}[{i}] * {mult_names[name]}[{i}]")
 
-        expr = ""
+        if obj_expr is None:
+            expr = ""
+        else:
+            expr = f"{obj_expr}"
         if len(expr_list) > 0:
             expr = expr_list[0]
             for i in range(1, len(expr_list)):
@@ -406,7 +409,7 @@ class OutputSet:
 
         return expr
 
-    def generate_cpp(self, mode="eval"):
+    def generate_cpp(self, mode="eval", obj_expr=None):
         lines = []
 
         if mode == "eval":
@@ -426,7 +429,7 @@ class OutputSet:
                         rhs = self.outputs[item].expr[i].generate_cpp()
                         lines.append(f"{name}[{i}] = {rhs}")
 
-            rhs = self._lagrangian_evaluation()
+            rhs = self._lagrangian_evaluation(obj_expr=obj_expr)
             lines.append(f"{self.lagrangian_name} = {rhs}")
         else:
             for item in self.outputs:
@@ -444,11 +447,35 @@ class OutputSet:
                     for i in range(shape):
                         rhs = self.outputs[item].expr[i].generate_cpp()
                         lines.append(f"A2D::Eval({rhs}, {name}[{i}])")
-            rhs = self._lagrangian_evaluation()
+            rhs = self._lagrangian_evaluation(obj_expr=obj_expr)
             lines.append(f"A2D::Eval({rhs}, {self.lagrangian_name})")
 
         return lines
 
+class ObjectiveSet:
+    def __init__(self):
+        self.expr = {}
+
+    def add(self, name, type=float, shape=None):
+        if shape != None:
+            raise ValueError("Objective must be a scalar")
+        if len(self.expr) == 1:
+            raise ValueError("Cannot add more than one objective")
+        self.expr[name] = None
+        return
+    
+    def __setitem__(self, name, expr):
+        if name not in self.expr:
+            raise KeyError(f"{name} not the declared objective")
+        self.expr[name] = expr
+        return
+    
+    def generate_cpp(self):
+        for name in self.expr:
+            rhs = self.expr[name].generate_cpp()
+            return rhs
+        return None
+    
 
 class Component:
     def __init__(self):
@@ -458,6 +485,7 @@ class Component:
         self.inputs = InputSet()
         self.vars = VarSet()
         self.outputs = OutputSet()
+        self.objective = ObjectiveSet()
 
     def add_constant(self, name, value, type=float, label="const"):
         self.constants.add(name, value, type=type, label=label)
@@ -473,6 +501,10 @@ class Component:
 
     def add_output(self, name, type=float, shape=None, label="output"):
         self.outputs.add(name, type=type, shape=shape, label=label)
+        return
+    
+    def add_objective(self, name, type=float):
+        self.objective.add(name, type=type)
         return
 
     def get_var_shapes(self):
@@ -589,9 +621,10 @@ class Component:
             )
             for line in out_decl:
                 cpp += "    " + line + ";\n"
-
+                
+            obj_expr = self.objective.generate_cpp()
             body = self.vars.generate_cpp(mode=mode)
-            body.extend(self.outputs.generate_cpp(mode=mode))
+            body.extend(self.outputs.generate_cpp(mode=mode, obj_expr=obj_expr))
 
             if mode == "eval":
                 for line in body:

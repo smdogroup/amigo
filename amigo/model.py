@@ -215,6 +215,9 @@ class Model:
 
         return
     
+    def get_vars(self, name, var_name):
+        return self.comp[name].get_var(var_name)
+    
     def create_opt_problem(self):
         objs = []
         for name, comp in self.comp.items():

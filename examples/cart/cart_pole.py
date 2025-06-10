@@ -1,4 +1,9 @@
 import amigo as am
+import numpy as np
+from scipy.sparse import csr_matrix
+from scipy.sparse.linalg import spsolve
+import matplotlib.pylab as plt
+import niceplots
 
 final_time = 2.0
 num_time_steps = 200
@@ -39,7 +44,7 @@ class CartComponent(am.Component):
 
         self.add_constant("g", value=9.81)
         self.add_constant("L", value=0.5)
-        self.add_constant("m1", value=0.5)
+        self.add_constant("m1", value=1.0)
         self.add_constant("m2", value=0.3)
 
         self.add_input("x", label="control")
@@ -86,14 +91,266 @@ class CartComponent(am.Component):
         return
 
 
+class Objective(am.Component):
+    def __init__(self):
+        super().__init__()
+
+        self.add_constant("dt", value=final_time / num_time_steps)
+
+        self.add_input("x1", label="control")
+        self.add_input("x2", label="control")
+
+        self.add_objective("obj")
+
+        return
+
+    def compute(self):
+        dt = self.constants["dt"]
+
+        x1 = self.inputs["x1"]
+        x2 = self.inputs["x2"]
+
+        self.objective["obj"] = (x1 * x1 + x2 * x2) / 2
+
+        return
+
+# Initial conditions are q = 0
+class InitialConditions(am.Component):
+    def __init__(self):
+        super().__init__()
+
+        self.add_input("q", shape=4)
+        self.add_output("res", shape=4)
+
+    def compute(self):
+        q = self.inputs["q"]
+        self.outputs["res"] = [q[0], q[1], q[2], q[3]]
+
+# Set the final conditions
+class FinalConditions(am.Component):
+    def __init__(self):
+        super().__init__()
+
+        self.add_constant("pi", value=np.pi)
+
+        self.add_input("q", shape=4)
+        self.add_output("res", shape=4)
+
+    def compute(self):
+        pi = self.constants["pi"]
+        q = self.inputs["q"]
+        self.outputs["res"] = [q[0] - 2.0, q[1] - pi, q[2], q[3]]
+
+
+class Optimizer:
+    def __init__(self, model, prob, x_init=None):
+        self.model = model
+        self.prob = prob
+        self.x_init = x_init
+
+        self.x = self.prob.create_vector()
+        self.g = self.prob.create_vector()
+
+        self.mat_obj = self.prob.create_csr_matrix()
+        self.nrows, self.ncols, self.nnz, self.rowp, self.cols = (
+            self.mat_obj.get_nonzero_structure()
+        )
+
+        self.check()
+
+    def check(self, dh=1e-7):
+        x = self.x.get_array()
+        if self.x_init is not None:
+            x[:] = self.x_init 
+
+        px = np.random.uniform(size=x.shape)
+
+        g1 = self.gradient().copy()
+        jac = self.hessian()
+        ans = jac @ px
+
+        x[:] += dh * px
+
+        g2 = self.gradient().copy()
+        fd = (g2 - g1) / dh
+
+        err = (fd - ans)
+
+        print("Max absolute error = ", np.max(np.absolute(err)))
+        print("Max relative error = ", np.max(np.absolute(err / fd)))
+
+        return
+
+    def gradient(self):
+        self.prob.gradient(self.x, self.g)
+
+        return self.g.get_array()
+
+    def hessian(self):
+        self.prob.hessian(self.x, self.mat_obj)
+        data = self.mat_obj.get_data()
+        jac = csr_matrix((data, self.cols, self.rowp), shape=(self.nrows, self.ncols))
+
+        return jac
+
+    def optimize(self):
+        x = self.x.get_array()
+        if self.x_init is not None:
+            x[:] = self.x_init 
+
+        gnrms = []
+
+        for i in range(500):
+            g = self.gradient()
+
+            gnrm = np.linalg.norm(g)
+            gnrms.append(gnrm)
+
+            print("||g[%3d]||: " % (i), gnrm)
+            if gnrm < 1e-10:
+                break
+
+            H = self.hessian()
+            p = spsolve(H, g)
+
+            if i < 20:
+                x[:] -= 0.01 * p
+            elif gnrm < 100.0:
+                x[:] -= p
+            else:
+                x[:] -= 0.1 * p
+
+        return x[:], gnrms
+    
+    def plot(self, x):
+
+        t = np.linspace(0, final_time, num_time_steps + 1)
+        q_idx = self.model.get_vars("cart", "q")
+        x_idx = self.model.get_vars("cart", "x")
+
+        d = x[q_idx[:, 0]]
+        theta = x[q_idx[:, 1]]
+        xctrl = x[x_idx]
+
+        with plt.style.context(niceplots.get_style()):
+            data = {}
+            data["Cart pos."] = d
+            data["Pole angle"] = (180 / np.pi) * theta
+            data["Control force"] = xctrl
+
+            fig, ax = niceplots.stacked_plots(
+                "Time (s)",
+                t,
+                [data],
+                lines_only=True,
+                figsize=(10, 6),
+                line_scaler=0.5,
+            )
+
+            fontname = "Helvetica"
+            for axis in ax:
+                axis.xaxis.label.set_fontname(fontname)
+                axis.yaxis.label.set_fontname(fontname)
+
+                # Update tick labels
+                for tick in axis.get_xticklabels():
+                    tick.set_fontname(fontname)
+
+                for tick in axis.get_yticklabels():
+                    tick.set_fontname(fontname)
+
+            fig.savefig("cart_stacked.svg")
+            fig.savefig("cart_stacked.png")
+
+        return
+
+    def plot_convergence(self, gnrms):
+
+        with plt.style.context(niceplots.get_style()):
+            fig, ax = plt.subplots(1, 1)
+
+            ax.semilogy(gnrms, marker="o", clip_on=False, lw=2.0)
+            ax.set_ylabel("KKT residual norm")
+            ax.set_xlabel("Iteration")
+
+            niceplots.adjust_spines(ax)
+
+            fontname = "Helvetica"
+            ax.xaxis.label.set_fontname(fontname)
+            ax.yaxis.label.set_fontname(fontname)
+
+            # Update tick labels
+            for tick in ax.get_xticklabels():
+                tick.set_fontname(fontname)
+
+            for tick in ax.get_yticklabels():
+                tick.set_fontname(fontname)
+
+            fig.savefig("cart_residual_norm.svg")
+            fig.savefig("cart_residual_norm.png")
+
+    def visualize(self, x, L=0.5):
+        with plt.style.context(niceplots.get_style()):
+            q_idx = self.model.get_vars("cart", "q")
+
+            d = x[q_idx[:, 0]]
+            theta = x[q_idx[:, 1]]
+
+            # Create the time-lapse visualization
+            fig, ax = plt.subplots(1, figsize=(10, 4.5))
+            ax.axis("equal")
+            ax.axis("off")
+
+            values = np.linspace(0, 1.0, d.shape[0])
+            cmap = plt.get_cmap("viridis")
+
+            hx = 0.03
+            hy = 0.03
+            xpts = []
+            ypts = []
+            for i in range(0, d.shape[0]):
+                color = cmap(values[i])
+
+                x1 = d[i]
+                y1 = 0.0
+                x2 = d[i] + L * np.sin(theta[i])
+                y2 = -L * np.cos(theta[i])
+
+                xpts.append(x2)
+                ypts.append(y2)
+
+                if i % 3 == 0:
+                    ax.plot([x1, x2], [y1, y2], linewidth=2, color=color)
+                    ax.fill(
+                        [x1 - hx, x1 + hx, x1 + hx, x1 - hx, x1 - hx],
+                        [y1, y1, y1 + hy, y1 + hy, y1],
+                        alpha=0.5,
+                        linewidth=2,
+                        color=color,
+                    )
+
+                ax.plot([x2], [y2], color=color, marker="o")
+
+            fig.savefig("cart_pole_history.svg")
+            fig.savefig("cart_pole_history.png")
+
+        return
+
+
 cart = CartComponent()
 trap = TrapezoidRule()
+obj = Objective()
+ic = InitialConditions()
+fc = FinalConditions()
 
 module_name = "cart_pole"
 model = am.Model(module_name)
 
 model.add("cart", num_time_steps + 1, cart)
 model.add("trap", 4 * num_time_steps, trap)
+model.add("obj", num_time_steps, obj)
+model.add("ic", 1, ic)
+model.add("fc", 1, fc)
 
 model.generate_cpp()
 
@@ -109,6 +366,12 @@ for i in range(4):
     model.connect(f"cart.qdot[:-1, {i}]", f"trap.q1dot[{start}:{end}]")
     model.connect(f"cart.qdot[1:, {i}]", f"trap.q2dot[{start}:{end}]")
 
+model.connect(f"cart.x[:-1]", f"obj.x1[:]")
+model.connect(f"cart.x[1:]", f"obj.x2[:]")
+
+model.connect("cart.q[0, :]", "ic.q[0, :]")
+model.connect(f"cart.q[{num_time_steps}, :]", "fc.q[0, :]")
+
 model.initialize()
 
 print("num_variables = ", model.num_variables)
@@ -117,12 +380,18 @@ prob = model.create_opt_problem()
 mat = prob.create_csr_matrix()
 
 x = prob.create_vector()
-
-# Set some initial values
 x_array = x.get_array()
-x_array[:] = 1.0
 
-grad = prob.create_vector()
-prob.gradient(x, grad)
+# Set the initial conditions based on the varaibles
+q_idx = model.get_vars("cart", "q")
+x_array[q_idx[:, 0]] = np.linspace(0, 2.0, num_time_steps + 1)
+x_array[q_idx[:, 1]] = np.linspace(0, np.pi, num_time_steps + 1)
+x_array[q_idx[:, 2]] = 1.0
+x_array[q_idx[:, 3]] = 1.0
 
-print(grad[:])
+opt = Optimizer(model, prob, x_init=x_array)
+xopt, gnrm = opt.optimize()
+
+opt.plot(xopt)
+opt.plot_convergence(gnrm)
+opt.visualize(xopt)
