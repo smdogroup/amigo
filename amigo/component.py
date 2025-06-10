@@ -657,6 +657,6 @@ class Component:
         module_class_name = f'"{self.name}"'
 
         cpp = f"py::class_<{cls}, amigo::ComponentSet<double>, std::shared_ptr<{cls}>>"
-        cpp += f"({mod_ident}, {module_class_name}).def(py::init<std::shared_ptr<amigo::Vector<int>>>())" + "\n"
+        cpp += f"({mod_ident}, {module_class_name}).def(py::init<std::shared_ptr<amigo::Vector<int>>>())"
 
         return cpp
