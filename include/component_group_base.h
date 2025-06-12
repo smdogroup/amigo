@@ -1,5 +1,5 @@
-#ifndef AMIGO_COMPONENT_SET_H
-#define AMIGO_COMPONENT_SET_H
+#ifndef AMIGO_COMPONENT_GROUP_BASE_H
+#define AMIGO_COMPONENT_GROUP_BASE_H
 
 #include <set>
 
@@ -9,9 +9,9 @@
 namespace amigo {
 
 template <typename T>
-class ComponentSet {
+class ComponentGroupBase {
  public:
-  virtual ~ComponentSet() {}
+  virtual ~ComponentGroupBase() {}
   virtual int get_max_dof() const { return 0; }
   virtual T lagrangian(const Vector<T>& x) const { return T(0.0); }
   virtual void add_gradient(const Vector<T>& x, Vector<T>& g) const {}
@@ -23,4 +23,4 @@ class ComponentSet {
 
 }  // namespace amigo
 
-#endif  // AMIGO_COMPONENT_SET_H
+#endif  // AMIGO_COMPONENT_GROUP_BASE_H

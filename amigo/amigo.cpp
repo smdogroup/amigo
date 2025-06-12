@@ -109,15 +109,16 @@ PYBIND11_MODULE(amigo, mod) {
   bind_vector<int>(mod, "VectorInt");
   bind_vector<double>(mod, "Vector");
 
-  py::class_<amigo::ComponentSet<double>,
-             std::shared_ptr<amigo::ComponentSet<double>>>(mod, "ComponentSet");
+  py::class_<amigo::ComponentGroupBase<double>,
+             std::shared_ptr<amigo::ComponentGroupBase<double>>>(
+      mod, "ComponentGroupBase");
 
   py::class_<amigo::OptimizationProblem<double>,
              std::shared_ptr<amigo::OptimizationProblem<double>>>(
       mod, "OptimizationProblem")
-      .def(
-          py::init<int,
-                   std::vector<std::shared_ptr<amigo::ComponentSet<double>>>>())
+      .def(py::init<
+           int,
+           std::vector<std::shared_ptr<amigo::ComponentGroupBase<double>>>>())
       .def("create_vector", &amigo::OptimizationProblem<double>::create_vector)
       .def("lagrangian", &amigo::OptimizationProblem<double>::lagrangian)
       .def("gradient", &amigo::OptimizationProblem<double>::gradient)

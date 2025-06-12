@@ -187,60 +187,7 @@ class Model:
         self.comp = {}
         self.index_pool = GlobalIndexPool()
         self.connections = []
-
-    def generate_cpp(self):
-        """
-        Generate the C++ header and pybind11 wrapper for the model.
-
-        This code automatically generates the files module_name.h (containing the C++ Component
-        definitions) and module_name.cpp (containing the pybind11 wrapper).
-
-        The wrapper must be compiled before the optimization will run.
-        """
-
-        # C++ file contents
-        cpp = '#include "a2dcore.h"\n'
-        cpp += "namespace amigo {"
-
-        # pybind11 file contents
-        py11 = "#include <pybind11/numpy.h>\n"
-        py11 += "#include <pybind11/pybind11.h>\n"
-        py11 += "#include <pybind11/stl.h>\n"
-        py11 += '#include "serial_component_set.h"\n'
-        py11 += f'#include "{self.module_name}.h"\n'
-        py11 += "namespace py = pybind11;\n"
-
-        mod_ident = "mod"
-        py11 += f"PYBIND11_MODULE({self.module_name}, {mod_ident}) " + "{\n"
-
-        # Write out the classes needed - class names must be unique
-        # so we don't duplicate code
-        class_names = {}
-        for name in self.comp:
-            class_name = self.comp[name].class_name
-            if class_name not in class_names:
-                class_names[class_name] = True
-
-                # Generate the C++
-                cpp += self.comp[name].comp_obj.generate_cpp()
-
-                py11 += (
-                    self.comp[name].comp_obj.generate_pybind11(mod_ident=mod_ident)
-                    + ";\n"
-                )
-
-        cpp += "}\n"
-        py11 += "}\n"
-
-        filename = self.module_name + ".h"
-        with open(filename, "w") as fp:
-            fp.write(cpp)
-
-        filename = self.module_name + ".cpp"
-        with open(filename, "w") as fp:
-            fp.write(py11)
-
-        return
+        self._initialized = False
 
     def add_component(self, name: str, size: int, comp_obj: Component):
         """
@@ -380,6 +327,7 @@ class Model:
                     arr[i] = vars[arr[i]]
 
         self.num_variables = counter
+        self._initialized = True
 
         return
 
@@ -409,11 +357,71 @@ class Model:
         Create the optimization problem object that is used to evaluate the gradient and
         Hessian of the Lagrangian.
         """
+
+        if not self._initialized:
+            raise RuntimeError(
+                "Must call initialize before creating the optimization problem"
+            )
+
         objs = []
         for name, comp in self.comp.items():
             objs.append(comp.create_model(self.module_name))
 
         return OptimizationProblem(self.num_variables, objs)
+
+    def generate_cpp(self):
+        """
+        Generate the C++ header and pybind11 wrapper for the model.
+
+        This code automatically generates the files module_name.h (containing the C++ Component
+        definitions) and module_name.cpp (containing the pybind11 wrapper).
+
+        The wrapper must be compiled before the optimization will run.
+        """
+
+        # C++ file contents
+        cpp = '#include "a2dcore.h"\n'
+        cpp += "namespace amigo {"
+
+        # pybind11 file contents
+        py11 = "#include <pybind11/numpy.h>\n"
+        py11 += "#include <pybind11/pybind11.h>\n"
+        py11 += "#include <pybind11/stl.h>\n"
+        py11 += '#include "component_group.h"\n'
+        py11 += f'#include "{self.module_name}.h"\n'
+        py11 += "namespace py = pybind11;\n"
+
+        mod_ident = "mod"
+        py11 += f"PYBIND11_MODULE({self.module_name}, {mod_ident}) " + "{\n"
+
+        # Write out the classes needed - class names must be unique
+        # so we don't duplicate code
+        class_names = {}
+        for name in self.comp:
+            class_name = self.comp[name].class_name
+            if class_name not in class_names:
+                class_names[class_name] = True
+
+                # Generate the C++
+                cpp += self.comp[name].comp_obj.generate_cpp()
+
+                py11 += (
+                    self.comp[name].comp_obj.generate_pybind11(mod_ident=mod_ident)
+                    + ";\n"
+                )
+
+        cpp += "}\n"
+        py11 += "}\n"
+
+        filename = self.module_name + ".h"
+        with open(filename, "w") as fp:
+            fp.write(cpp)
+
+        filename = self.module_name + ".cpp"
+        with open(filename, "w") as fp:
+            fp.write(py11)
+
+        return
 
     def build_module(self):
         """
@@ -440,5 +448,6 @@ class Model:
         setup(
             name=f"{self.module_name}",
             ext_modules=ext_modules,
+            script_args=["build_ext", "--inplace"],
             include_dirs=[amigo_include, pybind11_include, a2d_include],
         )

@@ -1,7 +1,7 @@
 #ifndef AMIGO_OPTIMIZATION_PROBLEM_H
 #define AMIGO_OPTIMIZATION_PROBLEM_H
 
-#include "component_set.h"
+#include "component_group_base.h"
 
 namespace amigo {
 
@@ -12,7 +12,7 @@ class OptimizationProblem {
   using Mat = std::shared_ptr<CSRMat<T>>;
 
   OptimizationProblem(int ndof,
-                      std::vector<std::shared_ptr<ComponentSet<T>>> comps)
+                      std::vector<std::shared_ptr<ComponentGroupBase<T>>> comps)
       : ndof(ndof), comps(comps) {}
 
   int get_num_dof() const { return ndof; }
@@ -84,7 +84,7 @@ class OptimizationProblem {
 
  private:
   int ndof;
-  std::vector<std::shared_ptr<ComponentSet<T>>> comps;
+  std::vector<std::shared_ptr<ComponentGroupBase<T>>> comps;
 };
 
 }  // namespace amigo

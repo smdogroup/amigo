@@ -1,8 +1,7 @@
 import amigo as am
-import numpy as np
+import numpy as np  # used for plotting/analysis
 import sys
-from scipy.sparse import csr_matrix
-from scipy.sparse.linalg import spsolve
+import argparse
 import matplotlib.pylab as plt
 import niceplots
 
@@ -145,199 +144,108 @@ class FinalConditions(am.Component):
         self.outputs["res"] = [q[0] - 2.0, q[1] - pi, q[2], q[3]]
 
 
-class Optimizer:
-    def __init__(self, model, prob, x_init=None):
-        self.model = model
-        self.prob = prob
-        self.x_init = x_init
+def plot(d, theta, xctrl):
+    t = np.linspace(0, final_time, num_time_steps + 1)
 
-        self.x = self.prob.create_vector()
-        self.g = self.prob.create_vector()
+    with plt.style.context(niceplots.get_style()):
+        data = {}
+        data["Cart pos."] = d
+        data["Pole angle"] = (180 / np.pi) * theta
+        data["Control force"] = xctrl
 
-        self.mat_obj = self.prob.create_csr_matrix()
-        self.nrows, self.ncols, self.nnz, self.rowp, self.cols = (
-            self.mat_obj.get_nonzero_structure()
+        fig, ax = niceplots.stacked_plots(
+            "Time (s)",
+            t,
+            [data],
+            lines_only=True,
+            figsize=(10, 6),
+            line_scaler=0.5,
         )
 
-        self.check()
-
-    def check(self, dh=1e-7):
-        x = self.x.get_array()
-        if self.x_init is not None:
-            x[:] = self.x_init
-
-        px = np.random.uniform(size=x.shape)
-
-        g1 = self.gradient().copy()
-        jac = self.hessian()
-        ans = jac @ px
-
-        x[:] += dh * px
-
-        g2 = self.gradient().copy()
-        fd = (g2 - g1) / dh
-
-        err = fd - ans
-
-        print("Max absolute error = ", np.max(np.absolute(err)))
-        print("Max relative error = ", np.max(np.absolute(err / fd)))
-
-        return
-
-    def gradient(self):
-        self.prob.gradient(self.x, self.g)
-
-        return self.g.get_array()
-
-    def hessian(self):
-        self.prob.hessian(self.x, self.mat_obj)
-        data = self.mat_obj.get_data()
-        jac = csr_matrix((data, self.cols, self.rowp), shape=(self.nrows, self.ncols))
-
-        return jac
-
-    def optimize(self):
-        x = self.x.get_array()
-        if self.x_init is not None:
-            x[:] = self.x_init
-
-        gnrms = []
-
-        for i in range(500):
-            g = self.gradient()
-
-            gnrm = np.linalg.norm(g)
-            gnrms.append(gnrm)
-
-            print("||g[%3d]||: " % (i), gnrm)
-            if gnrm < 1e-10:
-                break
-
-            H = self.hessian()
-            p = spsolve(H, g)
-
-            if i < 20:
-                x[:] -= 0.01 * p
-            elif gnrm < 100.0:
-                x[:] -= p
-            else:
-                x[:] -= 0.1 * p
-
-        return x[:], gnrms
-
-    def plot(self, x, base=""):
-
-        t = np.linspace(0, final_time, num_time_steps + 1)
-        q_idx = self.model.get_var_indices(base + "cart.q")
-        x_idx = self.model.get_var_indices(base + "cart.x")
-
-        d = x[q_idx[:, 0]]
-        theta = x[q_idx[:, 1]]
-        xctrl = x[x_idx]
-
-        with plt.style.context(niceplots.get_style()):
-            data = {}
-            data["Cart pos."] = d
-            data["Pole angle"] = (180 / np.pi) * theta
-            data["Control force"] = xctrl
-
-            fig, ax = niceplots.stacked_plots(
-                "Time (s)",
-                t,
-                [data],
-                lines_only=True,
-                figsize=(10, 6),
-                line_scaler=0.5,
-            )
-
-            fontname = "Helvetica"
-            for axis in ax:
-                axis.xaxis.label.set_fontname(fontname)
-                axis.yaxis.label.set_fontname(fontname)
-
-                # Update tick labels
-                for tick in axis.get_xticklabels():
-                    tick.set_fontname(fontname)
-
-                for tick in axis.get_yticklabels():
-                    tick.set_fontname(fontname)
-
-            fig.savefig("cart_stacked.svg")
-            fig.savefig("cart_stacked.png")
-
-        return
-
-    def plot_convergence(self, gnrms):
-
-        with plt.style.context(niceplots.get_style()):
-            fig, ax = plt.subplots(1, 1)
-
-            ax.semilogy(gnrms, marker="o", clip_on=False, lw=2.0)
-            ax.set_ylabel("KKT residual norm")
-            ax.set_xlabel("Iteration")
-
-            niceplots.adjust_spines(ax)
-
-            fontname = "Helvetica"
-            ax.xaxis.label.set_fontname(fontname)
-            ax.yaxis.label.set_fontname(fontname)
+        fontname = "Helvetica"
+        for axis in ax:
+            axis.xaxis.label.set_fontname(fontname)
+            axis.yaxis.label.set_fontname(fontname)
 
             # Update tick labels
-            for tick in ax.get_xticklabels():
+            for tick in axis.get_xticklabels():
                 tick.set_fontname(fontname)
 
-            for tick in ax.get_yticklabels():
+            for tick in axis.get_yticklabels():
                 tick.set_fontname(fontname)
 
-            fig.savefig("cart_residual_norm.svg")
-            fig.savefig("cart_residual_norm.png")
+        fig.savefig("cart_stacked.svg")
+        fig.savefig("cart_stacked.png")
 
-    def visualize(self, x, L=0.5, base=""):
-        with plt.style.context(niceplots.get_style()):
-            q_idx = self.model.get_var_indices(base + "cart.q")
+    return
 
-            d = x[q_idx[:, 0]]
-            theta = x[q_idx[:, 1]]
 
-            # Create the time-lapse visualization
-            fig, ax = plt.subplots(1, figsize=(10, 4.5))
-            ax.axis("equal")
-            ax.axis("off")
+def plot_convergence(gnrms):
+    with plt.style.context(niceplots.get_style()):
+        fig, ax = plt.subplots(1, 1)
 
-            values = np.linspace(0, 1.0, d.shape[0])
-            cmap = plt.get_cmap("viridis")
+        ax.semilogy(gnrms, marker="o", clip_on=False, lw=2.0)
+        ax.set_ylabel("KKT residual norm")
+        ax.set_xlabel("Iteration")
 
-            hx = 0.03
-            hy = 0.03
-            xpts = []
-            ypts = []
-            for i in range(0, d.shape[0]):
-                color = cmap(values[i])
+        niceplots.adjust_spines(ax)
 
-                x1 = d[i]
-                y1 = 0.0
-                x2 = d[i] + L * np.sin(theta[i])
-                y2 = -L * np.cos(theta[i])
+        fontname = "Helvetica"
+        ax.xaxis.label.set_fontname(fontname)
+        ax.yaxis.label.set_fontname(fontname)
 
-                xpts.append(x2)
-                ypts.append(y2)
+        # Update tick labels
+        for tick in ax.get_xticklabels():
+            tick.set_fontname(fontname)
 
-                if i % 3 == 0:
-                    ax.plot([x1, x2], [y1, y2], linewidth=2, color=color)
-                    ax.fill(
-                        [x1 - hx, x1 + hx, x1 + hx, x1 - hx, x1 - hx],
-                        [y1, y1, y1 + hy, y1 + hy, y1],
-                        alpha=0.5,
-                        linewidth=2,
-                        color=color,
-                    )
+        for tick in ax.get_yticklabels():
+            tick.set_fontname(fontname)
 
-                ax.plot([x2], [y2], color=color, marker="o")
+        fig.savefig("cart_residual_norm.svg")
+        fig.savefig("cart_residual_norm.png")
 
-            fig.savefig("cart_pole_history.svg")
-            fig.savefig("cart_pole_history.png")
 
-        return
+def visualize(d, theta, L=0.5):
+    with plt.style.context(niceplots.get_style()):
+        # Create the time-lapse visualization
+        fig, ax = plt.subplots(1, figsize=(10, 4.5))
+        ax.axis("equal")
+        ax.axis("off")
+
+        values = np.linspace(0, 1.0, d.shape[0])
+        cmap = plt.get_cmap("viridis")
+
+        hx = 0.03
+        hy = 0.03
+        xpts = []
+        ypts = []
+        for i in range(0, d.shape[0]):
+            color = cmap(values[i])
+
+            x1 = d[i]
+            y1 = 0.0
+            x2 = d[i] + L * np.sin(theta[i])
+            y2 = -L * np.cos(theta[i])
+
+            xpts.append(x2)
+            ypts.append(y2)
+
+            if i % 3 == 0:
+                ax.plot([x1, x2], [y1, y2], linewidth=2, color=color)
+                ax.fill(
+                    [x1 - hx, x1 + hx, x1 + hx, x1 - hx, x1 - hx],
+                    [y1, y1, y1 + hy, y1 + hy, y1],
+                    alpha=0.5,
+                    linewidth=2,
+                    color=color,
+                )
+
+            ax.plot([x2], [y2], color=color, marker="o")
+
+        fig.savefig("cart_pole_history.svg")
+        fig.savefig("cart_pole_history.png")
+
+    return
 
 
 def create_cart_model(module_name="cart_pole"):
@@ -377,17 +285,18 @@ def create_cart_model(module_name="cart_pole"):
     return model
 
 
-m1 = create_cart_model()
-m2 = create_cart_model()
+parser = argparse.ArgumentParser()
+parser.add_argument(
+    "--build", dest="build", action="store_true", default=False, help="Enable building"
+)
+args = parser.parse_args()
 
-model = am.Model("cart_pole")
-model.add_model("cart1", m1)
-model.add_model("cart2", m2)
+model = create_cart_model()
 
 # model.connect("cart2.cart.x", "cart1.cart.x")
 model.initialize()
 
-if "build_ext" in sys.argv:
+if args.build:
     model.generate_cpp()
     model.build_module()
 
@@ -401,16 +310,19 @@ x_array = x.get_array()
 x_array[:] = 0.0
 
 # # Set the initial conditions based on the varaibles
-for q_var in ["cart1.cart.q", "cart2.cart.q"]:
-    q_idx = model.get_var_indices(q_var)
-    x_array[q_idx[:, 0]] = np.linspace(0, 2.0, num_time_steps + 1)
-    x_array[q_idx[:, 1]] = np.linspace(0, np.pi, num_time_steps + 1)
-    x_array[q_idx[:, 2]] = 1.0
-    x_array[q_idx[:, 3]] = 1.0
+q_idx = model.get_var_indices("cart.q")
+x_array[q_idx[:, 0]] = np.linspace(0, 2.0, num_time_steps + 1)
+x_array[q_idx[:, 1]] = np.linspace(0, np.pi, num_time_steps + 1)
+x_array[q_idx[:, 2]] = 1.0
+x_array[q_idx[:, 3]] = 1.0
 
-opt = Optimizer(model, prob, x_init=x_array)
+opt = am.Optimizer(model, prob, x_init=x_array)
 xopt, gnrm = opt.optimize()
 
-opt.plot(xopt, base="cart1.")
-opt.plot_convergence(gnrm)
-opt.visualize(xopt, base="cart1.")
+d = xopt[model.get_var_indices("cart.q[:, 0]")]
+theta = xopt[model.get_var_indices("cart.q[:, 1]")]
+xctrl = xopt[model.get_var_indices("cart.x")]
+
+plot(d, theta, xctrl)
+plot_convergence(gnrm)
+visualize(d, theta)

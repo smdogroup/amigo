@@ -1,8 +1,8 @@
-#ifndef AMIGO_SERIAL_COMPONENT_SET_H
-#define AMIGO_SERIAL_COMPONENT_SET_H
+#ifndef AMIGO_COMPONENT_GROUP_H
+#define AMIGO_COMPONENT_GROUP_H
 
 #include "a2dcore.h"
-#include "component_set.h"
+#include "component_group_base.h"
 #include "csr_matrix.h"
 #include "layout.h"
 #include "vector.h"
@@ -10,12 +10,12 @@
 namespace amigo {
 
 template <typename T, class Component>
-class SerialComponentSet : public ComponentSet<T> {
+class ComponentGroup : public ComponentGroupBase<T> {
  public:
   static constexpr int ncomp = Component::ncomp;
   using Input = typename Component::Input;
 
-  SerialComponentSet(std::shared_ptr<Vector<int>> indices) : layout(indices) {}
+  ComponentGroup(std::shared_ptr<Vector<int>> indices) : layout(indices) {}
 
   int get_max_dof() const {
     int index[ncomp];
@@ -104,4 +104,4 @@ class SerialComponentSet : public ComponentSet<T> {
 
 }  // namespace amigo
 
-#endif  // AMIGO_SERIAL_COMPONENT_SET_H
+#endif  // AMIGO_COMPONENT_GROUP_H

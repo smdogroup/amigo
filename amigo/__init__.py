@@ -1,7 +1,8 @@
 from .amigo import Vector, OptimizationProblem
 from .component import Component
-from .unary_operations import *
 from .model import Model
+from .optimizer import Optimizer
+from .unary_operations import *
 
 
 def get_include():
