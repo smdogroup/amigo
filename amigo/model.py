@@ -1,5 +1,6 @@
 import numpy as np
 import ast
+import sys
 import importlib
 from .amigo import VectorInt, OptimizationProblem, AMIGO_INCLUDE_PATH, A2D_INCLUDE_PATH
 from .component import Component
@@ -31,7 +32,10 @@ def _parse_var_expr(expr: str):
         # Determine if it's an attribute or a subscript
         if isinstance(node, ast.Subscript):
             attr_node = node.value
-            indices = _parse_indices(node.slice)
+            if sys.version_info < (3, 9):
+                indices = _parse_indices_depr(node.slice)
+            else:
+                indices = _parse_indices(node.slice)
         elif isinstance(node, ast.Attribute):
             attr_node = node
             indices = None
@@ -78,6 +82,40 @@ def _eval_ast_index(node):
         return None
     else:
         return ast.literal_eval(node)
+
+
+def _parse_indices_depr(slice_node):
+    if sys.version_info < (3, 9):
+        if isinstance(slice_node, ast.ExtSlice):
+            return tuple(_eval_ast_index_depr(dim) for dim in slice_node.dims)
+        elif isinstance(slice_node, ast.Tuple):
+            return tuple(_eval_ast_index_depr(elt) for elt in slice_node.elts)
+        elif isinstance(slice_node, ast.Index):
+            return (_eval_ast_index_depr(slice_node.value),)
+        else:
+            return (_eval_ast_index_depr(slice_node),)
+    else:
+        raise NotImplementedError
+    
+
+def _eval_ast_index_depr(node):
+    if sys.version_info < (3, 9):
+        if isinstance(node, ast.Slice):
+            return slice(
+                _eval_ast_index_depr(node.lower) if node.lower else None,
+                _eval_ast_index_depr(node.upper) if node.upper else None,
+                _eval_ast_index_depr(node.step) if node.step else None,
+            )
+        elif isinstance(node, ast.Constant):
+            return node.value
+        elif isinstance(node, ast.Name) and node.id == "None":
+            return None
+        elif isinstance(node, ast.Index):
+            return _eval_ast_index(node.value)
+        else:
+            return ast.literal_eval(node)
+    else:
+        raise NotImplementedError
 
 
 class AliasTracker:
@@ -186,14 +224,14 @@ class Model:
         self.module_name = module_name
         self.comp = {}
         self.index_pool = GlobalIndexPool()
-        self.connections = []
+        self.links = []
         self._initialized = False
 
     def add_component(self, name: str, size: int, comp_obj: Component):
         """
         Add a component group to the model.
 
-        This function adds the component group to the model. No ordering or connection
+        This function adds the component group to the model. No ordering or linking
         operations are performed until initialize() is called. All inputs and outputs from
         comp_obj are referred to by: name.var or name.var[i, j], where numpy-type index
         slicing can be used to denote slices of variables.
@@ -248,42 +286,42 @@ class Model:
 
             self.add_component(sub_name, sub_size, sub_obj)
 
-        # Add all of the sub-model connections (if any exist)
-        for src_expr, tgt_expr in model.connections:
-            self.connect(name + "." + src_expr, name + "." + tgt_expr)
+        # Add all of the sub-model links (if any exist)
+        for src_expr, tgt_expr in model.links:
+            self.link(name + "." + src_expr, name + "." + tgt_expr)
 
         return
 
-    def connect(self, src_expr: str, tgt_expr: str):
+    def link(self, src_expr: str, tgt_expr: str):
         """
-        Impose that two variables are the same.
+        Link two variables so that they are the same.
 
-        You cannot connect intputs to outputs. You can only connect inputs to inputs and
-        outputs to outputs. The outputs are used as constraints within the optimization problem.
+        You cannot link intputs to outputs. You can only link inputs to inputs and outputs 
+        to outputs. The outputs are used as constraints within the optimization problem.
         The inputs are the design variables.
 
         The variables are specified as sub_model.group.var[0, 1] or sub_model.group.var[:, 1]
         or sub_model.group.var, or any sliced numpy view.
 
-        The purpose of the connection statements is to enforce which input variables are the same.
+        The purpose of the link statements is to enforce which input variables are the same.
         If outputs are linked, then the resulting constraints are summed across all group components.
 
         Args:
             src_expr (str): Source variable name
             tgt_expr (str): Target variable name
         """
-        self.connections.append((src_expr, tgt_expr))
+        self.links.append((src_expr, tgt_expr))
         return
 
     def initialize(self):
         """
-        Initialize the variable indices for each component and resolve all connections.
+        Initialize the variable indices for each component and resolve all links.
         """
 
         # Allocate the AliasTracker
         tracker = AliasTracker(self.index_pool.counter)
 
-        for a_expr, b_expr in self.connections:
+        for a_expr, b_expr in self.links:
             a_path, a_slice = _parse_var_expr(a_expr)
             a_var = ".".join(a_path)
             a_indices = self.get_var_indices(a_var)[a_slice]

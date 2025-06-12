@@ -264,23 +264,23 @@ def create_cart_model(module_name="cart_pole"):
     model.add_component("ic", 1, ic)
     model.add_component("fc", 1, fc)
 
-    # Add the connections
+    # Add the links
     for i in range(4):
         start = i * num_time_steps
         end = (i + 1) * num_time_steps
-        # Connect the state variables
-        model.connect(f"cart.q[:{num_time_steps}, {i}]", f"trap.q1[{start}:{end}]")
-        model.connect(f"cart.q[1:, {i}]", f"trap.q2[{start}:{end}]")
+        # Link the state variables
+        model.link(f"cart.q[:{num_time_steps}, {i}]", f"trap.q1[{start}:{end}]")
+        model.link(f"cart.q[1:, {i}]", f"trap.q2[{start}:{end}]")
 
-        # Connect the state rates
-        model.connect(f"cart.qdot[:-1, {i}]", f"trap.q1dot[{start}:{end}]")
-        model.connect(f"cart.qdot[1:, {i}]", f"trap.q2dot[{start}:{end}]")
+        # Link the state rates
+        model.link(f"cart.qdot[:-1, {i}]", f"trap.q1dot[{start}:{end}]")
+        model.link(f"cart.qdot[1:, {i}]", f"trap.q2dot[{start}:{end}]")
 
-    model.connect(f"cart.x[:-1]", f"obj.x1[:]")
-    model.connect(f"cart.x[1:]", f"obj.x2[:]")
+    model.link(f"cart.x[:-1]", f"obj.x1[:]")
+    model.link(f"cart.x[1:]", f"obj.x2[:]")
 
-    model.connect("cart.q[0, :]", "ic.q[0, :]")
-    model.connect(f"cart.q[{num_time_steps}, :]", "fc.q[0, :]")
+    model.link("cart.q[0, :]", "ic.q[0, :]")
+    model.link(f"cart.q[{num_time_steps}, :]", "fc.q[0, :]")
 
     return model
 
@@ -292,8 +292,6 @@ parser.add_argument(
 args = parser.parse_args()
 
 model = create_cart_model()
-
-# model.connect("cart2.cart.x", "cart1.cart.x")
 model.initialize()
 
 if args.build:
