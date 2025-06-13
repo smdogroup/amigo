@@ -324,11 +324,11 @@ class Model:
         for a_expr, b_expr in self.links:
             a_path, a_slice = _parse_var_expr(a_expr)
             a_var = ".".join(a_path)
-            a_indices = self.get_var_indices(a_var)[a_slice]
+            a_indices = self.get_indices(a_var)[a_slice]
 
             b_path, b_slice = _parse_var_expr(b_expr)
             b_var = ".".join(b_path)
-            b_indices = self.get_var_indices(b_var)[b_slice]
+            b_indices = self.get_indices(b_var)[b_slice]
 
             if a_indices.shape != b_indices.shape:
                 raise ValueError(
@@ -369,13 +369,13 @@ class Model:
 
         return
 
-    def get_var_indices(self, name: str):
+    def get_indices(self, name: str):
         """
         Get the indices associated with the variable.
 
         You can use this to access the indices of variables within the model. For instance,
-        get_var_inidces("sub_model.comp.vars") will return the indices for all of the vars
-        under sub_model.comp and get_var_inidces("sub_model.comp.vars[2:5, :]") will return
+        get_indices("sub_model.comp.vars") will return the indices for all of the vars
+        under sub_model.comp and get_indices("sub_model.comp.vars[2:5, :]") will return
         a sliced version of the indices.
 
         Args:

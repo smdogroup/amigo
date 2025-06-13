@@ -301,14 +301,13 @@ if args.build:
 print("num_variables = ", model.num_variables)
 
 prob = model.create_opt_problem()
-mat = prob.create_csr_matrix()
 
 x = prob.create_vector()
 x_array = x.get_array()
 x_array[:] = 0.0
 
 # # Set the initial conditions based on the varaibles
-q_idx = model.get_var_indices("cart.q")
+q_idx = model.get_indices("cart.q")
 x_array[q_idx[:, 0]] = np.linspace(0, 2.0, num_time_steps + 1)
 x_array[q_idx[:, 1]] = np.linspace(0, np.pi, num_time_steps + 1)
 x_array[q_idx[:, 2]] = 1.0
@@ -317,9 +316,9 @@ x_array[q_idx[:, 3]] = 1.0
 opt = am.Optimizer(model, prob, x_init=x_array)
 xopt, gnrm = opt.optimize()
 
-d = xopt[model.get_var_indices("cart.q[:, 0]")]
-theta = xopt[model.get_var_indices("cart.q[:, 1]")]
-xctrl = xopt[model.get_var_indices("cart.x")]
+d = xopt[model.get_indices("cart.q[:, 0]")]
+theta = xopt[model.get_indices("cart.q[:, 1]")]
+xctrl = xopt[model.get_indices("cart.x")]
 
 plot(d, theta, xctrl)
 plot_convergence(gnrm)
