@@ -4,6 +4,8 @@ _cpp_type_map = {int: "int", float: "double", complex: "std::complex<double>"}
 
 
 def _normalize_shape(shape):
+    if shape is None:
+        return None
     if isinstance(shape, int):
         shape = (shape,)
     elif not isinstance(shape, tuple):
@@ -26,17 +28,16 @@ def _generate_cpp_input_decl(
 ):
     lines = []
 
-    if mode == "eval":
-        for index, name in enumerate(inputs):
-            node = inputs[name]
-            shape = node.shape
-            var_name = name if alt_names is None else alt_names[name]
+    for index, name in enumerate(inputs):
+        node = inputs[name]
+        shape = _normalize_shape(node.shape)
+        var_name = name if alt_names is None else alt_names[name]
 
+        if mode == "eval":
             decl = None
             if shape is None:
                 decl = f"{template_name}& {var_name}"
             else:
-                shape = _normalize_shape(shape)
                 if len(shape) == 1:
                     decl = f"A2D::Vec<{template_name}, {shape[0]}>& {var_name}"
                 elif len(shape) == 2:
@@ -44,17 +45,11 @@ def _generate_cpp_input_decl(
                         f"A2D::Mat<{template_name}, {shape[0]}, {shape[1]}>& {var_name}"
                     )
             lines.append(f"{decl} = A2D::get<{index + offset}>({input_name})")
-    elif mode == "rev":
-        for index, name in enumerate(inputs):
-            node = inputs[name]
-            shape = node.shape
-            var_name = name if alt_names is None else alt_names[name]
-
+        elif mode == "rev":
             decl = None
             if shape is None:
                 decl = f"A2D::ADObj<{template_name}&> {var_name}"
             else:
-                shape = _normalize_shape(shape)
                 if len(shape) == 1:
                     decl = (
                         f"A2D::ADObj<A2D::Vec<{template_name}, {shape[0]}>&> {var_name}"
@@ -64,17 +59,11 @@ def _generate_cpp_input_decl(
             lines.append(
                 f"{decl}(A2D::get<{index + offset}>({input_name}), A2D::get<{index + offset}>({grad_name}))"
             )
-    elif mode == "hprod":
-        for index, name in enumerate(inputs):
-            node = inputs[name]
-            shape = node.shape
-            var_name = name if alt_names is None else alt_names[name]
-
+        elif mode == "hprod":
             decl = None
             if shape is None:
                 decl = f"A2D::A2DObj<{template_name}&> {var_name}"
             else:
-                shape = _normalize_shape(shape)
                 if len(shape) == 1:
                     decl = f"A2D::A2DObj<A2D::Vec<{template_name}, {shape[0]}>&> {var_name}"
                 elif len(shape) == 2:
@@ -87,20 +76,26 @@ def _generate_cpp_input_decl(
     return lines
 
 
-def _generate_cpp_var_decl(inputs, mode="eval", alt_names=None, template_name="T__"):
+def _generate_cpp_var_decl(
+    inputs, active=None, mode="eval", alt_names=None, template_name="T__"
+):
     lines = []
 
-    if mode == "eval":
-        for index, name in enumerate(inputs):
-            node = inputs[name]
-            shape = node.shape
-            var_name = name if alt_names is None else alt_names[name]
+    for index, name in enumerate(inputs):
+        node = inputs[name]
+        shape = _normalize_shape(node.shape)
+        var_name = name if alt_names is None else alt_names[name]
 
+        passive = False
+        if active is not None:
+            if var_name in active and not active[var_name]:
+                passive = True
+
+        if mode == "eval" or passive:
             decl = None
             if shape is None:
                 decl = f"{template_name} {var_name}"
             else:
-                shape = _normalize_shape(shape)
                 if len(shape) == 1:
                     decl = f"A2D::Vec<{template_name}, {shape[0]}> {var_name}"
                 elif len(shape) == 2:
@@ -108,17 +103,11 @@ def _generate_cpp_var_decl(inputs, mode="eval", alt_names=None, template_name="T
                         f"A2D::Mat<{template_name}, {shape[0]}, {shape[1]}> {var_name}"
                     )
             lines.append(decl)
-    elif mode == "rev":
-        for index, name in enumerate(inputs):
-            node = inputs[name]
-            shape = node.shape
-            var_name = name if alt_names is None else alt_names[name]
-
+        elif mode == "rev":
             decl = None
             if shape is None:
                 decl = f"A2D::ADObj<{template_name}> {var_name}"
             else:
-                shape = _normalize_shape(shape)
                 if len(shape) == 1:
                     decl = (
                         f"A2D::ADObj<A2D::Vec<{template_name}, {shape[0]}>> {var_name}"
@@ -126,17 +115,11 @@ def _generate_cpp_var_decl(inputs, mode="eval", alt_names=None, template_name="T
                 elif len(shape) == 2:
                     decl = f"A2D::ADObj<A2D::Mat<{template_name}, {shape[0]}, {shape[1]}>> {var_name}"
             lines.append(decl)
-    elif mode == "hprod":
-        for index, name in enumerate(inputs):
-            node = inputs[name]
-            shape = node.shape
-            var_name = name if alt_names is None else alt_names[name]
-
+        elif mode == "hprod":
             decl = None
             if shape is None:
                 decl = f"A2D::A2DObj<{template_name}> {var_name}"
             else:
-                shape = _normalize_shape(shape)
                 if len(shape) == 1:
                     decl = (
                         f"A2D::A2DObj<A2D::Vec<{template_name}, {shape[0]}>> {var_name}"
@@ -153,14 +136,12 @@ def _generate_cpp_types(inputs, template_name="T__"):
 
     for index, name in enumerate(inputs):
         node = inputs[name]
-        shape = node.shape
+        shape = _normalize_shape(node.shape)
 
         decl = None
         if shape is None:
             decl = f"{template_name}"
         else:
-            # Normalize the shape input so it's always a tuple
-            shape = _normalize_shape(shape)
             if len(shape) == 1:
                 decl = f"A2D::Vec<{template_name}, {shape[0]}>"
             elif len(shape) == 2:
@@ -180,7 +161,7 @@ class InputSet:
         self.labels = {}
 
     def add(self, name, shape=None, type=float, label="input"):
-        node = VarNode(name, shape=shape, type=type)
+        node = VarNode(name, shape=shape, type=type, active=True)
         self.inputs[name] = node
         self.labels[name] = label
         return
@@ -260,55 +241,133 @@ class ConstantSet:
 
 
 class VarSet:
+    class VarExpr:
+        def __init__(self, name, type=float, shape=None, active=True):
+            self.name = name
+            self.shape = _normalize_shape(shape)
+            self.type = type
+            self.var = VarNode(name, shape=shape, type=type, active=True)
+            self.active = active
+
+            if self.shape is None:
+                self.expr = None
+            else:
+                if len(self.shape) == 1:
+                    self.expr = [None for _ in range(self.shape[0])]
+                else:
+                    self.expr = [
+                        [None for _ in range(self.shape[1])]
+                        for _ in range(self.shape[0])
+                    ]
+
     def __init__(self):
         self.vars = {}
-        self.expr = {}
 
     def add(self, name, shape=None, type=float):
-        node = VarNode(name, shape=shape, type=type)
-        self.vars[name] = node
-        self.expr[name] = None
+        # Default to an active type, but reset if the expression is passive
+        self.vars[name] = self.VarExpr(name, shape=shape, type=type, active=True)
         return
 
     def __iter__(self):
         return iter(self.vars)
 
     def __getitem__(self, name):
-        return Expr(self.vars[name])
+        return Expr(self.vars[name].var)
 
     def __setitem__(self, name, expr):
         if name not in self.vars:
             raise KeyError(f"{name} not in declared variables")
-        expr.node.name = name
-        self.expr[name] = expr
+
+        if isinstance(expr, Expr):
+            if self.vars[name].shape is None:
+                self.vars[name].expr = expr
+                expr.node.name = name
+                if expr.active == False:
+                    self.vars[name].active = False
+        else:
+            shape = self.vars[name].shape
+            active = False
+            if len(shape) == 1:
+                for i in range(shape[0]):
+                    self.vars[name].expr[i] = expr[i]
+                    active = active or expr[i].active
+            elif len(shape) == 2:
+                for i in range(shape[0]):
+                    for j in range(shape[1]):
+                        self.vars[name].expr[i][j] = expr[i][j]
+                        active = active or expr[i][j].active
+
+            self.vars[name].active = active
+
         return
 
     def generate_cpp_types(self, template_name="T__"):
         return _generate_cpp_types(self.vars, template_name=template_name)
 
     def generate_cpp_decl(self, mode="eval", template_name="T__"):
-        return _generate_cpp_var_decl(self.vars, mode=mode, template_name=template_name)
+        active = {}
+        for name in self.vars:
+            active[name] = self.vars[name].active
 
-    def generate_cpp(self, mode="eval"):
+        return _generate_cpp_var_decl(
+            self.vars, active, mode=mode, template_name=template_name
+        )
+
+    def generate_passive_cpp(self):
+        lines = []
+        for name in self.vars:
+            if not self.vars[name].active:
+                shape = _normalize_shape(self.vars[name].shape)
+                if shape is None:
+                    rhs = self.vars[name].expr.generate_cpp()
+                    lines.append(f"{name} = {rhs}")
+                elif len(shape) == 1:
+                    for i in range(shape[0]):
+                        rhs = self.vars[name].expr[i].generate_cpp()
+                        lines.append(f"{name}[{i}] = {rhs}")
+                elif len(shape) == 2:
+                    for j in range(shape[1]):
+                        for i in range(shape[0]):
+                            rhs = self.vars[name].expr[i][j].generate_cpp()
+                            lines.append(f"{name}({i},{j}) = {rhs}")
+
+        return lines
+
+    def generate_active_cpp(self, mode="eval"):
         lines = []
 
         if mode == "eval":
             for name in self.vars:
-                shape = self.vars[name].shape
-                if shape is None:
-                    rhs = self.expr[name].generate_cpp()
-                    lines.append(f"{name} = {rhs}")
-                else:
-                    raise NotImplementedError
+                if self.vars[name].active:
+                    shape = _normalize_shape(self.vars[name].shape)
+                    if shape is None:
+                        rhs = self.vars[name].expr.generate_cpp()
+                        lines.append(f"{name} = {rhs}")
+                    elif len(shape) == 1:
+                        for i in range(shape[0]):
+                            rhs = self.vars[name].expr[i].generate_cpp()
+                            lines.append(f"{name}[{i}] = {rhs}")
+                    elif len(shape) == 2:
+                        for j in range(shape[1]):
+                            for i in range(shape[0]):
+                                rhs = self.vars[name].expr[i][j].generate_cpp()
+                                lines.append(f"{name}({i})({j}) = {rhs}")
         else:
             for name in self.vars:
-                shape = self.vars[name].shape
-                if shape is None:
-                    rhs = self.expr[name].generate_cpp()
-                    lines.append(f"A2D::Eval({rhs}, {name})")
-                else:
-                    raise NotImplementedError
-
+                if self.vars[name].active:
+                    shape = _normalize_shape(self.vars[name].shape)
+                    if shape is None:
+                        rhs = self.vars[name].expr.generate_cpp()
+                        lines.append(f"A2D::Eval({rhs}, {name})")
+                    elif len(shape) == 1:
+                        for i in range(shape[0]):
+                            rhs = self.vars[name].expr[i].generate_cpp()
+                            lines.append(f"A2D::Eval({rhs}, {name}[{i}])")
+                    elif len(shape) == 2:
+                        for j in range(shape[1]):
+                            for i in range(shape[0]):
+                                rhs = self.vars[name].expr[i][j].generate_cpp()
+                                lines.append(f"A2D::Eval({rhs}, {name}({i},{j}))")
         return lines
 
 
@@ -318,14 +377,14 @@ class DataSet:
         self.labels = {}
 
     def add(self, name, shape=None, type=float, label=None):
-        self.data[name] = VarNode(name, shape=shape, type=type)
+        self.data[name] = VarNode(name, shape=shape, type=type, active=False)
         self.labels[name] = label
 
     def __len__(self):
         return len(self.data)
 
     def __getitem__(self, name):
-        return self.data[name]
+        return Expr(self.data[name])
 
     def __iter__(self):
         return iter(self.data)
@@ -347,18 +406,19 @@ class OutputSet:
     class OutputExpr:
         def __init__(self, name, type=float, shape=None):
             self.name = name
-            self.shape = shape
+            self.shape = _normalize_shape(shape)
             self.type = type
 
-            if shape is not None:
-                if isinstance(shape, tuple):
-                    self.expr = [
-                        [None for _ in range(shape[1])] for _ in range(shape[0])
-                    ]
-                else:
-                    self.expr = [None for _ in range(shape)]
-            else:
+            if self.shape is None:
                 self.expr = None
+            else:
+                if len(self.shape) == 1:
+                    self.expr = [None for _ in range(self.shape[0])]
+                else:
+                    self.expr = [
+                        [None for _ in range(self.shape[1])]
+                        for _ in range(self.shape[0])
+                    ]
 
     def __init__(self, lagrangian_name="lagrangian__"):
         self.outputs = {}
@@ -388,13 +448,13 @@ class OutputSet:
                 self.outputs[name].expr = expr
         else:
             shape = self.outputs[name].shape
-            if isinstance(shape, tuple):
+            if len(shape) == 1:
+                for i in range(shape[0]):
+                    self.outputs[name].expr[i] = expr[i]
+            elif len(shape) == 2:
                 for i in range(shape[0]):
                     for j in range(shape[1]):
                         self.outputs[name].expr[i][j] = expr[i][j]
-            else:
-                for i in range(shape):
-                    self.outputs[name].expr[i] = expr[i]
 
         return
 
@@ -460,15 +520,15 @@ class OutputSet:
 
             if shape is None:
                 expr_list.append(f"{name} * {mult_names[name]}")
-            elif isinstance(shape, tuple):
+            elif len(shape) == 1:
+                for i in range(shape[0]):
+                    expr_list.append(f"{name}[{i}] * {mult_names[name]}[{i}]")
+            elif len(shape) == 2:
                 for i in range(shape[0]):
                     for j in range(shape[1]):
                         expr_list.append(
                             f"{name}({i}, {j}) * {mult_names[name]}({i}, {j})"
                         )
-            else:
-                for i in range(shape):
-                    expr_list.append(f"{name}[{i}] * {mult_names[name]}[{i}]")
 
         if obj_expr is None:
             expr = ""
@@ -491,15 +551,15 @@ class OutputSet:
                 if shape is None:
                     rhs = self.outputs[item].expr.generate_cpp()
                     lines.append(f"{name} = {rhs}")
-                elif isinstance(shape, tuple):
+                elif len(shape) == 1:
+                    for i in range(shape[0]):
+                        rhs = self.outputs[item].expr[i].generate_cpp()
+                        lines.append(f"{name}[{i}] = {rhs}")
+                elif len(shape) == 2:
                     for i in range(shape[0]):
                         for j in range(shape[1]):
                             rhs = self.outputs[item].expr[i][j].generate_cpp()
                             lines.append(f"{name}({i}, {j}) = {rhs}")
-                else:
-                    for i in range(shape):
-                        rhs = self.outputs[item].expr[i].generate_cpp()
-                        lines.append(f"{name}[{i}] = {rhs}")
 
             rhs = self._lagrangian_evaluation(obj_expr=obj_expr)
             lines.append(f"{self.lagrangian_name} = {rhs}")
@@ -507,18 +567,20 @@ class OutputSet:
             for item in self.outputs:
                 shape = self.outputs[item].shape
                 name = self.outputs[item].name
+
                 if shape is None:
                     rhs = self.outputs[item].expr.generate_cpp()
                     lines.append(f"A2D::Eval({rhs}, {name})")
-                elif isinstance(shape, tuple):
+                elif len(shape) == 1:
+                    for i in range(shape[0]):
+                        rhs = self.outputs[item].expr[i].generate_cpp()
+                        lines.append(f"A2D::Eval({rhs}, {name}[{i}])")
+                elif len(shape) == 2:
                     for i in range(shape[0]):
                         for j in range(shape[1]):
                             rhs = self.outputs[item].expr[i][j].generate_cpp()
                             lines.append(f"A2D::Eval({rhs}, {name}({i}, {j}))")
-                else:
-                    for i in range(shape):
-                        rhs = self.outputs[item].expr[i].generate_cpp()
-                        lines.append(f"A2D::Eval({rhs}, {name}[{i}])")
+
             rhs = self._lagrangian_evaluation(obj_expr=obj_expr)
             lines.append(f"A2D::Eval({rhs}, {self.lagrangian_name})")
 
@@ -744,8 +806,12 @@ class Component:
             for line in out_decl:
                 cpp += "    " + line + ";\n"
 
+            lines = self.vars.generate_passive_cpp()
+            for line in lines:
+                cpp += "    " + f"{line};\n"
+
             obj_expr = self.objective.generate_cpp()
-            body = self.vars.generate_cpp(mode=mode)
+            body = self.vars.generate_active_cpp(mode=mode)
             body.extend(self.outputs.generate_cpp(mode=mode, obj_expr=obj_expr))
 
             if mode == "eval":

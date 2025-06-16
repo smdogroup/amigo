@@ -4,6 +4,7 @@ import math
 class ExprNode:
     def __init__(self):
         self.name = None  # For output variable names
+        self.active = False
 
     def evaluate(self, env):
         raise NotImplementedError
@@ -17,6 +18,7 @@ class ConstNode(ExprNode):
         super().__init__()
         self.value = value
         self.type = type
+        self.active = False
 
     def evaluate(self, env):
         return self.value
@@ -26,11 +28,12 @@ class ConstNode(ExprNode):
 
 
 class VarNode(ExprNode):
-    def __init__(self, name, shape=None, type=float):
+    def __init__(self, name, shape=None, type=float, active=True):
         super().__init__()
         self.name = name
         self.shape = shape
         self.type = type
+        self.active = active
 
     def generate_cpp(self, index=None):
         if index is None:
@@ -49,6 +52,7 @@ class IndexNode(ExprNode):
         super().__init__()
         self.array_node = array_node
         self.index_node = index_node  # can be ExprNode or tuple of ExprNodes
+        self.active = self.array_node.active
 
     def evaluate(self, env):
         array_val = self.array_node.evaluate(env)
@@ -75,6 +79,10 @@ class OpNode(ExprNode):
         self.op = op
         self.left = left
         self.right = right
+        if self.left.active or self.right.active:
+            self.active = True
+        else:
+            self.active = False
 
     def evaluate(self, env):
         lval = self.left.evaluate(env)
@@ -120,6 +128,7 @@ class UnaryNode(ExprNode):
         self.func_name = func_name
         self.func = func
         self.operand = operand
+        self.active = operand.active
 
     def evaluate(self, env):
         val = self.operand.evaluate(env)
@@ -136,6 +145,7 @@ class UnaryNegNode(ExprNode):
     def __init__(self, operand):
         super().__init__()
         self.operand = operand
+        self.active = self.operand.active
 
     def evaluate(self, env):
         val = self.operand.evaluate(env)
@@ -151,6 +161,7 @@ class UnaryNegNode(ExprNode):
 class Expr:
     def __init__(self, node: ExprNode):
         self.node = node
+        self.active = node.active
 
     def __neg__(self):
         return Expr(UnaryNegNode(self.node))
