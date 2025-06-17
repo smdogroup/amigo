@@ -12,7 +12,7 @@ template <typename T>
 class ComponentGroupBase {
  public:
   virtual ~ComponentGroupBase() {}
-  virtual int get_max_dof() const { return 0; }
+
   virtual T lagrangian(const Vector<T>& data, const Vector<T>& x) const {
     return T(0.0);
   }
@@ -23,7 +23,8 @@ class ComponentGroupBase {
   virtual void add_hessian(const Vector<T>& data, const Vector<T>& x,
                            CSRMat<T>& mat) const {}
 
-  virtual void add_nonzero_pattern(std::set<std::pair<int, int>>& s) const {}
+  virtual void get_layout_data(int* length_, int* ncomp_,
+                               const int** array_) const {}
 };
 
 }  // namespace amigo

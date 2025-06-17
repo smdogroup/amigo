@@ -53,38 +53,35 @@ class OptimizationProblem {
   }
 
   std::shared_ptr<CSRMat<T>> create_csr_matrix() const {
-    std::set<std::pair<int, int>> node_set;
+    std::vector<int> intervals(comps.size() + 1);
+    intervals[0] = 0;
     for (size_t i = 0; i < comps.size(); i++) {
-      comps[i]->add_nonzero_pattern(node_set);
+      int length, ncomp;
+      const int* data;
+      comps[i]->get_layout_data(&length, &ncomp, &data);
+      intervals[i + 1] = intervals[i] + length;
     }
 
-    std::vector<int> rowp(num_variables + 1);
-    for (auto it = node_set.begin(); it != node_set.end(); it++) {
-      rowp[it->first + 1] += 1;
-    }
+    auto element_nodes = [&](int element, const int** ptr) {
+      // upper_bound finds the first index i such that intervals[i] >
+      // element
+      auto it = std::upper_bound(intervals.begin(), intervals.end(), element);
 
-    // Set the pointer into the rows
-    rowp[0] = 0;
-    for (int i = 0; i < num_variables; i++) {
-      rowp[i + 1] += rowp[i];
-    }
+      // Decrement to get the interval where element fits: intervals[idx]
+      // <= element < intervals[idx+1]
+      int idx = static_cast<int>(it - intervals.begin()) - 1;
 
-    int nnz = rowp[num_variables];
-    std::vector<int> cols(nnz);
+      int length, ncomp;
+      const int* data;
+      comps[idx]->get_layout_data(&length, &ncomp, &data);
 
-    for (auto it = node_set.begin(); it != node_set.end(); it++) {
-      cols[rowp[it->first]] = it->second;
-      rowp[it->first]++;
-    }
+      int elem = element - intervals[idx];
+      *ptr = &data[ncomp * elem];
+      return ncomp;
+    };
 
-    // Reset the pointer into the nodes
-    for (int i = num_variables; i > 0; i--) {
-      rowp[i] = rowp[i - 1];
-    }
-    rowp[0] = 0;
-
-    return std::make_shared<CSRMat<T>>(num_variables, num_variables, nnz,
-                                       rowp.data(), cols.data());
+    return std::make_shared<CSRMat<T>>(num_variables, num_variables,
+                                       intervals[comps.size()], element_nodes);
   }
 
  private:

@@ -14,8 +14,9 @@ class ExprNode:
 
 
 class ConstNode(ExprNode):
-    def __init__(self, value, type=float):
+    def __init__(self, name=None, value=None, type=float):
         super().__init__()
+        self.name = name
         self.value = value
         self.type = type
         self.active = False
@@ -24,6 +25,8 @@ class ConstNode(ExprNode):
         return self.value
 
     def generate_cpp(self, index=None):
+        if self.name is not None:
+            return self.name
         return str(self.value)
 
 
@@ -215,5 +218,5 @@ class Expr:
         if isinstance(val, ExprNode):
             return val
         if isinstance(val, (int, float)):
-            return ConstNode(val)
+            return ConstNode(value=val)
         raise TypeError(f"Unsupported value: {val}")

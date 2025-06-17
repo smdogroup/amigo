@@ -99,17 +99,8 @@ class ComponentGroup : public ComponentGroupBase<T> {
     }
   }
 
-  void add_nonzero_pattern(std::set<std::pair<int, int>> &map) const {
-    for (int i = 0; i < layout.get_length(); i++) {
-      int index[ncomp];
-      layout.get_indices(i, index);
-
-      for (int j = 0; j < ncomp; j++) {
-        for (int k = 0; k < ncomp; k++) {
-          map.insert(std::pair<int, int>(index[j], index[k]));
-        }
-      }
-    }
+  void get_layout_data(int *length_, int *ncomp_, const int **array_) const {
+    layout.get_data(length_, ncomp_, array_);
   }
 
  private:

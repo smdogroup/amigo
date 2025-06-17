@@ -50,9 +50,6 @@ class CartComponent(am.Component):
         self.add_input("q", shape=(4), label="state")
         self.add_input("qdot", shape=(4), label="rate")
 
-        self.add_var("cost")
-        self.add_var("sint")
-
         self.add_output("res", shape=(4), label="residual")
 
         return

@@ -2,6 +2,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
+#include "alias_tracker.h"
 #include "amigo_include_paths.h"
 #include "csr_matrix.h"
 #include "optimization_problem.h"
@@ -127,4 +128,16 @@ PYBIND11_MODULE(amigo, mod) {
       .def("create_csr_matrix",
            &amigo::OptimizationProblem<double>::create_csr_matrix)
       .def("hessian", &amigo::OptimizationProblem<double>::hessian);
+
+  py::class_<amigo::AliasTracker<int>>(mod, "AliasTracker")
+      .def(py::init<int>(), py::arg("size"))
+      .def("alias", &amigo::AliasTracker<int>::alias, py::arg("var1"),
+           py::arg("var2"))
+      .def("get_alias_group", &amigo::AliasTracker<int>::get_alias_group,
+           py::arg("var"))
+      .def("assign_group_vars", [](amigo::AliasTracker<int> tracker) {
+        py::array_t<int> array(tracker.size());
+        int counter = tracker.assign_group_vars(array.mutable_data());
+        return py::make_tuple(counter, array);
+      });
 }

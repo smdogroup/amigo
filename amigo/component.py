@@ -15,6 +15,25 @@ def _normalize_shape(shape):
     return shape
 
 
+def _get_shape_from_list(obj):
+    if not isinstance(obj, (list, tuple)):
+        return ()
+
+    length = len(obj)
+
+    # Empty container: return current length
+    if length == 0 or not isinstance(obj[0], (list, tuple)):
+        return (length,)
+
+    # Recurse into first element and check consistency
+    sub_shape = _get_shape_from_list(obj[0])
+    for sub in obj:
+        if _get_shape_from_list(sub) != sub_shape:
+            raise ValueError("Inconsistent list-of-list shapes")
+
+    return (length,) + sub_shape
+
+
 def _generate_cpp_input_decl(
     inputs,
     offset=0,
@@ -214,7 +233,7 @@ class ConstantSet:
         self.labels = {}
 
     def add(self, name, value, type=float, label="const"):
-        node = ConstNode(value, type=type)
+        node = ConstNode(name=name, value=value, type=type)
         self.inputs[name] = node
         self.labels[name] = label
         return
@@ -246,7 +265,7 @@ class VarSet:
             self.name = name
             self.shape = _normalize_shape(shape)
             self.type = type
-            self.var = VarNode(name, shape=shape, type=type, active=True)
+            self.var = VarNode(name, shape=shape, type=type, active=active)
             self.active = active
 
             if self.shape is None:
@@ -263,11 +282,6 @@ class VarSet:
     def __init__(self):
         self.vars = {}
 
-    def add(self, name, shape=None, type=float):
-        # Default to an active type, but reset if the expression is passive
-        self.vars[name] = self.VarExpr(name, shape=shape, type=type, active=True)
-        return
-
     def __iter__(self):
         return iter(self.vars)
 
@@ -275,18 +289,16 @@ class VarSet:
         return Expr(self.vars[name].var)
 
     def __setitem__(self, name, expr):
-        if name not in self.vars:
-            raise KeyError(f"{name} not in declared variables")
-
         if isinstance(expr, Expr):
-            if self.vars[name].shape is None:
-                self.vars[name].expr = expr
-                expr.node.name = name
-                if expr.active == False:
-                    self.vars[name].active = False
-                    self.vars[name].var.active = False
+            shape = None
+            self.vars[name] = self.VarExpr(name, shape=shape, active=expr.active)
+            self.vars[name].expr = expr
+            expr.node.name = name
         else:
-            shape = self.vars[name].shape
+            shape = _get_shape_from_list(expr)
+            self.vars[name] = self.VarExpr(name, shape=shape, active=True)
+
+            # Check whether we should reset the active flag
             active = False
             if len(shape) == 1:
                 for i in range(shape[0]):
@@ -635,10 +647,6 @@ class Component:
 
     def add_input(self, name, type=float, shape=None, label="input"):
         self.inputs.add(name, type=type, shape=shape, label=label)
-        return
-
-    def add_var(self, name, type=float, shape=None):
-        self.vars.add(name, type=type, shape=shape)
         return
 
     def add_output(self, name, type=float, shape=None, label="output"):

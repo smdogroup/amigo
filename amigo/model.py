@@ -2,9 +2,8 @@ import numpy as np
 import ast
 import sys
 import importlib
-from .amigo import VectorInt, OptimizationProblem, AMIGO_INCLUDE_PATH, A2D_INCLUDE_PATH
+from .amigo import VectorInt, OptimizationProblem, AliasTracker, AMIGO_INCLUDE_PATH, A2D_INCLUDE_PATH
 from .component import Component
-from collections import defaultdict
 
 if sys.version_info < (3, 9):
     Self = object
@@ -120,41 +119,6 @@ def _eval_ast_index_depr(node):
             return ast.literal_eval(node)
     else:
         raise NotImplementedError
-
-
-class AliasTracker:
-    def __init__(self, size: int):
-        self.parent = np.arange(size, dtype=int)
-        self.rank = np.zeros(size, dtype=int)
-
-    def _find(self, var: int):
-        if self.parent[var] != var:
-            self.parent[var] = self._find(self.parent[var])
-        return self.parent[var]
-
-    def alias(self, var1: int, var2: int):
-        root1 = self._find(var1)
-        root2 = self._find(var2)
-        if root1 == root2:
-            return
-        # Union by rank
-        if self.rank[root1] < self.rank[root2]:
-            self.parent[root1] = root2
-        else:
-            self.parent[root2] = root1
-            if self.rank[root1] == self.rank[root2]:
-                self.rank[root1] += 1
-
-    def get_alias_group(self, var: int):
-        root = self._find(var)
-        return [v for v in range(len(self.parent)) if self._find(v) == root]
-
-    def all_groups(self):
-        groups = defaultdict(list)
-        for var in range(len(self.parent)):
-            root = self._find(var)
-            groups[root].append(var)
-        return list(groups.values())
 
 
 class GlobalIndexPool:
@@ -411,22 +375,10 @@ class Model:
                         f"Incompatible link {a_expr} {a_indices.shape} and {b_expr} {b_indices.shape}"
                     )
 
-                for a, b in zip(a_indices.flatten(), b_indices.flatten()):
-                    tracker.alias(a, b)
-
-        # Set up the variables so that they are contiguous
-        vars = -np.ones(pool.counter, dtype=int)
-
-        # Order the variables
-        counter = 0
+                tracker.alias(a_indices.flatten(), b_indices.flatten())
 
         # Order the aliased variables first
-        groups = tracker.all_groups()
-        for group in groups:
-            for index in group:
-                vars[index] = counter
-
-            counter += 1
+        counter, vars = tracker.assign_group_vars()
 
         # Order any remaining variables
         for name, comp in self.comp.items():
@@ -438,12 +390,14 @@ class Model:
             for varname, array in items:
                 arr = array.ravel()
 
-                for i in range(arr.shape[0]):
-                    if vars[arr[i]] == -1:
-                        vars[arr[i]] = counter
-                        counter += 1
+                # Assign variable indices to any remaining negative values
+                idx = np.where(vars[arr] < 0)
+                length = len(idx)
+                vars[arr[idx]] = np.arange(counter, counter + length)
+                counter += length
 
-                    arr[i] = vars[arr[i]]
+                # Set the variable indices
+                arr[:] = vars[arr]
 
         return counter
 
@@ -472,7 +426,7 @@ class Model:
         elif name in self.comp[comp_name].data:
             return "data"
         else:
-            raise ValueError("Name is neither a variable or data")
+            raise ValueError(f"Name {name} is neither a variable or data")
 
     def get_indices(self, name: str):
         """
@@ -582,7 +536,7 @@ class Model:
 
         return
 
-    def build_module(self):
+    def build_module(self, extra_compile_args=["-std=c++17"]):
         """
         Quick setup for building the extension module. Some care is required with this.
         """
@@ -600,7 +554,7 @@ class Model:
                 self.module_name,
                 sources=[f"{self.module_name}.cpp"],
                 depends=[f"{self.module_name}.h"],
-                extra_compile_args=["-std=c++17"],
+                extra_compile_args=extra_compile_args,
             )
         ]
 

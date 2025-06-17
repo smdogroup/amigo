@@ -43,6 +43,12 @@ class IndexLayout {
     }
   }
 
+  void get_data(int *length_, int *ncomp_, const int **array_) const {
+    *length_ = indices->get_size() / ncomp;
+    *ncomp_ = ncomp;
+    *array_ = indices->get_host_array();
+  }
+
  private:
   std::shared_ptr<Vector<int>> indices;
 };
