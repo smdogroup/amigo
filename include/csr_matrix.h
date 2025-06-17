@@ -208,8 +208,8 @@ class CSRMat {
 
   void mult(const std::shared_ptr<Vector<T>>& x,
             std::shared_ptr<Vector<T>>& y) const {
-    const T* x_array = x->get_host_array();
-    T* y_array = y->get_host_array();
+    const T* x_array = x->get_array();
+    T* y_array = y->get_array();
 
     for (int i = 0; i < nrows; i++) {
       y_array[i] = 0.0;

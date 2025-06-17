@@ -43,7 +43,7 @@ def compute_shape_derivs(xi, eta, X, Y, vars):
     x_xi, x_ea, y_xi, y_ea = compute_detJ(xi, eta, X, Y, vars)
     detJ = vars["detJ"]
 
-    vars["invJ"] = [[y_ea / detJ, -x_ea / detJ], [-y_ea / detJ, x_xi / detJ]]
+    vars["invJ"] = [[y_ea / detJ, -x_ea / detJ], [-y_xi / detJ, x_xi / detJ]]
     invJ = vars["invJ"]
 
     vars["Nx"] = [
@@ -302,8 +302,8 @@ parser.add_argument(
 )
 args = parser.parse_args()
 
-nx = 256
-ny = 128
+nx = 2 * 256
+ny = 2 * 128
 nnodes = (nx + 1) * (ny + 1)
 nelems = nx * ny
 

@@ -84,7 +84,7 @@ void bind_vector(py::module_ &m, const std::string &name) {
       .def("get_array",
            [](std::shared_ptr<amigo::Vector<T>> self) -> py::array_t<T> {
              return py::array_t<T>({self->get_size()}, {sizeof(T)},
-                                   self->get_host_array(), py::cast(self));
+                                   self->get_array(), py::cast(self));
            });
 }
 
