@@ -107,7 +107,7 @@ class OmpGroupBackend {
   using Data = typename Component::Data;
 
   OmpGroupBackend(const IndexLayout<ndata> &data_layout,
-                  const IndexLayout<ndata> &layout)
+                  const IndexLayout<ncomp> &layout)
       : elem_by_color(layout.get_length()) {
     int length, ncomps;
     const int *array;
@@ -115,8 +115,8 @@ class OmpGroupBackend {
     color_elements(length, array);
   }
   int max_color;
-  std::vector<int> color_count;
-  std::vector<int> elems_by_color;
+  std::vector<int> elem_ptr;
+  std::vector<int> elem_by_color;
 
   // Input:
   // elem_nodes[e] = list of global node ids for element e
@@ -128,6 +128,7 @@ class OmpGroupBackend {
     // Step 1: Build node to element mapping
     for (int e = 0; e < nelems; ++e) {
       for (int j = 0; j < ncomp; j++) {
+        int node = elem_nodes[ncomp * e + j];
         node_to_elems[node].push_back(e);
       }
     }
@@ -168,21 +169,25 @@ class OmpGroupBackend {
     }
 
     // Step 4: Set up the elements by color
-    std::vector<int> ptr(max_color + 1, 0);
-    color_count.resize(max_color, 0);
-
+    elem_ptr.resize(max_color + 1, 0);
     for (int e = 0; e < nelems; e++) {
-      color_count[e]++;
+      elem_ptr[elem_color[e] + 1]++;
     }
 
     for (int i = 0; i < max_color; i++) {
-      ptr[i + 1] = ptr[i] + color_count[i];
+      elem_ptr[i + 1] += elem_ptr[i];
     }
 
     for (int e = 0; e < nelems; e++) {
       elem_by_color[ptr[elem_color[e]]] = e;
       ptr[elem_color[e]]++;
     }
+
+    // Reset the pointer
+    for (int i = max_color - 1; i >= 0; i--) {
+      elem_ptr[i + 1] = elem_ptr[i];
+    }
+    elem_ptr[0] = 0;
   }
 
   T lagrangian_kernel(const IndexLayout<ndata> &data_layout,
@@ -209,11 +214,12 @@ class OmpGroupBackend {
     Data data;
     Input input, gradient;
 
-    for (int i = 0, j = 0; j < max_color; j++) {
-      int end = i + colour_count[i];
+    for (int j = 0; j < max_color; j++) {
+      int start = elem_ptr[j];
+      int end = elem_ptr[j + 1];
 #pragma omp parallel for
-      for (; i < end; i++) {
-        int elem = elems_by_color[i];
+      for (int i = start; i < end; i++) {
+        int elem = elem_by_color[i];
         data_layout.get_values(elem, data_vec, data);
         gradient.zero();
         layout.get_values(elem, vec, input);
@@ -231,11 +237,12 @@ class OmpGroupBackend {
     Data data;
     Input input, gradient, direction, result;
 
-    for (int i = 0, j = 0; j < max_color; j++) {
-      int end = i + colour_count[i];
+    for (int j = 0; j < max_color; j++) {
+      int start = elem_ptr[j];
+      int end = elem_ptr[j + 1];
 #pragma omp parallel for
-      for (; i < end; i++) {
-        int elem = elems_by_color[i];
+      for (int i = start; i < end; i++) {
+        int elem = elem_by_color[i];
         data_layout.get_values(elem, data_vec, data);
         gradient.zero();
         result.zero();
@@ -254,11 +261,12 @@ class OmpGroupBackend {
     Data data;
     Input input, gradient, direction, result[ncomp];
 
-    for (int i = 0, j = 0; j < max_color; j++) {
-      int end = i + colour_count[i];
+    for (int j = 0; j < max_color; j++) {
+      int start = elem_ptr[j];
+      int end = elem_ptr[j + 1];
 #pragma omp parallel for
-      for (; i < end; i++) {
-        int elem = elems_by_color[i];
+      for (int i = start; i < end; i++) {
+        int elem = elem_by_color[i];
         data_layout.get_values(elem, data_vec, data);
         int index[ncomp];
         layout.get_indices(elem, index);
