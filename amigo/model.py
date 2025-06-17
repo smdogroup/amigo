@@ -2,7 +2,13 @@ import numpy as np
 import ast
 import sys
 import importlib
-from .amigo import VectorInt, OptimizationProblem, AliasTracker, AMIGO_INCLUDE_PATH, A2D_INCLUDE_PATH
+from .amigo import (
+    VectorInt,
+    OptimizationProblem,
+    AliasTracker,
+    AMIGO_INCLUDE_PATH,
+    A2D_INCLUDE_PATH,
+)
 from .component import Component
 
 if sys.version_info < (3, 9):
