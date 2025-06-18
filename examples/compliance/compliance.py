@@ -365,7 +365,7 @@ for n in range(4):
     # Link the filtered density field
     model.link(name + ".rho", "src.rho", tgt_indices=conn)
 
-for n in range(4):
+for n in range(0):
     topo = mass_factory(n)
     name = f"mass{n}"
 

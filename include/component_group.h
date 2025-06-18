@@ -111,11 +111,11 @@ class OmpGroupBackend {
       : num_colors(0), elem_per_color(nullptr) {
     int length, ncomps;
     const int *array;
+    layout.get_data(&length, &ncomps, &array);
 
     // Create a coloring for the layout
     int *elem_by_color_ptr;
     int *elem_by_color;
-    layout.get_data(&length, &ncomps, &array);
     OrderingUtils::color_elements(length, ncomp, array, &num_colors,
                                   &elem_by_color_ptr, &elem_by_color);
 
@@ -130,6 +130,41 @@ class OmpGroupBackend {
 
     delete[] elem_by_color_ptr;
     delete[] elem_by_color;
+
+    // Check the coloring
+    int max_node = 0;
+    for (int i = 0; i < length * ncomps; i++) {
+      if (array[i] > max_node) {
+        max_node = array[i];
+      }
+    }
+    max_node++;
+    // Set the values
+    int *temp = new int[max_node];
+
+    int end = 0;
+    for (int j = 0; j < num_colors; j++) {
+      int start = end;
+      end = start + elem_per_color[j];
+
+      std::fill(temp, temp + max_node, 0);
+      for (int elem = start; elem < end; elem++) {
+        int indices[ncomp];
+        layout.get_indices(elem, indices);
+
+        for (int k = 0; k < ncomp; k++) {
+          temp[indices[k]] += 1;
+        }
+      }
+
+      for (int k = 0; k < max_node; k++) {
+        if (temp[k] > 1) {
+          std::cout << "Error with coloring for node " << k << std::endl;
+        }
+      }
+    }
+
+    delete[] temp;
   }
   ~OmpGroupBackend() { delete[] elem_per_color; }
 
@@ -154,16 +189,15 @@ class OmpGroupBackend {
                            const IndexLayout<ncomp> &layout,
                            const Vector<T> &data_vec, const Vector<T> &vec,
                            Vector<T> &res) const {
-    Data data;
-    Input input, gradient;
-
     int end = 0;
     for (int j = 0; j < num_colors; j++) {
       int start = end;
-      int end = start + elem_per_color[j];
+      end = start + elem_per_color[j];
 #pragma omp parallel for
       for (int elem = start; elem < end; elem++) {
-        int elem = elem_by_color[i];
+        Data data;
+        Input input, gradient;
+
         data_layout.get_values(elem, data_vec, data);
         gradient.zero();
         layout.get_values(elem, vec, input);
@@ -178,15 +212,15 @@ class OmpGroupBackend {
                                   const Vector<T> &data_vec,
                                   const Vector<T> &vec, const Vector<T> &dir,
                                   Vector<T> &res) const {
-    Data data;
-    Input input, gradient, direction, result;
-
     int end = 0;
     for (int j = 0; j < num_colors; j++) {
       int start = end;
-      int end = start + elem_per_color[j];
+      end = start + elem_per_color[j];
 #pragma omp parallel for
       for (int elem = start; elem < end; elem++) {
+        Data data;
+        Input input, gradient, direction, result;
+
         data_layout.get_values(elem, data_vec, data);
         gradient.zero();
         result.zero();
@@ -202,15 +236,15 @@ class OmpGroupBackend {
                           const IndexLayout<ncomp> &layout,
                           const Vector<T> &data_vec, const Vector<T> &vec,
                           CSRMat<T> &jac) const {
-    Data data;
-    Input input, gradient, direction, result;
-
     int end = 0;
     for (int j = 0; j < num_colors; j++) {
       int start = end;
-      int end = start + elem_per_color[j];
+      end = start + elem_per_color[j];
 #pragma omp parallel for
       for (int elem = start; elem < end; elem++) {
+        Data data;
+        Input input, gradient, direction, result;
+
         data_layout.get_values(elem, data_vec, data);
         int index[ncomp];
         layout.get_indices(elem, index);
