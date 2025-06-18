@@ -4,13 +4,48 @@
 #include <algorithm>
 
 #ifdef AMIGO_USE_METIS
+extern "C" {
 #include "metis.h"
+}
 #endif
 
 namespace amigo {
 
 class OrderingUtils {
  public:
+  /**
+   * @brief Compute a nested disection ordering.
+   *
+   * Note that the CSR structure must not include the diagonal element (compute
+   * with include_diagonal = false).
+   *
+   * new_var = iperm[old_var]
+   * perm[new_var] = old_var
+   *
+   * Note that for a variable k, these arrays satisfy iperm[perm[k]] = k
+   */
+  static void nested_disection(int nrows, int ncols, int *rowp, int *cols,
+                               int **perm_, int **iperm_) {
+    int *perm = new int[nrows];
+    int *iperm = new int[nrows];
+#ifdef AMIGO_USE_METIS
+    // Set the default options in METIS
+    int options[METIS_NOPTIONS];
+    METIS_SetDefaultOptions(options);
+
+    // Use 0-based numbering
+    options[METIS_OPTION_NUMBERING] = 0;
+    METIS_NodeND(&nrows, rowp, cols, NULL, options, perm, iperm);
+#else
+    for (int i = 0; i < nrows; i++) {
+      perm[i] = i;
+      iperm[i] = i;
+    }
+#endif
+    *perm_ = perm;
+    *iperm_ = iperm;
+  }
+
   /**
    * @brief Compute the CSR data based on the element -> node information
    *

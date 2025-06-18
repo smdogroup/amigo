@@ -88,11 +88,95 @@ void bind_vector(py::module_ &m, const std::string &name) {
            });
 }
 
+py::array_t<int> reorder_model(std::vector<py::array_t<int>> arrays) {
+  std::vector<int> intervals(arrays.size() + 1);
+  intervals[0] = 0;
+
+  int max_node = 0;
+
+  // Check the dimension of the arrays
+  ssize_t max_columns = 0;
+  for (size_t i = 0; i < arrays.size(); i++) {
+    const auto &arr = arrays[i];
+    if (arr.ndim() != 2) {
+      throw std::runtime_error("Each input array must be 2D");
+    }
+
+    auto r = arr.unchecked<2>();
+    intervals[i + 1] = intervals[i] + r.shape(0);
+    int ncols = r.shape(1);
+
+    if (ncols > max_columns) {
+      max_columns = ncols;
+    }
+
+    for (int i = 0; i < r.shape(0); i++) {
+      for (int j = 0; j < r.shape(1); j++) {
+        if (r(i, j) > max_node) {
+          max_node = r(i, j);
+        }
+      }
+    }
+  }
+  max_node++;
+
+  int nrows = max_node, ncols = max_node;
+  int nelems = intervals[arrays.size()];
+
+  std::vector<int> columns(max_columns);
+
+  auto element_nodes = [&](int element, const int **ptr) {
+    // upper_bound finds the first index i such that intervals[i] >
+    // element
+    auto it = std::upper_bound(intervals.begin(), intervals.end(), element);
+
+    // Decrement to get the interval where element fits: intervals[idx]
+    // <= element < intervals[idx+1]
+    int idx = static_cast<int>(it - intervals.begin()) - 1;
+
+    int elem = element - intervals[idx];
+
+    auto r = arrays[idx].unchecked<2>();
+    int ncols = r.shape(1);
+    for (int j = 0; j < ncols; j++) {
+      columns[j] = r(elem, j);
+    }
+
+    *ptr = columns.data();
+    return ncols;
+  };
+
+  // Make a CSR structure
+  bool include_diagonal = false;
+  bool sort_columns = true;
+
+  int *rowp, *cols;
+  amigo::OrderingUtils::create_csr_from_elements(
+      nrows, ncols, nelems, element_nodes, include_diagonal, sort_columns,
+      &rowp, &cols);
+
+  // Compute the reordering
+  int *perm, *iperm;
+  amigo::OrderingUtils::nested_disection(nrows, ncols, rowp, cols, &perm,
+                                         &iperm);
+
+  delete[] rowp;
+  delete[] cols;
+  delete[] perm;
+
+  auto pyiperm = py::array_t<int>({nrows}, {sizeof(int)}, iperm);
+  delete[] iperm;
+
+  return pyiperm;
+}
+
 PYBIND11_MODULE(amigo, mod) {
   mod.doc() = "Amigo: A friendly library for MDO on GPUs";
 
   mod.attr("A2D_INCLUDE_PATH") = A2D_INCLUDE_PATH;
   mod.attr("AMIGO_INCLUDE_PATH") = AMIGO_INCLUDE_PATH;
+
+  mod.def("reorder_model", &reorder_model);
 
   py::class_<amigo::CSRMat<double>, std::shared_ptr<amigo::CSRMat<double>>>(
       mod, "CSRMat")

@@ -46,13 +46,15 @@ def get_extensions():
         a2d_include = os.path.join(home, "git", "a2d", "include")
         amigo_include = os.path.join(home, "git", "amigo", "include")
 
-    # metis_include = os.path.join(
-    #     os.environ.get("HOME"), "git", "tacs", "extern", "metis", "include"
-    # )
-    # lib_dirs.append(
-    #     os.path.join(os.environ.get("HOME"), "git", "tacs", "extern", "metis", "lib")
-    # )
-    # libs.append("metis")
+    inc_dirs += [
+        os.path.join(
+            os.environ.get("HOME"), "git", "tacs", "extern", "metis", "include"
+        )
+    ]
+    lib_dirs.append(
+        os.path.join(os.environ.get("HOME"), "git", "tacs", "extern", "metis", "lib")
+    )
+    libs.append("metis")
 
     # Escape backslashes for Windows paths in C++ string literals
     a2d_include_escaped = a2d_include.replace("\\", "\\\\")
@@ -83,6 +85,8 @@ def get_extensions():
         compile_args += ["-fopenmp"]
         link_args += ["-fopenmp"]
         define_macros += [("AMIGO_USE_OPENMP", "1")]
+
+    define_macros += [("AMIGO_USE_METIS", "1")]
 
     ext_modules = [
         Extension(

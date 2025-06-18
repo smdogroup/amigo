@@ -404,7 +404,7 @@ if args.build:
     )
 
 start = time.perf_counter()
-model.initialize()
+model.initialize(reorder=True)
 end = time.perf_counter()
 print(f"Initialization time:        {end - start:.6f} seconds")
 print(f"Num variables:              {model.num_variables}")
