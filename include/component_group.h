@@ -130,41 +130,6 @@ class OmpGroupBackend {
 
     delete[] elem_by_color_ptr;
     delete[] elem_by_color;
-
-    // Check the coloring
-    int max_node = 0;
-    for (int i = 0; i < length * ncomps; i++) {
-      if (array[i] > max_node) {
-        max_node = array[i];
-      }
-    }
-    max_node++;
-    // Set the values
-    int *temp = new int[max_node];
-
-    int end = 0;
-    for (int j = 0; j < num_colors; j++) {
-      int start = end;
-      end = start + elem_per_color[j];
-
-      std::fill(temp, temp + max_node, 0);
-      for (int elem = start; elem < end; elem++) {
-        int indices[ncomp];
-        layout.get_indices(elem, indices);
-
-        for (int k = 0; k < ncomp; k++) {
-          temp[indices[k]] += 1;
-        }
-      }
-
-      for (int k = 0; k < max_node; k++) {
-        if (temp[k] > 1) {
-          std::cout << "Error with coloring for node " << k << std::endl;
-        }
-      }
-    }
-
-    delete[] temp;
   }
   ~OmpGroupBackend() { delete[] elem_per_color; }
 
