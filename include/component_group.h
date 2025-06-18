@@ -136,13 +136,13 @@ class OmpGroupBackend {
   T lagrangian_kernel(const IndexLayout<ndata> &data_layout,
                       const IndexLayout<ncomp> &layout,
                       const Vector<T> &data_vec, const Vector<T> &vec) const {
-    Data data;
-    Input input;
     T value = 0.0;
     int length = layout.get_length();
 
 #pragma omp parallel for reduction(+ : value)
     for (int i = 0; i < length; i++) {
+      Data data;
+      Input input;
       data_layout.get_values(i, data_vec, data);
       layout.get_values(i, vec, input);
       value += Component::lagrange(data, input);
