@@ -108,7 +108,7 @@ class OmpGroupBackend {
 
   OmpGroupBackend(const IndexLayout<ndata> &data_layout,
                   const IndexLayout<ncomp> &layout)
-      : elem_by_color(layout.get_length()) {
+      : num_colors(0), elem_by_color_ptr(nullptr), elem_by_color(nullptr) {
     int length, ncomps;
     const int *array;
     layout.get_data(&length, &ncomps, &array);
@@ -180,7 +180,7 @@ class OmpGroupBackend {
           }
         }
       }
-      elem_to_elem_ptr[e + 1] = count;
+      elem_to_elem_ptr[i + 1] = count;
     }
 
     for (int i = 0; i < nelems; i++) {
@@ -277,7 +277,7 @@ class OmpGroupBackend {
 
     for (int e = 0; e < nelems; e++) {
       elem_by_color[elem_by_color_ptr[elem_colors[e]]] = e;
-      elem_by_color_ptr[elem_color[e]]++;
+      elem_by_color_ptr[elem_colors[e]]++;
     }
 
     // Reset the pointer
