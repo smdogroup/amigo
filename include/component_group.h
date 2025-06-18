@@ -5,6 +5,7 @@
 #include "component_group_base.h"
 #include "csr_matrix.h"
 #include "layout.h"
+#include "ordering_utils.h"
 #include "vector.h"
 
 namespace amigo {
@@ -106,193 +107,31 @@ class OmpGroupBackend {
   using Input = typename Component::Input;
   using Data = typename Component::Data;
 
-  OmpGroupBackend(const IndexLayout<ndata> &data_layout,
-                  const IndexLayout<ncomp> &layout)
-      : num_colors(0), elem_by_color_ptr(nullptr), elem_by_color(nullptr) {
+  OmpGroupBackend(IndexLayout<ndata> &data_layout, IndexLayout<ncomp> &layout)
+      : num_colors(0), elem_per_color(nullptr) {
     int length, ncomps;
     const int *array;
+
+    // Create a coloring for the layout
+    int *elem_by_color_ptr;
+    int *elem_by_color;
     layout.get_data(&length, &ncomps, &array);
-    color_elements(length, array);
-  }
-  ~OmpGroupBackend() {
+    OrderingUtils::color_elements(length, ncomp, array, &num_colors,
+                                  &elem_by_color_ptr, &elem_by_color);
+
+    // Re-order the data and the variable layouts
+    data_layout.reorder(elem_by_color);
+    layout.reorder(elem_by_color);
+
+    elem_per_color = new int[num_colors];
+    for (int i = 0; i < num_colors; i++) {
+      elem_per_color[i] = elem_by_color_ptr[i + 1] - elem_by_color_ptr[i];
+    }
+
     delete[] elem_by_color_ptr;
     delete[] elem_by_color;
   }
-
-  void build_element_to_element(int nelems, const int *elem_nodes,
-                                int **elem_to_elem_ptr_, int **elem_to_elem_) {
-    int max_node = 0;
-    for (int i = 0; i < nelems * ncomp; i++) {
-      if (elem_nodes[i] > max_node) {
-        max_node = elem_nodes[i];
-      }
-    }
-    max_node++;
-
-    // Create a pointer from the nodes back to the elements
-    int *node_to_elem_ptr = new int[max_node + 1];
-    std::fill(node_to_elem_ptr, node_to_elem_ptr + max_node + 1, 0);
-
-    for (int i = 0; i < nelems * ncomp; i++) {
-      node_to_elem_ptr[elem_nodes[i] + 1]++;
-    }
-    for (int i = 0; i < max_node; i++) {
-      node_to_elem_ptr[i + 1] += node_to_elem_ptr[i];
-    }
-
-    int *node_to_elem = new int[nelems * ncomp];
-
-    // Fill in the element numbers
-    for (int i = 0; i < nelems; i++) {
-      for (int j = 0; j < ncomp; j++) {
-        int node = elem_nodes[ncomp * i + j];
-        node_to_elem[node_to_elem_ptr[node]] = i;
-        node_to_elem_ptr[node]++;
-      }
-    }
-
-    // Fix the now broken node_to_elem_ptr array
-    for (int i = max_node - 1; i >= 0; i--) {
-      node_to_elem_ptr[i + 1] = node_to_elem_ptr[i];
-    }
-    node_to_elem_ptr[0] = 0;
-
-    // Compute the element -> element data structure
-    int *elem_flags = new int[nelems];
-    std::fill(elem_flags, elem_flags + nelems, -1);
-
-    int *elem_to_elem_ptr = new int[nelems + 1];
-    elem_to_elem_ptr[0] = 0;
-    for (int i = 0; i < nelems; i++) {
-      int count = 0;
-
-      for (int j = 0; j < ncomp; j++) {
-        int node = elem_nodes[ncomp * i + j];
-
-        // Find the adjacent elements
-        int start = node_to_elem_ptr[node];
-        int end = node_to_elem_ptr[node + 1];
-        for (int k = start; k < end; k++) {
-          int e = node_to_elem[k];
-
-          if (e != i && elem_flags[e] != i) {
-            count++;
-            elem_flags[e] = i;
-          }
-        }
-      }
-      elem_to_elem_ptr[i + 1] = count;
-    }
-
-    for (int i = 0; i < nelems; i++) {
-      elem_to_elem_ptr[i + 1] += elem_to_elem_ptr[i];
-    }
-
-    std::fill(elem_flags, elem_flags + nelems, -1);
-    int *elem_to_elem = new int[elem_to_elem_ptr[nelems]];
-    for (int i = 0; i < nelems; i++) {
-      int count = 0;
-
-      for (int j = 0; j < ncomp; j++) {
-        int node = elem_nodes[ncomp * i + j];
-
-        // Find the adjacent elements
-        int start = node_to_elem_ptr[node];
-        int end = node_to_elem_ptr[node + 1];
-        for (int k = start; k < end; k++) {
-          int e = node_to_elem[k];
-
-          if (e != i && elem_flags[e] != i) {
-            elem_to_elem[elem_to_elem_ptr[i] + count] = e;
-            count++;
-            elem_flags[e] = i;
-          }
-        }
-      }
-    }
-
-    delete[] node_to_elem;
-    delete[] node_to_elem_ptr;
-    delete[] elem_flags;
-
-    *elem_to_elem_ptr_ = elem_to_elem_ptr;
-    *elem_to_elem_ = elem_to_elem;
-  }
-
-  // Input:
-  // elem_nodes[e] = list of global node ids for element e
-  // Output:
-  // elem_color[e] = color assigned to element e
-  void color_elements(int nelems, const int *elem_nodes) {
-    int *elem_to_elem_ptr, *elem_to_elem;
-    build_element_to_element(nelems, elem_nodes, &elem_to_elem_ptr,
-                             &elem_to_elem);
-
-    // Greedy coloring
-    int *elem_colors = new int[nelems];
-    std::fill(elem_colors, elem_colors + nelems, -1);
-
-    // Keep track of the number of colors
-    num_colors = 0;
-
-    int *flags = new int[nelems];
-    std::fill(flags, flags + nelems, -1);
-
-    for (int e = 0; e < nelems; e++) {
-      int start = elem_to_elem_ptr[e];
-      int end = elem_to_elem_ptr[e + 1];
-      for (int k = start; k < end; k++) {
-        int neigh = elem_to_elem[k];
-        int c = elem_colors[neigh];
-
-        if (c >= 0) {
-          flags[c] = e;
-        }
-      }
-
-      // Find smallest non-conflicting color if any
-      int found = false;
-      for (int k = 0; k < num_colors; k++) {
-        if (flags[k] != e) {
-          elem_colors[e] = k;
-          found = true;
-          break;
-        }
-      }
-
-      // No color was found, create a new color
-      if (!found) {
-        elem_colors[e] = num_colors;
-        num_colors++;
-      }
-    }
-
-    // Set up the elements by color
-    elem_by_color = new int[nelems];
-    elem_by_color_ptr = new int[num_colors + 1];
-    std::fill(elem_by_color_ptr, elem_by_color_ptr + num_colors + 1, 0);
-    for (int e = 0; e < nelems; e++) {
-      elem_by_color_ptr[elem_colors[e] + 1]++;
-    }
-
-    for (int i = 0; i < num_colors; i++) {
-      elem_by_color_ptr[i + 1] += elem_by_color_ptr[i];
-    }
-
-    for (int e = 0; e < nelems; e++) {
-      elem_by_color[elem_by_color_ptr[elem_colors[e]]] = e;
-      elem_by_color_ptr[elem_colors[e]]++;
-    }
-
-    // Reset the pointer
-    for (int i = num_colors - 1; i >= 0; i--) {
-      elem_by_color_ptr[i + 1] = elem_by_color_ptr[i];
-    }
-    elem_by_color_ptr[0] = 0;
-
-    delete[] elem_colors;
-    delete[] flags;
-  }
+  ~OmpGroupBackend() { delete[] elem_per_color; }
 
   T lagrangian_kernel(const IndexLayout<ndata> &data_layout,
                       const IndexLayout<ncomp> &layout,
@@ -318,11 +157,12 @@ class OmpGroupBackend {
     Data data;
     Input input, gradient;
 
+    int end = 0;
     for (int j = 0; j < num_colors; j++) {
-      int start = elem_by_color_ptr[j];
-      int end = elem_by_color_ptr[j + 1];
+      int start = end;
+      int end = start + elem_per_color[j];
 #pragma omp parallel for
-      for (int i = start; i < end; i++) {
+      for (int elem = start; elem < end; elem++) {
         int elem = elem_by_color[i];
         data_layout.get_values(elem, data_vec, data);
         gradient.zero();
@@ -341,12 +181,12 @@ class OmpGroupBackend {
     Data data;
     Input input, gradient, direction, result;
 
+    int end = 0;
     for (int j = 0; j < num_colors; j++) {
-      int start = elem_by_color_ptr[j];
-      int end = elem_by_color_ptr[j + 1];
+      int start = end;
+      int end = start + elem_per_color[j];
 #pragma omp parallel for
-      for (int i = start; i < end; i++) {
-        int elem = elem_by_color[i];
+      for (int elem = start; elem < end; elem++) {
         data_layout.get_values(elem, data_vec, data);
         gradient.zero();
         result.zero();
@@ -365,12 +205,12 @@ class OmpGroupBackend {
     Data data;
     Input input, gradient, direction, result;
 
+    int end = 0;
     for (int j = 0; j < num_colors; j++) {
-      int start = elem_by_color_ptr[j];
-      int end = elem_by_color_ptr[j + 1];
+      int start = end;
+      int end = start + elem_per_color[j];
 #pragma omp parallel for
-      for (int i = start; i < end; i++) {
-        int elem = elem_by_color[i];
+      for (int elem = start; elem < end; elem++) {
         data_layout.get_values(elem, data_vec, data);
         int index[ncomp];
         layout.get_indices(elem, index);
@@ -393,13 +233,56 @@ class OmpGroupBackend {
 
  private:
   int num_colors;
-  int *elem_by_color_ptr;
-  int *elem_by_color;
+  int *elem_per_color;
 };
 
 template <typename T, class Component>
 using DefaultGroupBackend = OmpGroupBackend<T, Component>;
 #elif defined(AMIGO_USE_CUDA)
+
+template <typename T, class Component>
+AMIGO_KERNEL T lagrange_kernel() {}
+
+template <typename T, class Component>
+AMIGO_KERNEL void add_gradient_kernel() {}
+
+template <typename T, class Component>
+AMIGO_KERNEL void add_hessian_product_kernel() {}
+
+template <typename T, class Component>
+AMIGO_KERNEL void add_hessian_kernel() {}
+
+template <typename T, class Component>
+class CudaGroupBackend {
+ public:
+  static constexpr int ncomp = Component::ncomp;
+  static constexpr int ndata = Component::ndata;
+  using Input = typename Component::Input;
+  using Data = typename Component::Data;
+
+  CudaGroupBackend(IndexLayout<ndata> &data_layout,
+                   IndexLayout<ncomp> &layout) {
+    data_layout.copy_host_to_device();
+    layout.copy_host_to_device();
+  }
+  T lagrangian_kernel(const IndexLayout<ndata> &data_layout,
+                      const IndexLayout<ncomp> &layout,
+                      const Vector<T> &data_vec, const Vector<T> &vec) const {}
+
+  void add_gradient_kernel(const IndexLayout<ndata> &data_layout,
+                           const IndexLayout<ncomp> &layout,
+                           const Vector<T> &data_vec, const Vector<T> &vec,
+                           Vector<T> &res) const {}
+  void add_hessian_product_kernel(const IndexLayout<ndata> &data_layout,
+                                  const IndexLayout<ncomp> &layout,
+                                  const Vector<T> &data_vec,
+                                  const Vector<T> &vec, const Vector<T> &dir,
+                                  Vector<T> &res) const {}
+  void add_hessian_kernel(const IndexLayout<ndata> &data_layout,
+                          const IndexLayout<ncomp> &layout,
+                          const Vector<T> &data_vec, const Vector<T> &vec,
+                          CSRMat<T> &jac) const {}
+};
 
 #else  // Default to serial implementation
 template <typename T, class Component>

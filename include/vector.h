@@ -9,10 +9,10 @@
 namespace amigo {
 
 template <typename T>
-class EmptyBackend {
+class SerialVecBackend {
  public:
-  EmptyBackend() {}
-  ~EmptyBackend() {}
+  SerialVecBackend() {}
+  ~SerialVecBackend() {}
 
   void allocate(int size_) {}
   void copy_to_host(T* host_dest) {}
@@ -23,11 +23,6 @@ class EmptyBackend {
   // Kernel functions
   void axpy_kernel(T alpha, const T* x_device_ptr) {}
 };
-
-// class GpuLaunchParams {
-// public:
-// static constexpr ;
-// };
 
 #ifdef AMIGO_USE_CUDA
 
@@ -107,15 +102,15 @@ class CudaBackend {
 };
 
 template <typename T>
-using DefaultBackend = CudaBackend<T>;
+using DefaultVecBackend = CudaBackend<T>;
 #else
 template <typename T>
-using DefaultBackend = EmptyBackend<T>;
+using DefaultVecBackend = SerialVecBackend<T>;
 #endif  // AMIGO_USE_CUDA
 
 enum class VectorLocation { HOST_ONLY, DEVICE_ONLY, HOST_AND_DEVICE };
 
-template <typename T, class Backend = DefaultBackend<T>>
+template <typename T, class Backend = DefaultVecBackend<T>>
 class Vector {
  public:
   Vector(int size, VectorLocation vtype = VectorLocation::HOST_AND_DEVICE)
