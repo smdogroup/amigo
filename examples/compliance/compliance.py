@@ -63,13 +63,15 @@ def compute_shape_derivs(xi, eta, X, Y, vars):
     return N, N_xi, N_ea
 
 
-def filter_factory(pt: int):
-    qpts = [-1.0 / np.sqrt(3.0), 1.0 / np.sqrt(3.0)]
+class Helmholtz(am.Component):
+    def __init__(self):
+        super().__init__()
 
-    def init_func(self):
-        am.Component.__init__(self)
-        self.xi = qpts[pt % 2]
-        self.eta = qpts[pt // 2]
+        # Add keyword arguments for the compute function
+        compute_args = []
+        for n in range(4):
+            compute_args.append({"n": n})
+        self.set_compute_args(compute_args)
 
         # The filter radius
         self.add_constant("r_filter", 0.1)
@@ -87,7 +89,11 @@ def filter_factory(pt: int):
 
         return
 
-    def compute(self):
+    def compute(self, n=None):
+        qpts = [-1.0 / np.sqrt(3.0), 1.0 / np.sqrt(3.0)]
+        xi = qpts[n % 2]
+        eta = qpts[n // 2]
+
         r = self.constants["r_filter"]
         x = self.inputs["x"]
         rho = self.inputs["rho"]
@@ -95,7 +101,7 @@ def filter_factory(pt: int):
         X = self.data["x_coord"]
         Y = self.data["y_coord"]
 
-        N, N_xi, N_ea = compute_shape_derivs(self.xi, self.eta, X, Y, self.vars)
+        N, N_xi, N_ea = compute_shape_derivs(xi, eta, X, Y, self.vars)
 
         Nx = self.vars["Nx"]
         Ny = self.vars["Ny"]
@@ -121,19 +127,16 @@ def filter_factory(pt: int):
 
         return
 
-    class_name = f"Filter{pt}"
-    return type(
-        class_name, (am.Component,), {"__init__": init_func, "compute": compute}
-    )()
 
+class Topology(am.Component):
+    def __init__(self):
+        super().__init__()
 
-def topology_factory(pt: int):
-    qpts = [-1.0 / np.sqrt(3.0), 1.0 / np.sqrt(3.0)]
-
-    def init_func(self):
-        am.Component.__init__(self)
-        self.xi = qpts[pt % 2]
-        self.eta = qpts[pt // 2]
+        # Add keyword arguments for the compute function
+        compute_args = []
+        for n in range(4):
+            compute_args.append({"n": n})
+        self.set_compute_args(compute_args)
 
         # The filter radius
         self.add_constant("p", 3.0)
@@ -156,7 +159,11 @@ def topology_factory(pt: int):
 
         return
 
-    def compute(self):
+    def compute(self, n=None):
+        qpts = [-1.0 / np.sqrt(3.0), 1.0 / np.sqrt(3.0)]
+        xi = qpts[n % 2]
+        eta = qpts[n // 2]
+
         E = self.constants["E"]
         nu = self.constants["nu"]
         kappa = self.constants["kappa"]
@@ -170,7 +177,7 @@ def topology_factory(pt: int):
         # Extract the input data
         X = self.data["x_coord"]
         Y = self.data["y_coord"]
-        compute_shape_derivs(self.xi, self.eta, X, Y, self.vars)
+        compute_shape_derivs(xi, eta, X, Y, self.vars)
 
         # Set the values of the derivatives of the shape functions
         Nx = self.vars["Nx"]
@@ -206,11 +213,6 @@ def topology_factory(pt: int):
         ]
 
         return
-
-    class_name = f"Topology{pt}"
-    return type(
-        class_name, (am.Component,), {"__init__": init_func, "compute": compute}
-    )()
 
 
 def mass_factory(pt: int):
@@ -324,69 +326,62 @@ for j in range(ny):
         conn[ny * i + j, 2] = nodes[i + 1, j + 1]
         conn[ny * i + j, 3] = nodes[i, j + 1]
 
-node_src = NodeSource()
 
 module_name = "compliance"
 model = am.Model(module_name)
 
+node_src = NodeSource()
 model.add_component("src", nnodes, node_src)
 
-for n in range(4):
-    fltr = filter_factory(n)
-    name = f"filter{n}"
+helmholtz = Helmholtz()
+model.add_component("helmholtz", nelems, helmholtz)
 
-    model.add_component(name, nelems, fltr)
+# Link the inputs and the outputs
+model.link("helmholtz.x_coord", "src.x_coord", tgt_indices=conn)
+model.link("helmholtz.y_coord", "src.y_coord", tgt_indices=conn)
+model.link("helmholtz.x", "src.x", tgt_indices=conn)
+model.link("helmholtz.rho", "src.rho", tgt_indices=conn)
+model.link("helmholtz.rho_res", "src.rho_res", tgt_indices=conn)
 
-    # Link the inputs and the outputs
-    model.link(name + ".x_coord", "src.x_coord", tgt_indices=conn)
-    model.link(name + ".y_coord", "src.y_coord", tgt_indices=conn)
+topo = Topology()
+model.add_component("topo", nelems, topo)
 
-    model.link(name + ".x", "src.x", tgt_indices=conn)
-    model.link(name + ".rho", "src.rho", tgt_indices=conn)
-    model.link(name + ".rho_res", "src.rho_res", tgt_indices=conn)
+# Link the data
+model.link("topo.x_coord", "src.x_coord", tgt_indices=conn)
+model.link("topo.y_coord", "src.y_coord", tgt_indices=conn)
 
-for n in range(4):
-    topo = topology_factory(n)
-    name = f"topo{n}"
+# Link the inputs and the outputs
+model.link("topo.u", "src.u", tgt_indices=conn)
+model.link("topo.v", "src.v", tgt_indices=conn)
 
-    model.add_component(name, nelems, topo)
+model.link("topo.u_res", "src.u_res", tgt_indices=conn)
+model.link("topo.v_res", "src.v_res", tgt_indices=conn)
 
-    # Link the data
-    model.link(name + ".x_coord", "src.x_coord", tgt_indices=conn)
-    model.link(name + ".y_coord", "src.y_coord", tgt_indices=conn)
+# Link the filtered density field
+model.link("topo.rho", "src.rho", tgt_indices=conn)
 
-    # Link the inputs and the outputs
-    model.link(name + ".u", "src.u", tgt_indices=conn)
-    model.link(name + ".v", "src.v", tgt_indices=conn)
+# for n in range(0):
+#     topo = mass_factory(n)
+#     name = f"mass{n}"
 
-    model.link(name + ".u_res", "src.u_res", tgt_indices=conn)
-    model.link(name + ".v_res", "src.v_res", tgt_indices=conn)
+#     model.add_component(name, nelems, topo)
 
-    # Link the filtered density field
-    model.link(name + ".rho", "src.rho", tgt_indices=conn)
+#     # Link the data
+#     model.link(name + ".x_coord", "src.x_coord", tgt_indices=conn)
+#     model.link(name + ".y_coord", "src.y_coord", tgt_indices=conn)
 
-for n in range(0):
-    topo = mass_factory(n)
-    name = f"mass{n}"
+#     # Link the filtered density field
+#     model.link(name + ".rho", "src.rho", tgt_indices=conn)
 
-    model.add_component(name, nelems, topo)
-
-    # Link the data
-    model.link(name + ".x_coord", "src.x_coord", tgt_indices=conn)
-    model.link(name + ".y_coord", "src.y_coord", tgt_indices=conn)
-
-    # Link the filtered density field
-    model.link(name + ".rho", "src.rho", tgt_indices=conn)
-
-    if n == 0:
-        model.link(
-            name + ".mass_con",
-            name + ".mass_con",
-            src_indices=np.zeros(nelems - 1, dtype=int),
-            tgt_indices=np.arange(1, nelems, dtype=int),
-        )
-    else:
-        model.link(name + ".mass_con", f"mass{n-1}.mass_con")
+#     if n == 0:
+#         model.link(
+#             name + ".mass_con",
+#             name + ".mass_con",
+#             src_indices=np.zeros(nelems - 1, dtype=int),
+#             tgt_indices=np.arange(1, nelems, dtype=int),
+#         )
+#     else:
+#         model.link(name + ".mass_con", f"mass{n-1}.mass_con")
 
 if args.build:
     model.generate_cpp()

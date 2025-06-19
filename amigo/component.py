@@ -315,6 +315,9 @@ class VarSet:
 
         return
 
+    def clear(self):
+        self.vars = {}
+
     def generate_cpp_types(self, template_name="T__"):
         return _generate_cpp_types(self.vars, template_name=template_name)
 
@@ -422,7 +425,9 @@ class OutputSet:
             self.name = name
             self.shape = _normalize_shape(shape)
             self.type = type
+            self.clear_expr()
 
+        def clear_expr(self):
             if self.shape is None:
                 self.expr = None
             else:
@@ -442,6 +447,11 @@ class OutputSet:
     def add(self, name, type=float, shape=None, label="output"):
         self.outputs[name] = self.OutputExpr(name, shape=shape, type=type)
         self.labels[name] = label
+        return
+
+    def clear(self):
+        for name in self.outputs:
+            self.outputs[name].clear_expr()
         return
 
     def __len__(self):
@@ -622,6 +632,10 @@ class ObjectiveSet:
         self.expr[name] = expr
         return
 
+    def clear(self):
+        for name in self.expr:
+            self.expr[name] = None
+
     def generate_cpp(self):
         for name in self.expr:
             rhs = self.expr[name].generate_cpp()
@@ -631,7 +645,10 @@ class ObjectiveSet:
 
 class Component:
     def __init__(self):
+        # Set the name - this will be the ComponentGroup name in C++
         self.name = self.__class__.__name__
+
+        # Set the input values
         self.constants = ConstantSet()
         self.data = InputSet()
         self.inputs = InputSet()
@@ -640,6 +657,22 @@ class Component:
         self.objective = ObjectiveSet()
         self.data = DataSet()
         self.empty = False
+
+        # Set the compute function arguments
+        self.compute_args = [{}]
+
+    def set_compute_args(self, compute_args):
+        if not isinstance(compute_args, list) or not all(
+            isinstance(item, dict) for item in compute_args
+        ):
+            raise TypeError(
+                "set_compute_args expects a list of dictionaries for keyword arguments"
+            )
+        if len(self.compute_args) == 0:
+            raise ValueError("Length of compute_args must be at least 1")
+
+        self.compute_args = compute_args
+        return
 
     def add_constant(self, name, value, type=float, label="const"):
         self.constants.add(name, value, type=type, label=label)
@@ -665,6 +698,12 @@ class Component:
         if (len(self.objective) == 0 and len(self.outputs) == 0) or self.empty:
             return True
         return False
+
+    def clear(self):
+        self.outputs.clear()
+        self.vars.clear()
+        self.objective.clear()
+        return
 
     def get_var_shapes(self):
         var_shapes = {}
@@ -725,134 +764,159 @@ class Component:
         Generate the code for a c++ implementation
         """
 
-        # Perform the computation to get the outputs as a function of the inputs
-        self.compute()
+        cpp = ""
 
-        # Create the class structure
-        cpp = "\n" + f"template<typename {template_name}> \n"
-        cpp += f"class {self.name} " + "{\n"
-        cpp += " public:\n"
+        for index, args in enumerate(self.compute_args):
+            # Re-initialize any variables or other arguments
+            self.clear()
 
-        # Add the const declarations
-        const_decl = self.constants.generate_cpp_const_decl()
-        for line in const_decl:
-            cpp += "  " + line + ";\n"
-
-        # Add the input statement
-        using = self._get_using_statement(name="input", template_name=template_name)
-        cpp += "  " + using + ";\n"
-        cpp += "  " + "static constexpr int ncomp = Input::ncomp" + ";\n"
-
-        if len(self.data) > 0:
-            using = self._get_using_statement(name="data", template_name=template_name)
-            cpp += "  " + using + ";\n"
-            cpp += "  " + "static constexpr int ndata = Data::ncomp" + ";\n"
-        else:
-            cpp += (
-                "  "
-                + f"using Data = typename A2D::VarTuple<{template_name}, {template_name}>;\n"
-            )
-            cpp += "  " + "static constexpr int ndata = 0;\n"
-
-        # Add the contributions for each of the functions
-        for mode in ["eval", "rev", "hprod"]:
-            pre = "AMIGO_HOST_DEVICE static"
-            if mode == "eval":
-                cpp += (
-                    "  "
-                    + f"{pre} {template_name} lagrange(Data& {data_name}, Input& {input_name})"
-                    + " {\n"
-                )
-            elif mode == "rev":
-                cpp += (
-                    "  "
-                    f"{pre} void gradient(Data& {data_name}, Input& {input_name}, Input& {grad_name})"
-                    + " {\n"
-                )
-            elif mode == "hprod":
-                cpp += (
-                    "  "
-                    f"{pre} void hessian(Data& {data_name}, Input& {input_name}, Input& {prod_name}, "
-                    f"Input& {grad_name}, Input& {hprod_name})" + " {\n"
-                )
-
-            data_decl = self.data.generate_cpp_input_decl(
-                template_name=template_name, data_name=data_name
-            )
-            for line in data_decl:
-                cpp += "    " + line + ";\n"
-
-            in_decl = self.inputs.generate_cpp_input_decl(
-                mode=mode,
-                template_name=template_name,
-                input_name=input_name,
-                grad_name=grad_name,
-                prod_name=prod_name,
-                hprod_name=hprod_name,
-            )
-            for line in in_decl:
-                cpp += "    " + line + ";\n"
-
-            offset = self.inputs.get_num_inputs()
-            out_decl = self.outputs.generate_cpp_input_decl(
-                mode=mode,
-                offset=offset,
-                template_name=template_name,
-                input_name=input_name,
-                grad_name=grad_name,
-                prod_name=prod_name,
-                hprod_name=hprod_name,
-            )
-            for line in out_decl:
-                cpp += "    " + line + ";\n"
-
-            var_decl = self.vars.generate_cpp_decl(
-                mode=mode, template_name=template_name
-            )
-            for line in var_decl:
-                cpp += "    " + line + ";\n"
-
-            out_decl = self.outputs.generate_cpp_decl(
-                mode=mode, template_name=template_name
-            )
-            for line in out_decl:
-                cpp += "    " + line + ";\n"
-
-            lines = self.vars.generate_passive_cpp()
-            for line in lines:
-                cpp += "    " + f"{line};\n"
-
-            obj_expr = self.objective.generate_cpp()
-            body = self.vars.generate_active_cpp(mode=mode)
-            body.extend(self.outputs.generate_cpp(mode=mode, obj_expr=obj_expr))
-
-            if mode == "eval":
-                for line in body:
-                    cpp += "    " + line + ";\n"
-                cpp += "    " + f"return {self.outputs.lagrangian_name};\n"
+            # Perform the computation to get the outputs as a function of the inputs
+            if len(args) > 0:
+                self.compute(**args)
             else:
-                cpp += "    " + f"auto {stack_name} = A2D::MakeStack(\n"
-                for index, line in enumerate(body):
-                    cpp += "      " + line
-                    if index == len(body) - 1:
-                        cpp += ");\n"
-                    else:
-                        cpp += ",\n"
+                self.compute()
 
-                cpp += "    " + f"{self.outputs.lagrangian_name}.bvalue() = 1.0;\n"
-                cpp += "    " + f"{stack_name}.reverse();\n"
-                if mode == "hprod":
-                    cpp += "    " + f"{stack_name}.hforward();\n"
-                    cpp += "    " + f"{stack_name}.hreverse();\n"
+            if len(self.compute_args) == 1:
+                class_name = self.name + "__"
+            else:
+                class_name = self.name + str(index) + "__"
 
-            cpp += "  }\n"
+            # Create the class structure
+            cpp += "\n" + f"template<typename {template_name}> \n"
+            cpp += f"class {class_name} " + "{\n"
+            cpp += " public:\n"
 
-        cpp += "};\n"
+            # Add the const declarations
+            const_decl = self.constants.generate_cpp_const_decl()
+            for line in const_decl:
+                cpp += "  " + line + ";\n"
+
+            # Add the input statement
+            using = self._get_using_statement(name="input", template_name=template_name)
+            cpp += "  " + using + ";\n"
+            cpp += "  " + "static constexpr int ncomp = Input::ncomp" + ";\n"
+
+            if len(self.data) > 0:
+                using = self._get_using_statement(
+                    name="data", template_name=template_name
+                )
+                cpp += "  " + using + ";\n"
+                cpp += "  " + "static constexpr int ndata = Data::ncomp" + ";\n"
+            else:
+                cpp += (
+                    "  "
+                    + f"using Data = typename A2D::VarTuple<{template_name}, {template_name}>;\n"
+                )
+                cpp += "  " + "static constexpr int ndata = 0;\n"
+
+            # Add the contributions for each of the functions
+            for mode in ["eval", "rev", "hprod"]:
+                pre = "AMIGO_HOST_DEVICE static"
+                if mode == "eval":
+                    cpp += (
+                        "  "
+                        + f"{pre} {template_name} lagrange(Data& {data_name}, Input& {input_name})"
+                        + " {\n"
+                    )
+                elif mode == "rev":
+                    cpp += (
+                        "  "
+                        f"{pre} void gradient(Data& {data_name}, Input& {input_name}, Input& {grad_name})"
+                        + " {\n"
+                    )
+                elif mode == "hprod":
+                    cpp += (
+                        "  "
+                        f"{pre} void hessian(Data& {data_name}, Input& {input_name}, Input& {prod_name}, "
+                        f"Input& {grad_name}, Input& {hprod_name})" + " {\n"
+                    )
+
+                data_decl = self.data.generate_cpp_input_decl(
+                    template_name=template_name, data_name=data_name
+                )
+                for line in data_decl:
+                    cpp += "    " + line + ";\n"
+
+                in_decl = self.inputs.generate_cpp_input_decl(
+                    mode=mode,
+                    template_name=template_name,
+                    input_name=input_name,
+                    grad_name=grad_name,
+                    prod_name=prod_name,
+                    hprod_name=hprod_name,
+                )
+                for line in in_decl:
+                    cpp += "    " + line + ";\n"
+
+                offset = self.inputs.get_num_inputs()
+                out_decl = self.outputs.generate_cpp_input_decl(
+                    mode=mode,
+                    offset=offset,
+                    template_name=template_name,
+                    input_name=input_name,
+                    grad_name=grad_name,
+                    prod_name=prod_name,
+                    hprod_name=hprod_name,
+                )
+                for line in out_decl:
+                    cpp += "    " + line + ";\n"
+
+                var_decl = self.vars.generate_cpp_decl(
+                    mode=mode, template_name=template_name
+                )
+                for line in var_decl:
+                    cpp += "    " + line + ";\n"
+
+                out_decl = self.outputs.generate_cpp_decl(
+                    mode=mode, template_name=template_name
+                )
+                for line in out_decl:
+                    cpp += "    " + line + ";\n"
+
+                lines = self.vars.generate_passive_cpp()
+                for line in lines:
+                    cpp += "    " + f"{line};\n"
+
+                obj_expr = self.objective.generate_cpp()
+                body = self.vars.generate_active_cpp(mode=mode)
+                body.extend(self.outputs.generate_cpp(mode=mode, obj_expr=obj_expr))
+
+                if mode == "eval":
+                    for line in body:
+                        cpp += "    " + line + ";\n"
+                    cpp += "    " + f"return {self.outputs.lagrangian_name};\n"
+                else:
+                    cpp += "    " + f"auto {stack_name} = A2D::MakeStack(\n"
+                    for index, line in enumerate(body):
+                        cpp += "      " + line
+                        if index == len(body) - 1:
+                            cpp += ");\n"
+                        else:
+                            cpp += ",\n"
+
+                    cpp += "    " + f"{self.outputs.lagrangian_name}.bvalue() = 1.0;\n"
+                    cpp += "    " + f"{stack_name}.reverse();\n"
+                    if mode == "hprod":
+                        cpp += "    " + f"{stack_name}.hforward();\n"
+                        cpp += "    " + f"{stack_name}.hreverse();\n"
+
+                cpp += "  }\n"
+
+            cpp += "};\n"
 
         return cpp
 
     def generate_pybind11(self, mod_ident="mod"):
-        cls = f"amigo::ComponentGroup<double, amigo::{self.name}<double>>"
+        # Collect all the group members together...
+        cls = f"amigo::ComponentGroup<double"
+        for index, args in enumerate(self.compute_args):
+            if len(self.compute_args) == 1:
+                class_name = self.name + "__"
+            else:
+                class_name = self.name + str(index) + "__"
+
+            cls += f", amigo::{class_name}<double>"
+        cls += ">"
 
         module_class_name = f'"{self.name}"'
 
