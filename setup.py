@@ -73,7 +73,7 @@ def get_extensions():
         vars = sysconfig.get_config_vars()
         vars["LDSHARED"] = vars["LDSHARED"].replace("-bundle", "-dynamiclib")
 
-    link_args = []
+    link_args = ["-lblas", "-llapack"]
     compile_args = []
     define_macros = []
     if sys.platform == "win32":

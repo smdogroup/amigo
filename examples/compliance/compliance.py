@@ -387,11 +387,11 @@ if args.build:
     model.generate_cpp()
 
     compile_args = []
-    link_args = []
+    link_args = ["-lblas", "-llapack"]
     define_macros = []
     if args.use_openmp:
         compile_args = ["-fopenmp"]
-        link_args = ["-fopenmp"]
+        link_args += ["-fopenmp"]
         define_macros = [("AMIGO_USE_OPENMP", "1")]
 
     model.build_module(

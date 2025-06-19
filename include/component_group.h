@@ -149,7 +149,7 @@ class SerialGroupBackend {
 
 #ifdef AMIGO_USE_OPENMP
 
-template <typename T, class Input, class Data, class Components...>
+template <typename T, class Input, class Data, class... Components>
 class OmpGroupBackend {
  public:
   static constexpr int ncomp = Input::ncomp;
