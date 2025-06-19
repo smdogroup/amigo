@@ -10,17 +10,22 @@
 
 namespace amigo {
 
-template <typename T, class Component>
+template <typename T, class Input, class Data, class... Components>
 class SerialGroupBackend {
  public:
-  static constexpr int ncomp = Component::ncomp;
-  static constexpr int ndata = Component::ndata;
-  using Input = typename Component::Input;
-  using Data = typename Component::Data;
+  static constexpr int ncomp = Input::ncomp;
+  static constexpr int ndata = Data::ncomp;
 
-  SerialGroupBackend(const IndexLayout<ndata> &data_layout,
-                     const IndexLayout<ncomp> &layout) {}
+  SerialGroupBackend(IndexLayout<ndata> &data_layout,
+                     IndexLayout<ncomp> &layout) {}
 
+  T lagrangian_kernel(const IndexLayout<ndata> &data_layout,
+                      const IndexLayout<ncomp> &layout,
+                      const Vector<T> &data_vec, const Vector<T> &vec) const {
+    return lagrangian_kernel<Components...>(data_layout, layout, data_vec, vec);
+  }
+
+  template <class Component, class... Remain>
   T lagrangian_kernel(const IndexLayout<ndata> &data_layout,
                       const IndexLayout<ncomp> &layout,
                       const Vector<T> &data_vec, const Vector<T> &vec) const {
@@ -34,9 +39,23 @@ class SerialGroupBackend {
       layout.get_values(i, vec, input);
       value += Component::lagrange(data, input);
     }
-    return value;
+
+    if constexpr (sizeof...(Remain) > 0) {
+      return value +
+             lagrangian_kernel<Remain...>(data_layout, layout, data_vec, vec);
+    } else {
+      return value;
+    }
   }
 
+  void add_gradient_kernel(const IndexLayout<ndata> &data_layout,
+                           const IndexLayout<ncomp> &layout,
+                           const Vector<T> &data_vec, const Vector<T> &vec,
+                           Vector<T> &res) const {
+    add_gradient_kernel<Components...>(data_layout, layout, data_vec, vec, res);
+  }
+
+  template <class Component, class... Remain>
   void add_gradient_kernel(const IndexLayout<ndata> &data_layout,
                            const IndexLayout<ncomp> &layout,
                            const Vector<T> &data_vec, const Vector<T> &vec,
@@ -50,8 +69,22 @@ class SerialGroupBackend {
       Component::gradient(data, input, gradient);
       layout.add_values(i, gradient, res);
     }
+
+    if constexpr (sizeof...(Remain) > 0) {
+      add_gradient_kernel<Remain...>(data_layout, layout, data_vec, vec, res);
+    }
   }
 
+  void add_hessian_product_kernel(const IndexLayout<ndata> &data_layout,
+                                  const IndexLayout<ncomp> &layout,
+                                  const Vector<T> &data_vec,
+                                  const Vector<T> &vec, const Vector<T> &dir,
+                                  Vector<T> &res) const {
+    add_hessian_product_kernel<Components...>(data_layout, layout, data_vec,
+                                              vec, dir, res);
+  }
+
+  template <class Component, class... Remain>
   void add_hessian_product_kernel(const IndexLayout<ndata> &data_layout,
                                   const IndexLayout<ncomp> &layout,
                                   const Vector<T> &data_vec,
@@ -68,8 +101,21 @@ class SerialGroupBackend {
       Component::hessian(data, input, direction, gradient, result);
       layout.add_values(i, result, res);
     }
+
+    if constexpr (sizeof...(Remain) > 0) {
+      add_hessian_product_kernel<Remain...>(data_layout, layout, data_vec, vec,
+                                            dir, res);
+    }
   }
 
+  void add_hessian_kernel(const IndexLayout<ndata> &data_layout,
+                          const IndexLayout<ncomp> &layout,
+                          const Vector<T> &data_vec, const Vector<T> &vec,
+                          CSRMat<T> &jac) const {
+    add_hessian_kernel<Components...>(data_layout, layout, data_vec, vec, jac);
+  }
+
+  template <class Component, class... Remain>
   void add_hessian_kernel(const IndexLayout<ndata> &data_layout,
                           const IndexLayout<ncomp> &layout,
                           const Vector<T> &data_vec, const Vector<T> &vec,
@@ -94,18 +140,20 @@ class SerialGroupBackend {
         jac.add_row(index[j], Component::ncomp, index, result);
       }
     }
+
+    if constexpr (sizeof...(Remain) > 0) {
+      add_hessian_kernel<Remain...>(data_layout, layout, data_vec, vec, jac);
+    }
   }
 };
 
 #ifdef AMIGO_USE_OPENMP
 
-template <typename T, class Component>
+template <typename T, class Input, class Data, class... Components>
 class OmpGroupBackend {
  public:
-  static constexpr int ncomp = Component::ncomp;
-  static constexpr int ndata = Component::ndata;
-  using Input = typename Component::Input;
-  using Data = typename Component::Data;
+  static constexpr int ncomp = Input::ncomp;
+  static constexpr int ndata = Data::ncomp;
 
   OmpGroupBackend(IndexLayout<ndata> &data_layout, IndexLayout<ncomp> &layout)
       : num_colors(0), elem_per_color(nullptr) {
@@ -136,6 +184,13 @@ class OmpGroupBackend {
   T lagrangian_kernel(const IndexLayout<ndata> &data_layout,
                       const IndexLayout<ncomp> &layout,
                       const Vector<T> &data_vec, const Vector<T> &vec) const {
+    return lagrangian_kernel<Components...>(data_layout, layout, data_vec, vec);
+  }
+
+  template <class Component, class... Remain>
+  T lagrangian_kernel(const IndexLayout<ndata> &data_layout,
+                      const IndexLayout<ncomp> &layout,
+                      const Vector<T> &data_vec, const Vector<T> &vec) const {
     T value = 0.0;
     int length = layout.get_length();
 
@@ -147,9 +202,23 @@ class OmpGroupBackend {
       layout.get_values(i, vec, input);
       value += Component::lagrange(data, input);
     }
-    return value;
+
+    if constexpr (sizeof...(Remain) > 0) {
+      return value +
+             lagrangian_kernel<Remain...>(data_layout, layout, data_vec, vec);
+    } else {
+      return value;
+    }
   }
 
+  void add_gradient_kernel(const IndexLayout<ndata> &data_layout,
+                           const IndexLayout<ncomp> &layout,
+                           const Vector<T> &data_vec, const Vector<T> &vec,
+                           Vector<T> &res) const {
+    add_gradient_kernel<Components...>(data_layout, layout, data_vec, vec, res);
+  }
+
+  template <class Component, class... Remain>
   void add_gradient_kernel(const IndexLayout<ndata> &data_layout,
                            const IndexLayout<ncomp> &layout,
                            const Vector<T> &data_vec, const Vector<T> &vec,
@@ -170,8 +239,22 @@ class OmpGroupBackend {
         layout.add_values(elem, gradient, res);
       }
     }
+
+    if constexpr (sizeof...(Remain) > 0) {
+      add_gradient_kernel<Remain...>(data_layout, layout, data_vec, vec, res);
+    }
   }
 
+  void add_hessian_product_kernel(const IndexLayout<ndata> &data_layout,
+                                  const IndexLayout<ncomp> &layout,
+                                  const Vector<T> &data_vec,
+                                  const Vector<T> &vec, const Vector<T> &dir,
+                                  Vector<T> &res) const {
+    add_hessian_product_kernel<Components...>(data_layout, layout, data_vec,
+                                              vec, dir, res);
+  }
+
+  template <class Component, class... Remain>
   void add_hessian_product_kernel(const IndexLayout<ndata> &data_layout,
                                   const IndexLayout<ncomp> &layout,
                                   const Vector<T> &data_vec,
@@ -195,8 +278,21 @@ class OmpGroupBackend {
         layout.add_values(elem, result, res);
       }
     }
+
+    if constexpr (sizeof...(Remain) > 0) {
+      add_hessian_product_kernel<Remain...>(data_layout, layout, data_vec, vec,
+                                            dir, res);
+    }
   }
 
+  void add_hessian_kernel(const IndexLayout<ndata> &data_layout,
+                          const IndexLayout<ncomp> &layout,
+                          const Vector<T> &data_vec, const Vector<T> &vec,
+                          CSRMat<T> &jac) const {
+    add_hessian_kernel<Components...>(data_layout, layout, data_vec, vec, jac);
+  }
+
+  template <class Component, class... Remain>
   void add_hessian_kernel(const IndexLayout<ndata> &data_layout,
                           const IndexLayout<ncomp> &layout,
                           const Vector<T> &data_vec, const Vector<T> &vec,
@@ -228,6 +324,10 @@ class OmpGroupBackend {
         }
       }
     }
+
+    if constexpr (sizeof...(Remain) > 0) {
+      add_hessian_kernel<Remain...>(data_layout, layout, data_vec, vec, jac);
+    }
   }
 
  private:
@@ -235,8 +335,8 @@ class OmpGroupBackend {
   int *elem_per_color;
 };
 
-template <typename T, class Component>
-using DefaultGroupBackend = OmpGroupBackend<T, Component>;
+template <typename T, class Input, class Data, class... Components>
+using DefaultGroupBackend = OmpGroupBackend<T, Input, Data, Components...>;
 #elif defined(AMIGO_USE_CUDA)
 
 template <typename T, class Component>
@@ -255,7 +355,7 @@ template <typename T, class Component>
 class CudaGroupBackend {
  public:
   static constexpr int ncomp = Component::ncomp;
-  static constexpr int ndata = Component::ndata;
+  static constexpr int ndata = Component::ncomp;
   using Input = typename Component::Input;
   using Data = typename Component::Data;
 
@@ -284,18 +384,49 @@ class CudaGroupBackend {
 };
 
 #else  // Default to serial implementation
-template <typename T, class Component>
-using DefaultGroupBackend = SerialGroupBackend<T, Component>;
+template <typename T, class Input, class Data, class... Components>
+using DefaultGroupBackend = SerialGroupBackend<T, Input, Data, Components...>;
 #endif
 
-template <typename T, class Component,
-          class Backend = DefaultGroupBackend<T, Component>>
+template <class... Ts>
+struct __get_collection_input_type;
+
+template <class T>
+struct __get_collection_input_type<T> {
+  using Input = typename T::Input;
+};
+
+template <class T, class... Ts>
+struct __get_collection_input_type<T, Ts...> {
+  using Input = typename __get_collection_input_type<Ts...>::Input;
+};
+
+template <class... Ts>
+struct __get_collection_data_type;
+
+template <class T>
+struct __get_collection_data_type<T> {
+  using Data = typename T::Data;
+};
+
+template <class T, class... Ts>
+struct __get_collection_data_type<T, Ts...> {
+  using Data = typename __get_collection_data_type<Ts...>::Data;
+};
+
+template <typename T, class... Components>
 class ComponentGroup : public ComponentGroupBase<T> {
  public:
-  static constexpr int ncomp = Component::ncomp;
-  static constexpr int ndata = Component::ndata;
-  using Input = typename Component::Input;
-  using Data = typename Component::Data;
+  static constexpr int num_components = sizeof...(Components);
+
+  using Input = typename __get_collection_input_type<Components...>::Input;
+  using Data = typename __get_collection_data_type<Components...>::Data;
+
+  // Use whatever class is defined as the default backend
+  using Backend = DefaultGroupBackend<T, Input, Data, Components...>;
+
+  static constexpr int ncomp = Input::ncomp;
+  static constexpr int ndata = Data::ncomp;
 
   ComponentGroup(std::shared_ptr<Vector<int>> data_indices,
                  std::shared_ptr<Vector<int>> indices)

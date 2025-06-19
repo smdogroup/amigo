@@ -63,13 +63,15 @@ def compute_shape_derivs(xi, eta, X, Y, vars):
     return N, N_xi, N_ea
 
 
-def filter_factory(pt: int):
-    qpts = [-1.0 / np.sqrt(3.0), 1.0 / np.sqrt(3.0)]
+class Helmholtz(am.Component):
+    def __init__(self):
+        super().__init__()
 
-    def init_func(self):
-        am.Component.__init__(self)
-        self.xi = qpts[pt % 2]
-        self.eta = qpts[pt // 2]
+        # Add keyword arguments for the compute function
+        compute_args = []
+        for n in range(4):
+            compute_args.append({"n": n})
+        self.set_compute_args(compute_args)
 
         # The filter radius
         self.add_constant("r_filter", 0.1)
@@ -86,14 +88,18 @@ def filter_factory(pt: int):
 
         return
 
-    def compute(self):
+    def compute(self, n=None):
+        qpts = [-1.0 / np.sqrt(3.0), 1.0 / np.sqrt(3.0)]
+        xi = qpts[n % 2]
+        eta = qpts[n // 2]
+
         r = self.constants["r_filter"]
         rho = self.inputs["rho"]
 
         X = self.data["x_coord"]
         Y = self.data["y_coord"]
 
-        N, N_xi, N_ea = compute_shape_derivs(self.xi, self.eta, X, Y, self.vars)
+        N, N_xi, N_ea = compute_shape_derivs(xi, eta, X, Y, self.vars)
 
         Nx = self.vars["Nx"]
         Ny = self.vars["Ny"]
@@ -119,11 +125,6 @@ def filter_factory(pt: int):
         self.objective["obj"] = 0.5 * detJ * (rho0 * rho0 - rhs * rho0 + laplace)
 
         return
-
-    class_name = f"Filter{pt}"
-    return type(
-        class_name, (am.Component,), {"__init__": init_func, "compute": compute}
-    )()
 
 
 class NodeSource(am.Component):
@@ -185,25 +186,22 @@ model = am.Model(module_name)
 node_src = NodeSource()
 model.add_component("src", nnodes, node_src)
 
-for n in range(4):
-    fltr = filter_factory(n)
-    name = f"filter{n}"
+helmholtz = Helmholtz()
+model.add_component("helmholtz", nelems, helmholtz)
 
-    model.add_component(name, nelems, fltr)
-
-    model.link(name + ".x_coord", "src.x_coord", tgt_indices=conn)
-    model.link(name + ".y_coord", "src.y_coord", tgt_indices=conn)
-    model.link(name + ".rho", "src.rho", tgt_indices=conn)
+model.link("helmholtz.y_coord", "src.y_coord", tgt_indices=conn)
+model.link("helmholtz.x_coord", "src.x_coord", tgt_indices=conn)
+model.link("helmholtz.rho", "src.rho", tgt_indices=conn)
 
 if args.build:
     model.generate_cpp()
 
     compile_args = []
-    link_args = []
+    link_args = ["-lblas", "-llapack"]
     define_macros = []
     if args.use_openmp:
         compile_args = ["-fopenmp"]
-        link_args = ["-fopenmp"]
+        link_args += ["-fopenmp"]
         define_macros = [("AMIGO_USE_OPENMP", "1")]
 
     model.build_module(
