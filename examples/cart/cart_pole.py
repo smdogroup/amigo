@@ -293,7 +293,7 @@ parser.add_argument(
     help="Enable OpenMP",
 )
 parser.add_argument(
-    "--show_sparsity",
+    "--show-sparsity",
     dest="show_sparsity",
     action="store_true",
     default=False,
@@ -306,7 +306,7 @@ model = create_cart_model()
 if args.build:
     model.generate_cpp()
 
-    compile_args = []
+    compile_args = ["-g", "-O0"]
     link_args = []
     define_macros = []
     if args.use_openmp:

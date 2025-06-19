@@ -89,7 +89,8 @@ void bind_vector(py::module_ &m, const std::string &name) {
            });
 }
 
-py::array_t<int> reorder_model(std::vector<py::array_t<int>> arrays) {
+py::array_t<int> reorder_model(py::array_t<int> output_vars,
+                               std::vector<py::array_t<int>> arrays) {
   std::vector<int> intervals(arrays.size() + 1);
   intervals[0] = 0;
 
@@ -163,12 +164,35 @@ py::array_t<int> reorder_model(std::vector<py::array_t<int>> arrays) {
 
   delete[] rowp;
   delete[] cols;
+
+  int *is_output = new int[nrows];
+  std::fill(is_output, is_output + nrows, 0);
+
+  auto outputs = output_vars.unchecked<1>();
+  for (int i = 0; i < outputs.shape(0); i++) {
+    if (outputs[i] >= 0 && outputs[i] < nrows) {
+      is_output[outputs[i]] = 1;
+    }
+  }
+
+  // Create a partition of the inputs and outputs
+  std::stable_partition(perm, perm + nrows,
+                        [&](int index) { return !is_output[index]; });
+
+  // Allocate the new partition
+  py::array_t<int> iperm_output(nrows);
+  auto iperm_output_ = iperm_output.mutable_unchecked<1>();
+
+  // Step 3: write values
+  for (ssize_t i = 0; i < nrows; i++) {
+    iperm_output_[perm[i]] = i;
+  }
+
   delete[] perm;
-
-  auto pyiperm = py::array_t<int>({nrows}, {sizeof(int)}, iperm);
   delete[] iperm;
+  delete[] is_output;
 
-  return pyiperm;
+  return iperm_output;
 }
 
 PYBIND11_MODULE(amigo, mod) {

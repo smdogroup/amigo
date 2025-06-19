@@ -167,6 +167,9 @@ class ComponentGroup:
         for data_name, shape in data_shapes.items():
             self.data[data_name] = data_index_pool.allocate(shape)
 
+    def get_output_names(self):
+        return self.comp_obj.get_output_names()
+
     def get_var(self, varname: str):
         return self.vars[varname]
 
@@ -414,13 +417,26 @@ class Model:
                 arr = array.ravel()
                 arr[:] = vars[arr]
 
+        if type == "vars":
+            # Get the indices of variable names
+            temp = np.zeros(counter, dtype=int)
+            for name, comp in self.comp.items():
+                outputs = comp.get_output_names()
+                for outname in outputs:
+                    temp[comp.vars[outname]] = 1
+
+            self.output_vars = np.nonzero(temp)[0]
+            print(self.output_vars)
+
         # Compute and apply re-ordering here when type == "vars"
         if reorder and type == "vars":
             arrays = []
             for name, comp in self.comp.items():
                 arrays.append(comp.get_indices(comp.vars))
 
-            iperm = reorder_model(arrays)
+            iperm = reorder_model(self.output_vars, arrays)
+
+            self.output_vars = iperm[self.output_vars]
 
             # Apply the reordering to the variables
             for name, comp in self.comp.items():

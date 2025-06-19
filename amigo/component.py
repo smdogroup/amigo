@@ -704,6 +704,12 @@ class Component:
         self.vars.clear()
         self.objective.clear()
         return
+    
+    def get_output_names(self):
+        outputs = []
+        for name in self.outputs:
+            outputs.append(name)
+        return outputs
 
     def get_var_shapes(self):
         var_shapes = {}
