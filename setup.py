@@ -73,20 +73,22 @@ def get_extensions():
         vars = sysconfig.get_config_vars()
         vars["LDSHARED"] = vars["LDSHARED"].replace("-bundle", "-dynamiclib")
 
-    link_args = ["-lblas", "-llapack"]
+    link_args = []
     compile_args = []
     define_macros = []
     if sys.platform == "win32":
         compile_args = ["/std:c++17", "/permissive-"]
-    else:
+    elif sys.platform == "darwin":
         compile_args = ["-std=c++17"]
-
+        define_macros = [("AMIGO_USE_METIS", "1")]
+    else:
+        link_args = ["-lblas", "-llapack"]
+        compile_args = ["-std=c++17"]
+        define_macros = [("AMIGO_USE_METIS", "1")]
     if use_openmp:
         compile_args += ["-fopenmp"]
         link_args += ["-fopenmp"]
         define_macros += [("AMIGO_USE_OPENMP", "1")]
-
-    define_macros += [("AMIGO_USE_METIS", "1")]
 
     ext_modules = [
         Extension(

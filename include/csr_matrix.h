@@ -21,11 +21,12 @@ class CSRMat {
    * @param nnz Number of non-zeros
    * @param rowp Pointer into the rows of the matrix
    * @param cols Column indices
+   * @param sqdef_index Index at which 2x2 negative definite block matrix begins
    */
   template <class ArrayType>
   CSRMat(int nrows, int ncols, int nnz, const ArrayType rowp_,
-         const ArrayType cols_)
-      : nrows(nrows), ncols(ncols), nnz(nnz) {
+         const ArrayType cols_, int sqdef_index = -1)
+      : nrows(nrows), ncols(ncols), nnz(nnz), sqdef_index(sqdef_index) {
     rowp = new int[nrows + 1];
     cols = new int[nnz];
     std::copy(rowp_, rowp_ + (nrows + 1), rowp);
@@ -57,10 +58,12 @@ class CSRMat {
    * @param ncols Number of columns
    * @param nelems Number of elements in the connectivity matrix
    * @param element_nodes Functor returning the number of nodes and node numbers
+   * @param sqdef_index Index at which 2x2 negative definite block matrix begins
    */
   template <class Functor>
-  CSRMat(int nrows, int ncols, int nelems, const Functor& element_nodes)
-      : nrows(nrows), ncols(ncols) {
+  CSRMat(int nrows, int ncols, int nelems, const Functor& element_nodes,
+         int sqdef_index = -1)
+      : nrows(nrows), ncols(ncols), sqdef_index(sqdef_index) {
     // Create the CSR structure
     bool include_diagonal = true;
     bool sort_columns = true;
@@ -98,6 +101,12 @@ class CSRMat {
     }
   }
 
+  /**
+   * @brief Compute a matrix-vector product y = A @ x
+   *
+   * @param x The input vector
+   * @param y The matrix-vector product value
+   */
   void mult(const std::shared_ptr<Vector<T>>& x,
             std::shared_ptr<Vector<T>>& y) const {
     const T* x_array = x->get_array();
@@ -111,12 +120,19 @@ class CSRMat {
     }
   }
 
-  int nrows;
-  int ncols;
-  int nnz;
-  int* rowp;
-  int* cols;
-  T* data;
+  int nrows;  // Number of rows in the matrix
+  int ncols;  // Number of columns in the matrix
+  int nnz;    // Number of non-zeros in the matrix
+  int* rowp;  // Pointer into the column array
+  int* cols;  // Column indices
+  T* data;    // Matrix values
+
+  // Specific to symmetric quasi-definite matrices. Which index is where
+  // -C is located?
+  // A = [ A   B^{T} ]
+  //     [ B   -C    ]
+  int sqdef_index;  // Index at which C starts. Negative value indicates
+                    // that the matrix is not SQD.
 };
 
 }  // namespace amigo

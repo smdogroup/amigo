@@ -113,13 +113,47 @@ void lapack_pptrf(const char *c, int *n, T *ap, int *info) {
  *
  * This matrix can be factorized using a Cholesky factorization
  *
- * [ A  B^{T} ] = [ L                ][ L^{T}      L^{-1} * B^{T} ]
- * [ B     -C ] = [ B * L^{-T}   -F  ][                     F^{T} ]
+ * [ A  B^{T} ] = [ L               ][ L^{T}    L^{-1} * B^{T} ]
+ * [ B     -C ] = [ B * L^{-T}   -F ][                   F^{T} ]
  *
  * where A = L * L^{T} is the Cholesky factorization of A and F is the Cholesky
  * factorization of (C + B * A^{-1} * B) given by
  *
  * F * F^{T} = C + B * L^{-1} * L^{-1} * B^{T} = C + B * A^{-1} * B^{T}
+ *
+ * [ L11             ] [ L11^{T}  L21^{T}  L31^{T} ]   [ *     *   * ]
+ * [ L21  -F11       ] [          F11^{T}  F21^{T} ] = [ *  -C11   * ]
+ * [ L31  -F21  -F22 ] [                   F22^{T} ]   [ *  -C21   * ]
+ *
+ * C contributions, the updates chage. The C values recieve positive
+ * contributions for the diagonal update from L and negative contributions from
+ * the F components of the factored matrix.
+ *
+ * The diagonal update for C22 takes the form:
+ *
+ * C22 <- C22 + L31 * L31^{T} - F21 * F21^{T}
+ *
+ * Followed by the Cholesky factorization F22 * F22^{T} = C22.
+ *
+ * For the below-diagonal contributions, it's straightforward to observe that
+ *
+ * L31 * L21^{T} - F21 * F11^{T} = - C21
+ *
+ * So that the F21 contribution can be computed as:
+ *
+ * F21 = (C21 + L31 * L21^{T}) * F11^{-T}
+ *
+ * The lower update takes the form:
+ *
+ * L41 * L31^{T} - F31 * F21^{T} - F32^{T} * F22^{T} = - C32
+ *
+ * So that the lower block is
+ *
+ * F32 = (C32 + L41 * L31^{T} - F31 * F21^{T}) * F22^{-T}
+ *
+ * Note that the L-L contributions signs are reversed (now positive) compared to
+ * regular Cholesky factorization, while the C-C contributions take the regular
+ * sign.
  *
  * @tparam T Typename for the computations
  */
@@ -130,6 +164,12 @@ class QuasidefCholesky {
     // Set the values
     size = mat->nrows;
 
+    // Set the first variable which belongs to the SQD matrix
+    sqdef_index = mat->sqdef_index;
+    if (sqdef_index < 0 || sqdef_index > size) {
+      sqdef_index = size;
+    }
+
     // Perform a symbolic analysis to determine the size of the factorization
     int *parent = new int[size];  // Space for the etree
     int *Lnz = new int[size];     // Nonzeros below the diagonal
@@ -137,7 +177,7 @@ class QuasidefCholesky {
 
     // Find the supernodes in the matrix
     var_to_snode = new int[size];
-    num_snodes = init_supernodes(parent, Lnz, var_to_snode);
+    num_snodes = init_snodes(parent, Lnz, var_to_snode);
 
     // Set the remainder of the data based on the var to snode data
     snode_size = new int[num_snodes];
@@ -221,7 +261,7 @@ class QuasidefCholesky {
 
     (1) Compute the diagonal update: A22 <- A22 - L21 * L21^{T}
 
-    (2) Compute the column update: A32 <- A32 - L32 * L21. This is a two
+    (2) Compute the column update: A32 <- A32 - L31 * L21^{T}. This is a two
     step process whereby we first accumulate the numerical results in a
     temporary work vector then apply them to the A32/L32 data.
 
@@ -229,7 +269,7 @@ class QuasidefCholesky {
 
     (3) Factor the diagonal to obtain L22
 
-    (4) Apply the factor to the column L32 <- (A32 - L32 * L21) * L22^{-T}
+    (4) Apply the factor to the column L32 <- (A32 - L31 * L21^{T}) * L22^{-T}
   */
   int factor() {
     // Set values from the matrix
@@ -265,6 +305,7 @@ class QuasidefCholesky {
       while (k != -1) {
         // Store the next supernode that we will visit
         int next_k = list[k];
+        int kfirst_var = snode_to_first_var[k];
 
         // Width of this supernode
         int ksize = snode_size[k];
@@ -295,23 +336,33 @@ class QuasidefCholesky {
         const int *krows = &rows[ip_start];
         T *kvals = get_factor_pointer(k, ksize, ip_start);
 
-        // Perform the update to the diagonal by computing
-        // diag <- diag - L21 * L21^{T}
-        update_diag(ksize, nkrows, jfirst_var, krows, kvals, diag_size, diag,
-                    work_temp);
+        if (jfirst_var >= sqdef_index && kfirst_var < sqdef_index) {
+          // We are factoring C and adding a contribution from L so we need to
+          // add values, not subtract them here...
+          add_diag_update(ksize, nkrows, jfirst_var, krows, kvals, diag_size,
+                          diag, work_temp);
+        } else {
+          // Perform the update to the diagonal by computing
+          // diag <- diag - L21 * L21^{T}
+          sub_diag_update(ksize, nkrows, jfirst_var, krows, kvals, diag_size,
+                          diag, work_temp);
+        }
 
         // Perform the update for the column by computing
         // work_temp = L31 * L21^{T}
         int iremain = ip_end - ip_next;
-        update_work_column(ksize, nkrows,
-                           get_factor_pointer(k, ksize, ip_start), iremain,
-                           get_factor_pointer(k, ksize, ip_next), work_temp);
+        compute_work_update(ksize, nkrows,
+                            get_factor_pointer(k, ksize, ip_start), iremain,
+                            get_factor_pointer(k, ksize, ip_next), work_temp);
 
         // Add the temporary column to the remainder
-        // updateColumn(nkrows, iremain, &rows[ip_next], work_temp, jrows,
-        // jptr);
-        update_column(diag_size, nkrows, jfirst_var, krows, iremain,
-                      &rows[ip_next], work_temp, jrows, jptr);
+        if (jfirst_var >= sqdef_index && kfirst_var < sqdef_index) {
+          add_column_update(diag_size, nkrows, jfirst_var, krows, iremain,
+                            &rows[ip_next], work_temp, jrows, jptr);
+        } else {
+          sub_column_update(diag_size, nkrows, jfirst_var, krows, iremain,
+                            &rows[ip_next], work_temp, jrows, jptr);
+        }
 
         // Move to the next k non-zero
         k = next_k;
@@ -324,7 +375,7 @@ class QuasidefCholesky {
         break;
       }
 
-      // Compute (A32 - L32 * L21 ) * L21^{-T}
+      // Compute (A32 - L31 * L21^{T}) * L22^{-T}
       int nrhs = colp[j + 1] - colp[j];
       solve_diag(diag_size, diag, nrhs, jptr);
 
@@ -354,20 +405,43 @@ class QuasidefCholesky {
     for (int j = 0; j < num_snodes; j++) {
       const int jsize = snode_size[j];
       T *D = get_diag_pointer(j);
-      T *y = &xt[snode_to_first_var[j]];
-      solve_diag(jsize, D, 1, y);
+      int jvar = snode_to_first_var[j];
+      T *y = &xt[jvar];
 
-      // Apply the update from the whole column
-      const T *L = get_factor_pointer(j, jsize);
+      if (jvar < sqdef_index) {
+        solve_diag(jsize, D, 1, y);
 
-      int ip_end = colp[j + 1];
-      for (int ip = colp[j]; ip < ip_end; ip++) {
-        T val = 0.0;
-        for (int ii = 0; ii < jsize; ii++) {
-          val += L[ii] * y[ii];
+        // Apply the update from the whole column
+        const T *L = get_factor_pointer(j, jsize);
+
+        int ip_end = colp[j + 1];
+        for (int ip = colp[j]; ip < ip_end; ip++) {
+          T val = 0.0;
+          for (int ii = 0; ii < jsize; ii++) {
+            val += L[ii] * y[ii];
+          }
+          xt[rows[ip]] -= val;
+          L += jsize;
         }
-        xt[rows[ip]] -= val;
-        L += jsize;
+      } else {
+        // This is the C/F part of the matrix
+        solve_diag(jsize, D, 1, y);
+        for (int k = 0; k < jsize; k++) {
+          y[k] *= -1.0;
+        }
+
+        // Apply the update from the whole column
+        const T *L = get_factor_pointer(j, jsize);
+
+        int ip_end = colp[j + 1];
+        for (int ip = colp[j]; ip < ip_end; ip++) {
+          T val = 0.0;
+          for (int ii = 0; ii < jsize; ii++) {
+            val += L[ii] * y[ii];
+          }
+          xt[rows[ip]] += val;
+          L += jsize;
+        }
       }
     }
 
@@ -412,23 +486,50 @@ class QuasidefCholesky {
         int i = Arows[ip];
 
         if (i >= j) {
-          // Check if this is a diagonal element
-          if (i < jfirst + jsize) {
-            int jj = j - jfirst;
-            int ii = i - jfirst;
+          if (i >= sqdef_index && j >= sqdef_index) {
+            // This is part of the F matrix - from C.
+            // Store +C by taking the negative of the values in the matrix.
+            // These values will often be zero or not in the sparsity pattern at
+            // all.
+            if (i < jfirst + jsize) {
+              int jj = j - jfirst;
+              int ii = i - jfirst;
 
-            T *D = get_diag_pointer(sj);
-            D[get_diag_index(ii, jj)] += Avals[ip];
+              T *D = get_diag_pointer(sj);
+              D[get_diag_index(ii, jj)] -= Avals[ip];
+            } else {
+              int jj = j - jfirst;
+
+              // Look for the row
+              for (int kp = colp[sj]; kp < colp[sj + 1]; kp++) {
+                if (rows[kp] == i) {
+                  T *L = get_factor_pointer(sj, jsize, kp);
+                  L[jj] -= Avals[ip];
+
+                  break;
+                }
+              }
+            }
           } else {
-            int jj = j - jfirst;
+            // This is part of the L matrix - from A or B. Add the values into
+            // the L matrix components.
+            if (i < jfirst + jsize) {
+              int jj = j - jfirst;
+              int ii = i - jfirst;
 
-            // Look for the row
-            for (int kp = colp[sj]; kp < colp[sj + 1]; kp++) {
-              if (rows[kp] == i) {
-                T *L = get_factor_pointer(sj, jsize, kp);
-                L[jj] += Avals[ip];
+              T *D = get_diag_pointer(sj);
+              D[get_diag_index(ii, jj)] += Avals[ip];
+            } else {
+              int jj = j - jfirst;
 
-                break;
+              // Look for the row
+              for (int kp = colp[sj]; kp < colp[sj + 1]; kp++) {
+                if (rows[kp] == i) {
+                  T *L = get_factor_pointer(sj, jsize, kp);
+                  L[jj] += Avals[ip];
+
+                  break;
+                }
               }
             }
           }
@@ -487,13 +588,30 @@ class QuasidefCholesky {
     @param Lnz The number of non-zeros per variable
     @param vtn The array of supernodes for each variable
   */
-  int init_supernodes(const int parent[], const int Lnz[], int vtn[]) {
+  int init_snodes(const int parent[], const int Lnz[], int vtn[]) {
     int snode = 0;
-    for (int i = 0; i < size;) {
+
+    // First find the supernodes belonging strictly to L
+    int i = 0;
+    while (i < sqdef_index) {
       vtn[i] = snode;
       i++;
 
-      while (i < size && (parent[i - 1] == i) && Lnz[i] == Lnz[i - 1] - 1) {
+      while (i < sqdef_index && (parent[i - 1] == i) &&
+             Lnz[i] == Lnz[i - 1] - 1) {
+        vtn[i] = snode;
+        i++;
+      }
+      snode++;
+    }
+
+    // Now find superndoes belonging strictly to C
+    while (i < size) {
+      vtn[i] = snode;
+      i++;
+
+      while (i < sqdef_index && (parent[i - 1] == i) &&
+             Lnz[i] == Lnz[i - 1] - 1) {
         vtn[i] = snode;
         i++;
       }
@@ -556,9 +674,9 @@ class QuasidefCholesky {
 
     D <- D - L * L^{T}
   */
-  void update_diag(const int lsize, const int nlrows, const int lfirst_var,
-                   const int *lrows, T *L, const int diag_size, T *diag,
-                   T *work) {
+  void sub_diag_update(const int lsize, const int nlrows, const int lfirst_var,
+                       const int *lrows, T *L, const int diag_size, T *diag,
+                       T *work) {
     // Compute L * L^{T}
     int n = nlrows;
     int k = lsize;
@@ -571,6 +689,32 @@ class QuasidefCholesky {
       for (int ii = 0; ii < jj + 1; ii++) {
         int i = lrows[ii] - lfirst_var;
         diag[i + j * (j + 1) / 2] -= work[jj + nlrows * ii];
+      }
+    }
+  }
+
+  /**
+    Add the diagonal update
+
+    Update the entries of the diagonal matrix
+
+    D <- D + L * L^{T}
+  */
+  void add_diag_update(const int lsize, const int nlrows, const int lfirst_var,
+                       const int *lrows, T *L, const int diag_size, T *diag,
+                       T *work) {
+    // Compute L * L^{T}
+    int n = nlrows;
+    int k = lsize;
+    T alpha = 1.0, beta = 0.0;
+    blas_syrk<T>("L", "T", &n, &k, &alpha, L, &k, &beta, work, &n);
+
+    // Add D <- D - L * L^{T}
+    for (int jj = 0; jj < nlrows; jj++) {
+      int j = lrows[jj] - lfirst_var;
+      for (int ii = 0; ii < jj + 1; ii++) {
+        int i = lrows[ii] - lfirst_var;
+        diag[i + j * (j + 1) / 2] += work[jj + nlrows * ii];
       }
     }
   }
@@ -598,11 +742,11 @@ class QuasidefCholesky {
     @param L31 The numerical values of L32 in row-major order
     @param Tmp The temporary vector
   */
-  void update_work_column(int lwidth, int n21rows, T *L21, int n31rows, T *L31,
-                          T *Tmp) {
+  void compute_work_update(int lwidth, int n21rows, T *L21, int n31rows, T *L31,
+                           T *Tmp) {
     // These matrices are stored in row-major order. To compute the result we
-    // use LAPACK with the computation: T^{T} = L21 * L31^{T}
-    // dimension of T^{T} is n21rows X n32rows
+    // use LAPACK with the computation: Tmp^{T} = L21 * L31^{T}
+    // dimension of Tmp^{T} is n21rows X n32rows
     // dimension of L21 is n21rows X lwidth
     // dimension of L31^{T} is lwidth X n31rows
     T alpha = 1.0, beta = 0.0;
@@ -611,7 +755,7 @@ class QuasidefCholesky {
   }
 
   /**
-    Subtract a sparse column from another sparse column
+    Subtract a sparse column update from another sparse column
 
     L32 = L32 - Tmp
 
@@ -626,9 +770,9 @@ class QuasidefCholesky {
     @param brows The indices of the B column
     @param B The B values of the column
   */
-  void update_column(const int lwidth, const int nlcols, const int lfirst_var,
-                     const int *lrows, int nrows, const int *arows, const T *A,
-                     const int *brows, T *B) {
+  void sub_column_update(const int lwidth, const int nlcols,
+                         const int lfirst_var, const int *lrows, int nrows,
+                         const int *arows, const T *A, const int *brows, T *B) {
     for (int i = 0, bi = 0; i < nrows; i++) {
       while (brows[bi] < arows[i]) {
         bi++;
@@ -638,6 +782,39 @@ class QuasidefCholesky {
       for (int jj = 0; jj < nlcols; jj++) {
         int j = lrows[jj] - lfirst_var;
         B[j] -= A[jj];
+      }
+      A += nlcols;
+    }
+  }
+
+  /**
+    Add a sparse column update from another sparse column
+
+    L32 = L32 + Tmp
+
+    The row indices in the input brows must be a subset of the rows in arows.
+    Both the input arows and brows must be sorted. All indices in arows must
+    exist in brows.
+
+    @param lwidth The width of the L32 column
+    @param nrows The number of the rows to update
+    @param lrows The indices of the L32 column
+    @param A The A values of the column
+    @param brows The indices of the B column
+    @param B The B values of the column
+  */
+  void add_column_update(const int lwidth, const int nlcols,
+                         const int lfirst_var, const int *lrows, int nrows,
+                         const int *arows, const T *A, const int *brows, T *B) {
+    for (int i = 0, bi = 0; i < nrows; i++) {
+      while (brows[bi] < arows[i]) {
+        bi++;
+        B += lwidth;
+      }
+
+      for (int jj = 0; jj < nlcols; jj++) {
+        int j = lrows[jj] - lfirst_var;
+        B[j] += A[jj];
       }
       A += nlcols;
     }
@@ -674,7 +851,6 @@ class QuasidefCholesky {
     }
   }
 
-  // The following are short cut inline functions.
   // Get the diagonal block index
   inline int get_diag_index(const int i, const int j) {
     if (i >= j) {
@@ -689,16 +865,17 @@ class QuasidefCholesky {
 
   // Given the supernode index, the supernode size and the index into the rows
   // data, return the pointer to the lower factor
-  inline T *get_factor_pointer(const int i, const int size, const int index) {
-    const int dsize = size * (size + 1) / 2;
+  inline T *get_factor_pointer(const int i, const int node_size,
+                               const int index) {
+    const int dsize = node_size * (node_size + 1) / 2;
     const int offset = index - colp[i];
-    return &data[data_ptr[i] + dsize + size * offset];
+    return &data[data_ptr[i] + dsize + node_size * offset];
   }
 
   // Given the supernode index, the supernode size and the index into the rows
   // data, return the pointer to the lower factor
-  inline T *get_factor_pointer(const int i, const int size) {
-    const int dsize = size * (size + 1) / 2;
+  inline T *get_factor_pointer(const int i, const int node_size) {
+    const int dsize = node_size * (node_size + 1) / 2;
     return &data[data_ptr[i] + dsize];
   }
 
@@ -707,6 +884,9 @@ class QuasidefCholesky {
 
   // The dimension of the square matrix
   int size;
+
+  // SQD index indicating the first variable which belongs to the -C matrix
+  int sqdef_index;
 
   // The row indices for the strict lower-diagonal entries of each super node.
   // This does not contain the row indices for the supernode itself. Only
