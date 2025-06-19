@@ -300,6 +300,13 @@ parser = argparse.ArgumentParser()
 parser.add_argument(
     "--build", dest="build", action="store_true", default=False, help="Enable building"
 )
+parser.add_argument(
+    "--with-openmp",
+    dest="use_openmp",
+    action="store_true",
+    default=False,
+    help="Enable OpenMP",
+)
 args = parser.parse_args()
 
 nx = 2 * 256
@@ -358,7 +365,7 @@ for n in range(4):
     # Link the filtered density field
     model.link(name + ".rho", "src.rho", tgt_indices=conn)
 
-for n in range(4):
+for n in range(0):
     topo = mass_factory(n)
     name = f"mass{n}"
 
@@ -383,10 +390,21 @@ for n in range(4):
 
 if args.build:
     model.generate_cpp()
-    model.build_module()
+
+    compile_args = []
+    link_args = []
+    define_macros = []
+    if args.use_openmp:
+        compile_args = ["-fopenmp"]
+        link_args = ["-fopenmp"]
+        define_macros = [("AMIGO_USE_OPENMP", "1")]
+
+    model.build_module(
+        compile_args=compile_args, link_args=link_args, define_macros=define_macros
+    )
 
 start = time.perf_counter()
-model.initialize()
+model.initialize(reorder=True)
 end = time.perf_counter()
 print(f"Initialization time:        {end - start:.6f} seconds")
 print(f"Num variables:              {model.num_variables}")
@@ -407,3 +425,10 @@ start = time.perf_counter()
 prob.hessian(x, mat_obj)
 end = time.perf_counter()
 print(f"Matrix computation time:    {end - start:.6f} seconds")
+
+grad = prob.create_vector()
+start = time.perf_counter()
+for i in range(10):
+    prob.gradient(x, grad)
+end = time.perf_counter()
+print(f"Residual computation time:  {end - start:.6f} seconds")

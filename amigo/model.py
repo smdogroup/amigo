@@ -3,6 +3,7 @@ import ast
 import sys
 import importlib
 from .amigo import (
+    reorder_model,
     VectorInt,
     OptimizationProblem,
     AliasTracker,
@@ -172,7 +173,7 @@ class ComponentGroup:
     def get_data(self, name: str):
         return self.data[name]
 
-    def _set_indices(self, vars: dict):
+    def get_indices(self, vars: dict):
         size = 0
         dim = 0
         for name in vars:
@@ -185,30 +186,37 @@ class ComponentGroup:
                 dim += np.prod(shape[1:])
 
         # Set the entries of the vectors
-        vec = VectorInt(size)
-        array = vec.get_array()
+        array = np.zeros(size, dtype=int)
+
+        if array.size > 0:
+            array = array.reshape(-1, dim)
 
         offset = 0
         for name in vars:
             shape = vars[name].shape
             if len(shape) == 1:
-                array[offset::dim] = vars[name][:]
+                array[:, offset] = vars[name][:]
                 offset += 1
             elif len(shape) == 2:
                 for i in range(shape[1]):
-                    array[offset::dim] = vars[name][:, i]
+                    array[:, offset] = vars[name][:, i]
                     offset += 1
             elif len(shape) == 3:
                 for i in range(shape[1]):
                     for j in range(shape[2]):
-                        array[offset::dim] = vars[name][:, i, j]
+                        array[:, offset] = vars[name][:, i, j]
                         offset += 1
-        return vec
+        return array
 
     def create_model(self, module_name: str):
         if not self.comp_obj.is_empty():
-            data_vec = self._set_indices(self.data)
-            vec = self._set_indices(self.vars)
+            data_array = self.get_indices(self.data)
+            vec_array = self.get_indices(self.vars)
+
+            data_vec = VectorInt(np.prod(data_array.shape))
+            data_vec.get_array()[:] = data_array.ravel()
+            vec = VectorInt(np.prod(vec_array.shape))
+            vec.get_array()[:] = vec_array.ravel()
 
             # Create the object
             return _import_class(module_name, self.class_name)(data_vec, vec)
@@ -356,7 +364,13 @@ class Model:
         self.links.append((src_expr, src_indices, tgt_expr, tgt_indices))
         return
 
-    def _init_indices(self, links: list, pool: GlobalIndexPool, type: str = "vars"):
+    def _init_indices(
+        self,
+        links: list,
+        pool: GlobalIndexPool,
+        type: str = "vars",
+        reorder: bool = False,
+    ):
         # Allocate the AliasTracker
         tracker = AliasTracker(pool.counter)
 
@@ -400,15 +414,29 @@ class Model:
                 arr = array.ravel()
                 arr[:] = vars[arr]
 
+        # Compute and apply re-ordering here when type == "vars"
+        if reorder and type == "vars":
+            arrays = []
+            for name, comp in self.comp.items():
+                arrays.append(comp.get_indices(comp.vars))
+
+            iperm = reorder_model(arrays)
+
+            # Apply the reordering to the variables
+            for name, comp in self.comp.items():
+                for varname, array in comp.vars.items():
+                    arr = array.ravel()
+                    arr[:] = iperm[arr]
+
         return counter
 
-    def initialize(self):
+    def initialize(self, reorder: bool = False):
         """
         Initialize the variable indices for each component and resolve all links.
         """
 
         self.num_variables = self._init_indices(
-            self.links, self.index_pool, type="vars"
+            self.links, self.index_pool, type="vars", reorder=reorder
         )
         self.data_size = self._init_indices(
             self.links, self.data_index_pool, type="data"
@@ -537,7 +565,7 @@ class Model:
 
         return
 
-    def build_module(self, extra_compile_args=None):
+    def build_module(self, compile_args=[], link_args=[], define_macros=[]):
         """
         Quick setup for building the extension module. Some care is required with this.
         """
@@ -546,16 +574,12 @@ class Model:
         import sys
         from pybind11.setup_helpers import Pybind11Extension, build_ext
 
-        # Set platform-specific compiler args if not provided
-        if extra_compile_args is None:
-            extra_compile_args = []
-
-        # Append the extra compile args list based on system type (allows for compilaton on Windows vs. Linux/Mac)
+        # Append the extra compile args list based on system type (allows for
+        # compilaton on Windows vs. Linux/Mac)
         if sys.platform == "win32":
-            extra_compile_args.append("/std:c++17")
-            extra_compile_args.append("/permissive-")
+            compile_args += ["/std:c++17", "/permissive-"]
         else:
-            extra_compile_args = ["-std=c++17"]
+            compile_args += ["-std=c++17"]
 
         pybind11_include = pybind11.get_include()
         amigo_include = AMIGO_INCLUDE_PATH
@@ -567,7 +591,9 @@ class Model:
                 self.module_name,
                 sources=[f"{self.module_name}.cpp"],
                 depends=[f"{self.module_name}.h"],
-                extra_compile_args=extra_compile_args,
+                extra_compile_args=compile_args,
+                extra_link_args=link_args,
+                define_macros=define_macros,
             )
         ]
 

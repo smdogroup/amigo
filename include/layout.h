@@ -31,9 +31,6 @@ class IndexLayout {
     const int *indx = indices->get_array();
     T *vec_values = vec.get_array();
     for (int i = 0; i < ncomp; i++) {
-#ifdef AMIGO_USE_OPENMP
-#pragma omp atomic
-#endif
       vec_values[indx[ncomp * index + i]] += values[i];
     }
   }
@@ -50,6 +47,38 @@ class IndexLayout {
     *length_ = indices->get_size() / ncomp;
     *ncomp_ = ncomp;
     *array_ = indices->get_array();
+  }
+
+  /**
+   * @brief Reorder the indices of this layout so that it is consistent with the
+   * coloring.
+   *
+   * The elements (or components) are re-ordered but not the variables.
+   *
+   * The elem_by_color array is defined such that old_elem_idx =
+   * elem_by_color[new_elem_idx]
+   *
+   * @param elem_by_color Order of the elements by color
+   */
+  void reorder(const int *elem_by_color) {
+    // Make a new vector that will contain the re-ordered elements
+    std::shared_ptr<Vector<int>> new_indices =
+        std::make_shared<Vector<int>>(indices->get_size());
+
+    int *new_idx = new_indices->get_array();
+    int *old_idx = indices->get_array();
+
+    // Set the values
+    int length = get_length();
+    for (int i = 0; i < length; i++) {
+      int elem = elem_by_color[i];
+
+      for (int j = 0; j < ncomp; j++) {
+        new_idx[ncomp * i + j] = old_idx[ncomp * elem + j];
+      }
+    }
+
+    indices = new_indices;
   }
 
  private:

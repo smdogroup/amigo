@@ -23,7 +23,7 @@ class OptimizationProblem {
   }
   Vec get_data_vector() { return data_vec; }
 
-  T lagrangian(Vec& x) const {
+  T lagrangian(Vec x) const {
     T lagrange = 0.0;
     for (size_t i = 0; i < comps.size(); i++) {
       lagrange += comps[i]->lagrangian(*data_vec, *x);
@@ -31,28 +31,28 @@ class OptimizationProblem {
     return lagrange;
   }
 
-  void gradient(const Vec& x, Vec& g) const {
+  void gradient(const Vec x, Vec g) const {
     g->zero();
     for (size_t i = 0; i < comps.size(); i++) {
       comps[i]->add_gradient(*data_vec, *x, *g);
     }
   }
 
-  void hessian_product(const Vec& x, const Vec& p, Vec& h) const {
+  void hessian_product(const Vec x, const Vec p, Vec h) const {
     h->zero();
     for (size_t i = 0; i < comps.size(); i++) {
       comps[i]->add_hessian_product(*data_vec, *x, *p, *h);
     }
   }
 
-  void hessian(const Vec& x, Mat& mat) const {
+  void hessian(const Vec x, Mat mat) const {
     mat->zero();
     for (size_t i = 0; i < comps.size(); i++) {
       comps[i]->add_hessian(*data_vec, *x, *mat);
     }
   }
 
-  std::shared_ptr<CSRMat<T>> create_csr_matrix() const {
+  Mat create_csr_matrix() const {
     std::vector<int> intervals(comps.size() + 1);
     intervals[0] = 0;
     for (size_t i = 0; i < comps.size(); i++) {

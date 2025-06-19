@@ -1,4 +1,4 @@
-from .amigo import Vector, OptimizationProblem
+from .amigo import Vector, OptimizationProblem, QuasidefCholesky
 from .component import Component
 from .model import Model
 from .optimizer import Optimizer

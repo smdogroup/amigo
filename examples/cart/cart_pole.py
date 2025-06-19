@@ -285,14 +285,40 @@ parser = argparse.ArgumentParser()
 parser.add_argument(
     "--build", dest="build", action="store_true", default=False, help="Enable building"
 )
+parser.add_argument(
+    "--with-openmp",
+    dest="use_openmp",
+    action="store_true",
+    default=False,
+    help="Enable OpenMP",
+)
+parser.add_argument(
+    "--show_sparsity",
+    dest="show_sparsity",
+    action="store_true",
+    default=False,
+    help="Show the sparsity pattern",
+)
 args = parser.parse_args()
 
 model = create_cart_model()
-model.initialize()
 
 if args.build:
     model.generate_cpp()
-    model.build_module()
+
+    compile_args = []
+    link_args = []
+    define_macros = []
+    if args.use_openmp:
+        compile_args = ["-fopenmp"]
+        link_args = ["-fopenmp"]
+        define_macros = [("AMIGO_USE_OPENMP", "1")]
+
+    model.build_module(
+        compile_args=compile_args, link_args=link_args, define_macros=define_macros
+    )
+
+model.initialize(reorder=True)
 
 print("num_variables = ", model.num_variables)
 
@@ -319,3 +345,9 @@ xctrl = xopt[model.get_indices("cart.x")]
 plot(d, theta, xctrl)
 plot_convergence(gnrm)
 visualize(d, theta)
+
+if args.show_sparsity:
+    plt.figure(figsize=(6, 6))
+    plt.spy(opt.hessian(), markersize=0.2)
+    plt.title("Sparsity pattern of matrix A")
+    plt.show()
