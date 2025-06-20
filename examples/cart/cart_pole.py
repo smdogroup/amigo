@@ -318,7 +318,7 @@ if args.build:
         compile_args=compile_args, link_args=link_args, define_macros=define_macros
     )
 
-model.initialize(reorder=True)
+model.initialize(order_for_block=True)
 
 print(f"Num variables:              {model.num_variables}")
 print(f"Num constraints:            {model.num_constraints}")
@@ -337,7 +337,7 @@ x_array[q_idx[:, 2]] = 1.0
 x_array[q_idx[:, 3]] = 1.0
 
 opt = am.Optimizer(model, prob, x_init=x_array)
-xopt, gnrm = opt.optimize(max_iters=100)
+xopt, gnrm = opt.optimize(max_iters=1)
 
 d = xopt[model.get_indices("cart.q[:, 0]")]
 theta = xopt[model.get_indices("cart.q[:, 1]")]

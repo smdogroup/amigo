@@ -314,7 +314,7 @@ parser.add_argument(
     "--order-type",
     choices=["amd", "nd", "natural"],
     default="amd",
-    help="Ordering strategy to use (default: amd)"
+    help="Ordering strategy to use (default: amd)",
 )
 parser.add_argument(
     "--order-for-block",
