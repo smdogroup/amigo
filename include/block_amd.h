@@ -5,10 +5,27 @@
 
 namespace amigo {
 
+/**
+ * @brief Block AMD: Approximate minimum degree reordering for the 2x2 block
+ * structure of the KKT matrix
+ */
 class BlockAMD {
  public:
-  static void amd(int nvars, int *rowp, int *cols, int nmult, int *mult,
-                  int *perm, int use_exact_degree) {
+  static constexpr int FORMAT_ERROR = -1;
+  static constexpr int STATE_ERROR = -2;
+
+  static std::string error_code_to_string(int code) {
+    if (code == FORMAT_ERROR) {
+      return std::string("Detected problem with initial data structure\n");
+    } else if (code == STATE_ERROR) {
+      return std::string(
+          "The pivot row should contain only variables, not elements\n");
+    }
+    return std::string("Success");
+  }
+
+  static int amd(int nvars, int *rowp, int *cols, int nmult, int *mult,
+                 int *perm, int use_exact_degree) {
     int *alen = new int[nvars];  // Number of entries in a row
     int *elen = new int[nvars];  // Number of elements in a row
     int *slen = new int[nvars];  // The length of each supernode
@@ -21,6 +38,7 @@ class BlockAMD {
     for (int i = 0; i < nvars; i++) {
       perm[i] = i;
       degree[i] = rowp[i + 1] - rowp[i];
+      elem_degree[i] = -1;
       alen[i] = rowp[i + 1] - rowp[i];
       elen[i] = 0;
       state[i] = 1;  // Set everything to variables
@@ -28,8 +46,7 @@ class BlockAMD {
     }
 
     if (check_format(nvars, rowp, cols, elen, alen) != 0) {
-      fprintf(stderr, "Detected problem with initial data structure\n");
-      return;
+      return FORMAT_ERROR;
     }
 
     // Find the correct number of multipliers
@@ -210,11 +227,7 @@ class BlockAMD {
         for (int j = rowp[piv]; j < rowp[piv] + alen[piv]; j++) {
           // This row should be entirely variables by definition
           if (state[cols[j]] <= 0) {
-            fprintf(
-                stderr,
-                "Error, the pivot row %d should contain only variables, not "
-                "element %d\n",
-                piv, cols[j]);
+            return STATE_ERROR;
           }
 
           lenlp = 0;
@@ -336,16 +349,17 @@ class BlockAMD {
           int d = deglist.get_degree(lj);
           d = (deg_estimate < d + deg_Lp ? deg_estimate : d + deg_Lp);
           deglist.update_degree(lj, d);
+        }
 
-          for (int j = 0; j < lenlp; j++) {
-            int lj = Lp[j];
-            int end = rowp[lj] + elen[lj];
-            // For all elements pointed to by row Lp[j] = lj
-            for (int k = rowp[lj]; k < end; k++) {
-              // Find all the elements
-              int e = cols[k];
-              elem_degree[e] = -1;
-            }
+        // Now that the degrees have been updated, reset all the element degrees
+        for (int j = 0; j < lenlp; j++) {
+          int lj = Lp[j];
+          int end = rowp[lj] + elen[lj];
+          // For all elements pointed to by row Lp[j] = lj
+          for (int k = rowp[lj]; k < end; k++) {
+            // Find all the elements
+            int e = cols[k];
+            elem_degree[e] = -1;
           }
         }
       }
@@ -423,6 +437,9 @@ class BlockAMD {
     delete[] Lp;
     delete[] state;
     delete[] slen;
+    delete[] is_multiplier;
+
+    return 0;  // Success!
   }
 
  private:

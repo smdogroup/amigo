@@ -2,6 +2,8 @@ import amigo as am
 import numpy as np  # used for plotting/analysis
 import argparse
 import time
+import matplotlib.pylab as plt
+from scipy.sparse import csr_matrix  # For visualization
 
 
 def eval_shape_funcs(xi, eta):
@@ -153,6 +155,19 @@ parser.add_argument(
     default=False,
     help="Enable OpenMP",
 )
+parser.add_argument(
+    "--order-type",
+    choices=["amd", "nd", "natural"],
+    default="amd",
+    help="Ordering strategy to use (default: amd)"
+)
+parser.add_argument(
+    "--order-for-block",
+    dest="order_for_block",
+    action="store_true",
+    default=False,
+    help="Order for 2x2 block KKT matrix",
+)
 args = parser.parse_args()
 
 nx = 2 * 256
@@ -208,8 +223,23 @@ if args.build:
         compile_args=compile_args, link_args=link_args, define_macros=define_macros
     )
 
-model.initialize(reorder=True)
+start = time.perf_counter()
+
+if args.order_type == "amd":
+    order_type = am.OrderingType.AMD
+elif args.order_type == "nd":
+    order_type = am.OrderingType.NESTED_DISECTION
+elif args.order_type == "natural":
+    order_type = am.OrderingType.NESTED_DISECTION
+
+order_for_block = args.order_for_block
+model.initialize(order_type=order_type, order_for_block=order_for_block)
 prob = model.create_opt_problem()
+
+end = time.perf_counter()
+print(f"Initialization time:        {end - start:.6f} seconds")
+print(f"Num variables:              {model.num_variables}")
+print(f"Num constraints:            {model.num_constraints}")
 
 # Set the problem data
 data = prob.get_data_vector()
@@ -217,8 +247,11 @@ data_array = data.get_array()
 data_array[model.get_indices("src.x_coord")] = x_coord
 data_array[model.get_indices("src.y_coord")] = y_coord
 
+start = time.perf_counter()
 mat = prob.create_csr_matrix()
 diag = prob.create_vector()
+end = time.perf_counter()
+print(f"Matrix initialization time: {end - start:.6f} seconds")
 
 # Vectors for solving the problem
 x = prob.create_vector()
@@ -229,20 +262,26 @@ rhs = prob.create_vector()
 prob.gradient(x, ans)
 prob.gradient(x, g)
 
+start = time.perf_counter()
 prob.hessian(x, mat)
+end = time.perf_counter()
+print(f"Matrix computation time:    {end - start:.6f} seconds")
+
+start = time.perf_counter()
 chol = am.QuasidefCholesky(diag, mat)
 flag = chol.factor()
 print("flag = ", flag)
 chol.solve(ans)
 
+end = time.perf_counter()
+print(f"Factor and solve time:      {end - start:.6f} seconds")
+
 mat.mult(ans, rhs)
-print("Residual norm: ", np.linalg.norm(rhs.get_array() - g.get_array()))
+print(f"Residual norm:              {np.linalg.norm(rhs.get_array() - g.get_array())}")
 
 X, Y = np.meshgrid(xpts, ypts)
 vals = ans.get_array()[model.get_indices("src.rho")]
 vals = vals.reshape((nx + 1, ny + 1))
-
-import matplotlib.pylab as plt
 
 # Plot using contourf
 plt.contourf(X, Y, vals, levels=20, cmap="viridis")
@@ -250,15 +289,12 @@ plt.colorbar(label="Z value")
 plt.xlabel("x")
 plt.ylabel("y")
 
-from scipy.sparse import csr_matrix
-
 nrows, ncols, nnz, rowp, cols = mat.get_nonzero_structure()
 data = mat.get_data()
+data[:] = 1.0
 jac = csr_matrix((data, cols, rowp), shape=(nrows, ncols))
 
 plt.figure(figsize=(6, 6))
 plt.spy(jac, markersize=0.2)
 plt.title("Sparsity pattern of matrix A")
-plt.show()
-
 plt.show()

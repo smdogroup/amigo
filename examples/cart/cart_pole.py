@@ -320,8 +320,8 @@ if args.build:
 
 model.initialize(reorder=True)
 
-print("num_variables   = ", model.num_variables)
-print("num_constraints = ", model.num_constraints)
+print(f"Num variables:              {model.num_variables}")
+print(f"Num constraints:            {model.num_constraints}")
 
 prob = model.create_opt_problem()
 
