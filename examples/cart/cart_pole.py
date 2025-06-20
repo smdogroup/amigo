@@ -306,7 +306,7 @@ model = create_cart_model()
 if args.build:
     model.generate_cpp()
 
-    compile_args = ["-g", "-O0"]
+    compile_args = []
     link_args = []
     define_macros = []
     if args.use_openmp:
@@ -320,7 +320,8 @@ if args.build:
 
 model.initialize(reorder=True)
 
-print("num_variables = ", model.num_variables)
+print("num_variables   = ", model.num_variables)
+print("num_constraints = ", model.num_constraints)
 
 prob = model.create_opt_problem()
 

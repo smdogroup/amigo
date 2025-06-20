@@ -235,7 +235,7 @@ PYBIND11_MODULE(amigo, mod) {
              std::shared_ptr<amigo::OptimizationProblem<double>>>(
       mod, "OptimizationProblem")
       .def(py::init<
-           int, int,
+           int, int, int,
            std::vector<std::shared_ptr<amigo::ComponentGroupBase<double>>>>())
       .def("get_data_vector",
            &amigo::OptimizationProblem<double>::get_data_vector)
@@ -261,7 +261,8 @@ PYBIND11_MODULE(amigo, mod) {
   py::class_<amigo::QuasidefCholesky<double>,
              std::shared_ptr<amigo::QuasidefCholesky<double>>>(
       mod, "QuasidefCholesky")
-      .def(py::init<std::shared_ptr<amigo::CSRMat<double>>>())
+      .def(py::init<std::shared_ptr<amigo::Vector<double>>,
+                    std::shared_ptr<amigo::CSRMat<double>>>())
       .def("factor", &amigo::QuasidefCholesky<double>::factor)
       .def("solve", &amigo::QuasidefCholesky<double>::solve);
 }

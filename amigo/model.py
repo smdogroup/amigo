@@ -426,7 +426,6 @@ class Model:
                     temp[comp.vars[outname]] = 1
 
             self.output_vars = np.nonzero(temp)[0]
-            print(self.output_vars)
 
         # Compute and apply re-ordering here when type == "vars"
         if reorder and type == "vars":
@@ -435,7 +434,6 @@ class Model:
                 arrays.append(comp.get_indices(comp.vars))
 
             iperm = reorder_model(self.output_vars, arrays)
-
             self.output_vars = iperm[self.output_vars]
 
             # Apply the reordering to the variables
@@ -454,6 +452,8 @@ class Model:
         self.num_variables = self._init_indices(
             self.links, self.index_pool, type="vars", reorder=reorder
         )
+        self.num_constraints = len(self.output_vars)
+
         self.data_size = self._init_indices(
             self.links, self.data_index_pool, type="data"
         )
@@ -524,7 +524,9 @@ class Model:
             if obj is not None:
                 objs.append(obj)
 
-        return OptimizationProblem(self.data_size, self.num_variables, objs)
+        return OptimizationProblem(
+            self.data_size, self.num_variables, self.num_constraints, objs
+        )
 
     def generate_cpp(self):
         """

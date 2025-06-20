@@ -10,12 +10,10 @@
 
 namespace amigo {
 
-template <typename T, class Input, class Data, class... Components>
+template <typename T, int ncomp, class Input, int ndata, class Data,
+          class... Components>
 class SerialGroupBackend {
  public:
-  static constexpr int ncomp = Input::ncomp;
-  static constexpr int ndata = Data::ncomp;
-
   SerialGroupBackend(IndexLayout<ndata> &data_layout,
                      IndexLayout<ncomp> &layout) {}
 
@@ -149,12 +147,10 @@ class SerialGroupBackend {
 
 #ifdef AMIGO_USE_OPENMP
 
-template <typename T, class Input, class Data, class... Components>
+template <typename T, int ncomp, class Input, int ndata, class Data,
+          class... Components>
 class OmpGroupBackend {
  public:
-  static constexpr int ncomp = Input::ncomp;
-  static constexpr int ndata = Data::ncomp;
-
   OmpGroupBackend(IndexLayout<ndata> &data_layout, IndexLayout<ncomp> &layout)
       : num_colors(0), elem_per_color(nullptr) {
     int length, ncomps;
@@ -335,8 +331,11 @@ class OmpGroupBackend {
   int *elem_per_color;
 };
 
-template <typename T, class Input, class Data, class... Components>
-using DefaultGroupBackend = OmpGroupBackend<T, Input, Data, Components...>;
+template <typename T, int ncomp, class Input, int ndata, class Data,
+          class... Components>
+using DefaultGroupBackend =
+    OmpGroupBackend<T, ncomp, Input, ndata, Data, Components...>;
+
 #elif defined(AMIGO_USE_CUDA)
 
 template <typename T, class Component>
@@ -384,8 +383,10 @@ class CudaGroupBackend {
 };
 
 #else  // Default to serial implementation
-template <typename T, class Input, class Data, class... Components>
-using DefaultGroupBackend = SerialGroupBackend<T, Input, Data, Components...>;
+template <typename T, int ncomp, class Input, int ndata, class Data,
+          class... Components>
+using DefaultGroupBackend =
+    SerialGroupBackend<T, ncomp, Input, ndata, Data, Components...>;
 #endif
 
 template <class... Ts>
@@ -402,6 +403,19 @@ struct __get_collection_input_type<T, Ts...> {
 };
 
 template <class... Ts>
+struct __get_collection_ncomp;
+
+template <class T>
+struct __get_collection_ncomp<T> {
+  static constexpr int value = T::ncomp;
+};
+
+template <class T, class... Ts>
+struct __get_collection_ncomp<T, Ts...> {
+  static constexpr int value = __get_collection_ncomp<Ts...>::ncomp;
+};
+
+template <class... Ts>
 struct __get_collection_data_type;
 
 template <class T>
@@ -414,6 +428,19 @@ struct __get_collection_data_type<T, Ts...> {
   using Data = typename __get_collection_data_type<Ts...>::Data;
 };
 
+template <class... Ts>
+struct __get_collection_ndata;
+
+template <class T>
+struct __get_collection_ndata<T> {
+  static constexpr int value = T::ndata;
+};
+
+template <class T, class... Ts>
+struct __get_collection_ndata<T, Ts...> {
+  static constexpr int value = __get_collection_ndata<Ts...>::ndata;
+};
+
 template <typename T, class... Components>
 class ComponentGroup : public ComponentGroupBase<T> {
  public:
@@ -422,11 +449,12 @@ class ComponentGroup : public ComponentGroupBase<T> {
   using Input = typename __get_collection_input_type<Components...>::Input;
   using Data = typename __get_collection_data_type<Components...>::Data;
 
-  // Use whatever class is defined as the default backend
-  using Backend = DefaultGroupBackend<T, Input, Data, Components...>;
+  static constexpr int ncomp = __get_collection_ncomp<Components...>::value;
+  static constexpr int ndata = __get_collection_ndata<Components...>::value;
 
-  static constexpr int ncomp = Input::ncomp;
-  static constexpr int ndata = Data::ncomp;
+  // Use whatever class is defined as the default backend
+  using Backend =
+      DefaultGroupBackend<T, ncomp, Input, ndata, Data, Components...>;
 
   ComponentGroup(std::shared_ptr<Vector<int>> data_indices,
                  std::shared_ptr<Vector<int>> indices)
