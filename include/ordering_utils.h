@@ -3,6 +3,8 @@
 
 #include <algorithm>
 
+#include "block_amd.h"
+
 #ifdef AMIGO_USE_METIS
 extern "C" {
 #include "metis.h"
@@ -11,8 +13,58 @@ extern "C" {
 
 namespace amigo {
 
+enum class OrderingType { NESTED_DISECTION, AMD, NATURAL };
+
 class OrderingUtils {
  public:
+  static void reorder(OrderingType order, int nrows, int *rowp, int *cols,
+                      int **perm_, int **iperm_) {
+    if (order == OrderingType ::NESTED_DISECTION) {
+      nested_disection(nrows, rowp, cols, perm_, iperm_);
+    } else if (order == OrderingType ::AMD) {
+      amd(nrows, rowp, cols, 0, nullptr, perm_, iperm_);
+    } else {  // order == OrderingType::NATURAL
+      // Natural ordering
+      int *perm = new int[nrows];
+      int *iperm = new int[nrows];
+      for (int i = 0; i < nrows; i++) {
+        perm[i] = iperm[i] = i;
+      }
+      *perm_ = perm;
+      *iperm_ = iperm;
+    }
+  }
+
+  static void reorder_block(OrderingType order, int nrows, int *rowp, int *cols,
+                            int nmult, int *mult, int **perm_, int **iperm_) {
+    if (order == OrderingType ::NESTED_DISECTION ||
+        order == OrderingType::NATURAL) {
+      reorder(order, nrows, rowp, cols, perm_, iperm_);
+      int *perm = *perm_;
+      int *iperm = *iperm_;
+
+      int *is_mult = new int[nrows];
+      std::fill(is_mult, is_mult + nrows, 0);
+      for (int i = 0; i < nrows; i++) {
+        if (mult[i] >= 0 && mult[i] < nrows) {
+          is_mult[mult[i]] = 1;
+        }
+      }
+
+      // Perform a stable partition on perm to create the new output
+      std::stable_partition(perm, perm + nrows,
+                            [&](int index) { return !is_mult[index]; });
+
+      for (int i = 0; i < nrows; i++) {
+        iperm[perm[i]] = i;
+      }
+
+      delete[] is_mult;
+    } else {  // order == OrderingType::AMD
+      amd(nrows, rowp, cols, nmult, mult, perm_, iperm_);
+    }
+  }
+
   /**
    * @brief Compute a nested disection ordering.
    *
@@ -24,8 +76,8 @@ class OrderingUtils {
    *
    * Note that for a variable k, these arrays satisfy iperm[perm[k]] = k
    */
-  static void nested_disection(int nrows, int ncols, int *rowp, int *cols,
-                               int **perm_, int **iperm_) {
+  static void nested_disection(int nrows, int *rowp, int *cols, int **perm_,
+                               int **iperm_) {
     int *perm = new int[nrows];
     int *iperm = new int[nrows];
 #ifdef AMIGO_USE_METIS
@@ -42,6 +94,25 @@ class OrderingUtils {
       iperm[i] = i;
     }
 #endif
+    *perm_ = perm;
+    *iperm_ = iperm;
+  }
+
+  /**
+   * @brief Perform an AMD reordering
+   */
+  static void amd(int nrows, int *rowp, int *cols, int nmult, int *mult,
+                  int **perm_, int **iperm_) {
+    int *perm = new int[nrows];
+    int *iperm = new int[nrows];
+
+    int use_exact_degree = 0;
+    BlockAMD::amd(nrows, rowp, cols, nmult, mult, perm, use_exact_degree);
+
+    for (int i = 0; i < nrows; i++) {
+      iperm[perm[i]] = i;
+    }
+
     *perm_ = perm;
     *iperm_ = iperm;
   }

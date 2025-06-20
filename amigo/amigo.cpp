@@ -89,8 +89,9 @@ void bind_vector(py::module_ &m, const std::string &name) {
            });
 }
 
-py::array_t<int> reorder_model(py::array_t<int> output_vars,
-                               std::vector<py::array_t<int>> arrays) {
+py::array_t<int> reorder_model(amigo::OrderingType order_type,
+                               std::vector<py::array_t<int>> arrays,
+                               py::object output_vars = py::none()) {
   std::vector<int> intervals(arrays.size() + 1);
   intervals[0] = 0;
 
@@ -159,38 +160,32 @@ py::array_t<int> reorder_model(py::array_t<int> output_vars,
 
   // Compute the reordering
   int *perm, *iperm;
-  amigo::OrderingUtils::nested_disection(nrows, ncols, rowp, cols, &perm,
-                                         &iperm);
+  if (!output_vars.is_none()) {
+    auto output_array = output_vars.cast<py::array_t<int>>();
+    auto outputs_ = output_array.unchecked<1>();
+
+    int num_outputs = outputs_.shape(0);
+    int *outputs = new int[num_outputs];
+    for (int i = 0; i < num_outputs; i++) {
+      outputs[i] = outputs_[i];
+    }
+
+    amigo::OrderingUtils::reorder_block(order_type, nrows, rowp, cols,
+                                        num_outputs, outputs, &perm, &iperm);
+
+    delete[] outputs;
+  } else {
+    amigo::OrderingUtils::reorder(order_type, nrows, rowp, cols, &perm, &iperm);
+  }
 
   delete[] rowp;
   delete[] cols;
 
-  int *is_output = new int[nrows];
-  std::fill(is_output, is_output + nrows, 0);
-
-  auto outputs = output_vars.unchecked<1>();
-  for (int i = 0; i < outputs.shape(0); i++) {
-    if (outputs[i] >= 0 && outputs[i] < nrows) {
-      is_output[outputs[i]] = 1;
-    }
-  }
-
-  // Create a partition of the inputs and outputs
-  std::stable_partition(perm, perm + nrows,
-                        [&](int index) { return !is_output[index]; });
-
   // Allocate the new partition
-  py::array_t<int> iperm_output(nrows);
-  auto iperm_output_ = iperm_output.mutable_unchecked<1>();
-
-  // Step 3: write values
-  for (ssize_t i = 0; i < nrows; i++) {
-    iperm_output_[perm[i]] = i;
-  }
+  py::array_t<int> iperm_output(nrows, iperm);
 
   delete[] perm;
   delete[] iperm;
-  delete[] is_output;
 
   return iperm_output;
 }
@@ -201,7 +196,14 @@ PYBIND11_MODULE(amigo, mod) {
   mod.attr("A2D_INCLUDE_PATH") = A2D_INCLUDE_PATH;
   mod.attr("AMIGO_INCLUDE_PATH") = AMIGO_INCLUDE_PATH;
 
-  mod.def("reorder_model", &reorder_model);
+  py::enum_<amigo::OrderingType>(mod, "OrderingType")
+      .value("NESTED_DISECTION", amigo::OrderingType::NESTED_DISECTION)
+      .value("AMD", amigo::OrderingType::AMD)
+      .value("NATURAL", amigo::OrderingType::NATURAL)
+      .export_values();
+
+  mod.def("reorder_model", &reorder_model, py::arg("order_type"),
+          py::arg("arrays"), py::arg("output_indices") = py::none());
 
   py::class_<amigo::CSRMat<double>, std::shared_ptr<amigo::CSRMat<double>>>(
       mod, "CSRMat")
@@ -235,7 +237,7 @@ PYBIND11_MODULE(amigo, mod) {
              std::shared_ptr<amigo::OptimizationProblem<double>>>(
       mod, "OptimizationProblem")
       .def(py::init<
-           int, int,
+           int, int, int, bool,
            std::vector<std::shared_ptr<amigo::ComponentGroupBase<double>>>>())
       .def("get_data_vector",
            &amigo::OptimizationProblem<double>::get_data_vector)
@@ -261,7 +263,8 @@ PYBIND11_MODULE(amigo, mod) {
   py::class_<amigo::QuasidefCholesky<double>,
              std::shared_ptr<amigo::QuasidefCholesky<double>>>(
       mod, "QuasidefCholesky")
-      .def(py::init<std::shared_ptr<amigo::CSRMat<double>>>())
+      .def(py::init<std::shared_ptr<amigo::Vector<double>>,
+                    std::shared_ptr<amigo::CSRMat<double>>>())
       .def("factor", &amigo::QuasidefCholesky<double>::factor)
       .def("solve", &amigo::QuasidefCholesky<double>::solve);
 }

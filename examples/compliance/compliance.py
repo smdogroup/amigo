@@ -2,6 +2,7 @@ import amigo as am
 import numpy as np  # used for plotting/analysis
 import argparse
 import time
+import matplotlib.pylab as plt
 
 
 def eval_shape_funcs(xi, eta):
@@ -309,6 +310,26 @@ parser.add_argument(
     default=False,
     help="Enable OpenMP",
 )
+parser.add_argument(
+    "--order-type",
+    choices=["amd", "nd", "natural"],
+    default="amd",
+    help="Ordering strategy to use (default: amd)",
+)
+parser.add_argument(
+    "--order-for-block",
+    dest="order_for_block",
+    action="store_true",
+    default=False,
+    help="Order for 2x2 block KKT matrix",
+)
+parser.add_argument(
+    "--show-sparsity",
+    dest="show_sparsity",
+    action="store_true",
+    default=False,
+    help="Show the sparsity pattern",
+)
 args = parser.parse_args()
 
 nx = 2 * 256
@@ -318,6 +339,17 @@ nelems = nx * ny
 
 nodes = np.arange(nnodes, dtype=int).reshape((nx + 1, ny + 1))
 
+x_coord = np.zeros(nnodes)
+y_coord = np.zeros(nnodes)
+conn = np.zeros((nelems, 4), dtype=int)
+
+xpts = np.linspace(0, 2, nx + 1)
+ypts = np.linspace(0, 1, ny + 1)
+for j in range(ny + 1):
+    for i in range(nx + 1):
+        x_coord[nodes[i, j]] = xpts[i]
+        y_coord[nodes[i, j]] = ypts[j]
+
 conn = np.zeros((nelems, 4), dtype=int)
 for j in range(ny):
     for i in range(nx):
@@ -325,7 +357,6 @@ for j in range(ny):
         conn[ny * i + j, 1] = nodes[i + 1, j]
         conn[ny * i + j, 2] = nodes[i + 1, j + 1]
         conn[ny * i + j, 3] = nodes[i, j + 1]
-
 
 module_name = "compliance"
 model = am.Model(module_name)
@@ -398,18 +429,47 @@ if args.build:
         compile_args=compile_args, link_args=link_args, define_macros=define_macros
     )
 
+
 start = time.perf_counter()
-model.initialize(reorder=True)
+
+if args.order_type == "amd":
+    order_type = am.OrderingType.AMD
+elif args.order_type == "nd":
+    order_type = am.OrderingType.NESTED_DISECTION
+elif args.order_type == "natural":
+    order_type = am.OrderingType.NESTED_DISECTION
+
+order_for_block = args.order_for_block
+model.initialize(order_type=order_type, order_for_block=order_for_block)
+
+# Initialize the problem
+prob = model.create_opt_problem()
+
 end = time.perf_counter()
 print(f"Initialization time:        {end - start:.6f} seconds")
 print(f"Num variables:              {model.num_variables}")
+print(f"Num constraints:            {model.num_constraints}")
 
-prob = model.create_opt_problem()
+# Set the problem data
+data = prob.get_data_vector()
+data_array = data.get_array()
+data_array[model.get_indices("src.x_coord")] = x_coord
+data_array[model.get_indices("src.y_coord")] = y_coord
 
+# Set the initial problem variable values
 x = prob.create_vector()
 x_array = x.get_array()
+x_array[model.get_indices("src.u")] = x_coord + y_coord
+x_array[model.get_indices("src.v")] = x_coord + y_coord
+
+# Set initial design variable values
 x_array[model.get_indices("src.x")] = 1.0
 x_array[model.get_indices("src.rho")] = 1.0
+
+# Set initial multiplier values for the constraints
+x_array[model.get_indices("src.rho_res")] = 1.0
+x_array[model.get_indices("src.u_res")] = 1.0
+x_array[model.get_indices("src.v_res")] = 1.0
 
 start = time.perf_counter()
 mat_obj = prob.create_csr_matrix()
@@ -427,3 +487,15 @@ for i in range(10):
     prob.gradient(x, grad)
 end = time.perf_counter()
 print(f"Residual computation time:  {end - start:.6f} seconds")
+
+if args.show_sparsity:
+    from scipy.sparse import csr_matrix  # For visualization
+
+    nrows, ncols, nnz, rowp, cols = mat_obj.get_nonzero_structure()
+    data = mat_obj.get_data()
+    jac = csr_matrix((data, cols, rowp), shape=(nrows, ncols))
+
+    plt.figure(figsize=(6, 6))
+    plt.spy(jac, markersize=0.2)
+    plt.title("Sparsity pattern of matrix A")
+    plt.show()

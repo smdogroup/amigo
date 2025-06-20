@@ -11,9 +11,14 @@ class OptimizationProblem {
   using Vec = std::shared_ptr<Vector<T>>;
   using Mat = std::shared_ptr<CSRMat<T>>;
 
-  OptimizationProblem(int data_size, int num_variables,
+  OptimizationProblem(int data_size, int num_variables, int num_constraints,
+                      bool order_for_block,
                       std::vector<std::shared_ptr<ComponentGroupBase<T>>> comps)
-      : data_size(data_size), num_variables(num_variables), comps(comps) {
+      : data_size(data_size),
+        num_variables(num_variables),
+        num_constraints(num_constraints),
+        order_for_block(order_for_block),
+        comps(comps) {
     data_vec = std::make_shared<Vector<T>>(data_size);
   }
 
@@ -80,13 +85,20 @@ class OptimizationProblem {
       return ncomp;
     };
 
+    int sqdef_index = -1;
+    if (order_for_block) {
+      sqdef_index = num_variables - num_constraints;
+    }
     return std::make_shared<CSRMat<T>>(num_variables, num_variables,
-                                       intervals[comps.size()], element_nodes);
+                                       intervals[comps.size()], element_nodes,
+                                       sqdef_index);
   }
 
  private:
   int data_size;
   int num_variables;
+  int num_constraints;
+  bool order_for_block;
   std::vector<std::shared_ptr<ComponentGroupBase<T>>> comps;
   Vec data_vec;
 };

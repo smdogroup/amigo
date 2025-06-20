@@ -306,7 +306,7 @@ model = create_cart_model()
 if args.build:
     model.generate_cpp()
 
-    compile_args = ["-g", "-O0"]
+    compile_args = []
     link_args = []
     define_macros = []
     if args.use_openmp:
@@ -318,9 +318,10 @@ if args.build:
         compile_args=compile_args, link_args=link_args, define_macros=define_macros
     )
 
-model.initialize(reorder=True)
+model.initialize(order_for_block=True)
 
-print("num_variables = ", model.num_variables)
+print(f"Num variables:              {model.num_variables}")
+print(f"Num constraints:            {model.num_constraints}")
 
 prob = model.create_opt_problem()
 
@@ -336,7 +337,7 @@ x_array[q_idx[:, 2]] = 1.0
 x_array[q_idx[:, 3]] = 1.0
 
 opt = am.Optimizer(model, prob, x_init=x_array)
-xopt, gnrm = opt.optimize()
+xopt, gnrm = opt.optimize(max_iters=1)
 
 d = xopt[model.get_indices("cart.q[:, 0]")]
 theta = xopt[model.get_indices("cart.q[:, 1]")]
@@ -347,7 +348,8 @@ plot_convergence(gnrm)
 visualize(d, theta)
 
 if args.show_sparsity:
+    H = opt.hessian()
     plt.figure(figsize=(6, 6))
-    plt.spy(opt.hessian(), markersize=0.2)
+    plt.spy(H, markersize=0.2)
     plt.title("Sparsity pattern of matrix A")
     plt.show()

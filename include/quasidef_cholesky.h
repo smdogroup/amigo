@@ -160,7 +160,9 @@ void lapack_pptrf(const char *c, int *n, T *ap, int *info) {
 template <typename T>
 class QuasidefCholesky {
  public:
-  QuasidefCholesky(std::shared_ptr<CSRMat<T>> mat) : mat(mat) {
+  QuasidefCholesky(std::shared_ptr<Vector<T>> diag,
+                   std::shared_ptr<CSRMat<T>> mat)
+      : diag(diag), mat(mat) {
     // Set the values
     size = mat->nrows;
 
@@ -273,7 +275,7 @@ class QuasidefCholesky {
   */
   int factor() {
     // Set values from the matrix
-    set_values(mat->rowp, mat->cols, mat->data);
+    set_values(diag->get_array(), mat->rowp, mat->cols, mat->data);
 
     int rflag = 0;
     int *list = new int[num_snodes];  // List pointer
@@ -473,7 +475,8 @@ class QuasidefCholesky {
     @param Arows Row indices of the nonzero entries
     @param Avals The numerical values
   */
-  void set_values(const int Acolp[], const int Arows[], const T Avals[]) {
+  void set_values(const T diagonal[], const int Acolp[], const int Arows[],
+                  const T Avals[]) {
     std::fill(data, data + data_ptr[num_snodes], T(0.0));
 
     for (int j = 0; j < size; j++) {
@@ -497,6 +500,9 @@ class QuasidefCholesky {
 
               T *D = get_diag_pointer(sj);
               D[get_diag_index(ii, jj)] -= Avals[ip];
+              if (ii == jj) {
+                D[get_diag_index(ii, jj)] += diagonal[i];
+              }
             } else {
               int jj = j - jfirst;
 
@@ -519,6 +525,9 @@ class QuasidefCholesky {
 
               T *D = get_diag_pointer(sj);
               D[get_diag_index(ii, jj)] += Avals[ip];
+              if (ii == jj) {
+                D[get_diag_index(ii, jj)] += diagonal[i];
+              }
             } else {
               int jj = j - jfirst;
 
@@ -878,6 +887,9 @@ class QuasidefCholesky {
     const int dsize = node_size * (node_size + 1) / 2;
     return &data[data_ptr[i] + dsize];
   }
+
+  // The diagonal entries of the matrix D and C
+  std::shared_ptr<Vector<T>> diag;
 
   // The matrix
   std::shared_ptr<CSRMat<T>> mat;
