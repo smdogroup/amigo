@@ -337,7 +337,7 @@ x_array[q_idx[:, 2]] = 1.0
 x_array[q_idx[:, 3]] = 1.0
 
 opt = am.Optimizer(model, prob, x_init=x_array)
-xopt, gnrm = opt.optimize()
+xopt, gnrm = opt.optimize(max_iters=100)
 
 d = xopt[model.get_indices("cart.q[:, 0]")]
 theta = xopt[model.get_indices("cart.q[:, 1]")]
@@ -348,7 +348,8 @@ plot_convergence(gnrm)
 visualize(d, theta)
 
 if args.show_sparsity:
+    H = opt.hessian()
     plt.figure(figsize=(6, 6))
-    plt.spy(opt.hessian(), markersize=0.2)
+    plt.spy(H, markersize=0.2)
     plt.title("Sparsity pattern of matrix A")
     plt.show()

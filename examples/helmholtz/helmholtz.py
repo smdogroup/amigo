@@ -218,6 +218,9 @@ data_array[model.get_indices("src.x_coord")] = x_coord
 data_array[model.get_indices("src.y_coord")] = y_coord
 
 mat = prob.create_csr_matrix()
+diag = prob.create_vector()
+
+# Vectors for solving the problem
 x = prob.create_vector()
 ans = prob.create_vector()
 g = prob.create_vector()
@@ -227,7 +230,7 @@ prob.gradient(x, ans)
 prob.gradient(x, g)
 
 prob.hessian(x, mat)
-chol = am.QuasidefCholesky(mat)
+chol = am.QuasidefCholesky(diag, mat)
 flag = chol.factor()
 print("flag = ", flag)
 chol.solve(ans)

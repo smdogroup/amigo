@@ -412,7 +412,7 @@ struct __get_collection_ncomp<T> {
 
 template <class T, class... Ts>
 struct __get_collection_ncomp<T, Ts...> {
-  static constexpr int value = __get_collection_ncomp<Ts...>::ncomp;
+  static constexpr int value = __get_collection_ncomp<Ts...>::value;
 };
 
 template <class... Ts>
@@ -438,7 +438,7 @@ struct __get_collection_ndata<T> {
 
 template <class T, class... Ts>
 struct __get_collection_ndata<T, Ts...> {
-  static constexpr int value = __get_collection_ndata<Ts...>::ndata;
+  static constexpr int value = __get_collection_ndata<Ts...>::value;
 };
 
 template <typename T, class... Components>

@@ -81,7 +81,7 @@ class Optimizer:
         if info != 0:
             raise RuntimeError("Factorization failed")
 
-    def optimize(self, max_iters=10):
+    def optimize(self, max_iters=75):
         x = self.x.get_array()
         if self.x_init is not None:
             x[:] = self.x_init

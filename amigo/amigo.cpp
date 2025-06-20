@@ -159,38 +159,49 @@ py::array_t<int> reorder_model(py::array_t<int> output_vars,
 
   // Compute the reordering
   int *perm, *iperm;
-  amigo::OrderingUtils::nested_disection(nrows, ncols, rowp, cols, &perm,
-                                         &iperm);
+  // amigo::OrderingUtils::nested_disection(nrows, ncols, rowp, cols, &perm,
+  //                                        &iperm);
 
+  auto outputs_ = output_vars.unchecked<1>();
+
+  int num_outputs = outputs_.shape(0);
+  int *outputs = new int[num_outputs];
+  for (int i = 0; i < num_outputs; i++) {
+    outputs[i] = outputs_[i];
+  }
+
+  amigo::OrderingUtils::amd(nrows, rowp, cols, num_outputs, outputs, &perm,
+                            &iperm);
+
+  delete[] outputs;
   delete[] rowp;
   delete[] cols;
 
-  int *is_output = new int[nrows];
-  std::fill(is_output, is_output + nrows, 0);
+  // int *is_output = new int[nrows];
+  // std::fill(is_output, is_output + nrows, 0);
 
-  auto outputs = output_vars.unchecked<1>();
-  for (int i = 0; i < outputs.shape(0); i++) {
-    if (outputs[i] >= 0 && outputs[i] < nrows) {
-      is_output[outputs[i]] = 1;
-    }
-  }
+  // for (int i = 0; i < outputs.shape(0); i++) {
+  //   if (outputs[i] >= 0 && outputs[i] < nrows) {
+  //     is_output[outputs[i]] = 1;
+  //   }
+  // }
 
-  // Create a partition of the inputs and outputs
-  std::stable_partition(perm, perm + nrows,
-                        [&](int index) { return !is_output[index]; });
+  // // Create a partition of the inputs and outputs
+  // std::stable_partition(perm, perm + nrows,
+  //                       [&](int index) { return !is_output[index]; });
 
   // Allocate the new partition
   py::array_t<int> iperm_output(nrows);
   auto iperm_output_ = iperm_output.mutable_unchecked<1>();
 
-  // Step 3: write values
-  for (ssize_t i = 0; i < nrows; i++) {
-    iperm_output_[perm[i]] = i;
+  // Set the output values
+  for (int i = 0; i < nrows; i++) {
+    iperm_output_[i] = iperm[i];
   }
 
   delete[] perm;
   delete[] iperm;
-  delete[] is_output;
+  // delete[] is_output;
 
   return iperm_output;
 }

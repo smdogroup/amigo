@@ -3,6 +3,8 @@
 
 #include <algorithm>
 
+#include "block_amd.h"
+
 #ifdef AMIGO_USE_METIS
 extern "C" {
 #include "metis.h"
@@ -42,6 +44,25 @@ class OrderingUtils {
       iperm[i] = i;
     }
 #endif
+    *perm_ = perm;
+    *iperm_ = iperm;
+  }
+
+  /**
+   * @brief Perform an AMD reordering
+   */
+  static void amd(int nrows, int *rowp, int *cols, int nmult, int *mult,
+                  int **perm_, int **iperm_) {
+    int *perm = new int[nrows];
+    int *iperm = new int[nrows];
+
+    int use_exact_degree = 0;
+    BlockAMD::amd(nrows, rowp, cols, nmult, mult, perm, use_exact_degree);
+
+    for (int i = 0; i < nrows; i++) {
+      iperm[perm[i]] = i;
+    }
+
     *perm_ = perm;
     *iperm_ = iperm;
   }
