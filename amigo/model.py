@@ -396,12 +396,19 @@ class Model:
                 b_all = self.get_indices(b_var)
                 b_indices = self._get_slice_indices(b_all, b_slice, b_idx)
 
-                if a_indices.shape != b_indices.shape:
+                if a_indices.shape == b_indices.shape:
+                    tracker.alias(a_indices.flatten(), b_indices.flatten())
+                elif a_indices.size == 1:
+                    a_temp = a_indices * np.ones(b_indices.shape, dtype=int)
+                    tracker.alias(a_temp.flatten(), b_indices.flatten())
+                elif b_indices.size == 1:
+                    b_temp = b_indices * np.ones(a_indices.shape, dtype=int)
+                    tracker.alias(a_indices.flatten(), b_temp.flatten())
+                else:  
                     raise ValueError(
                         f"Incompatible link {a_expr} {a_indices.shape} and {b_expr} {b_indices.shape}"
                     )
 
-                tracker.alias(a_indices.flatten(), b_indices.flatten())
 
         # Order the aliased variables first. These are
         counter, vars = tracker.assign_group_vars()
@@ -484,7 +491,7 @@ class Model:
         elif name in self.comp[comp_name].data:
             return "data"
         else:
-            raise ValueError(f"Name {name} is neither a variable or data")
+            raise ValueError(f"Name {comp_name}.{name} is neither a variable or data")
 
     def get_indices(self, name: str):
         """

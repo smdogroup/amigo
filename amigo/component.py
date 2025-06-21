@@ -170,6 +170,43 @@ def _generate_cpp_types(inputs, template_name="T__"):
     return lines
 
 
+class VarMeta:
+    def __init__(self, name, **kwargs):
+        self.name = name
+        self.shape = kwargs.pop("shape", (1))
+        self.value = kwargs.pop("value", 0.0)
+        self.type  = kwargs.pop("type", float)
+        self.lower = kwargs.pop("lower", float("-inf"))
+        self.upper = kwargs.pop("upper", float("inf"))
+        self.label = kwargs.pop("label", None)
+        self.units = kwargs.pop("units", None)
+        self.scale = kwargs.pop("scale", 1.0)
+        self.label = kwargs.pop("label", None)
+
+        if len(kwargs) > 0:
+            raise ValueError(f"Unknown options: {kwargs}")
+
+        self._validate()
+
+    def _validate(self):
+        if not isinstance(self.value, self.type):
+            raise TypeError(f"value must be of type {self.type.__name__}")
+        if not isinstance(self.scale, (int, float)):
+            raise TypeError("scale must be a number")
+        if not isinstance(self.lower, (int, float)):
+            raise TypeError("lower must be a number")
+        if not isinstance(self.upper, (int, float)):
+            raise TypeError("upper must be a number")
+        if self.lower > self.upper:
+            raise ValueError("lower bound cannot be greater than upper bound")
+        if not self.lower <= self.value <= self.upper:
+            raise ValueError("value must be within [lower, upper]")
+
+    def __repr__(self):
+        return (f"Parameter(value={self.value}, type={self.type.__name__}, "
+                f"lower={self.lower}, upper={self.upper}, label={self.label}, "
+                f"units={self.units}, scale={self.scale})")
+
 class InputSet:
     """
     The set of input values that are
@@ -177,12 +214,11 @@ class InputSet:
 
     def __init__(self):
         self.inputs = {}
-        self.labels = {}
+        self.meta = {}
 
-    def add(self, name, shape=None, type=float, label="input"):
-        node = VarNode(name, shape=shape, type=type, active=True)
-        self.inputs[name] = node
-        self.labels[name] = label
+    def add(self, name, shape=None, **kwargs):
+        self.inputs[name] = VarNode(name, shape=shape, active=True)
+        self.meta[name] = VarMeta(name=name, shape=shape, **kwargs)
         return
 
     def get_num_inputs(self):
@@ -199,8 +235,8 @@ class InputSet:
             raise KeyError(f"{name} not in declared inputs")
         return Expr(self.inputs[name])
 
-    def get_info(self, name):
-        return self.inputs[name].shape, self.inputs[name].type, self.labels[name]
+    def get_shape(self, name):
+        return self.inputs[name].shape
 
     def generate_cpp_types(self, template_name="T__"):
         return _generate_cpp_types(self.inputs, template_name=template_name)
@@ -230,12 +266,13 @@ class InputSet:
 class ConstantSet:
     def __init__(self):
         self.inputs = {}
-        self.labels = {}
+        self.meta = {}
 
-    def add(self, name, value, type=float, label="const"):
-        node = ConstNode(name=name, value=value, type=type)
-        self.inputs[name] = node
-        self.labels[name] = label
+    def add(self, name, value, type=float, **kwargs):
+        if "shape" in kwargs and kwargs["shape"] != None:
+            raise ValueError("Constants must be scalars")
+        self.inputs[name] = ConstNode(name=name, value=value, type=type)
+        self.meta[name] = VarMeta(name, value=value, shape=None, type=type, **kwargs)
         return
 
     def __iter__(self):
@@ -246,8 +283,8 @@ class ConstantSet:
             raise KeyError(f"{name} not in declared constants")
         return Expr(self.inputs[name])
 
-    def get_info(self, name):
-        return self.inputs[name].shape, self.inputs[name].type, self.labels[name]
+    def get_shape(self, name):
+        return self.inputs[name].shape
 
     def generate_cpp_const_decl(self):
         lines = []
@@ -391,11 +428,11 @@ class VarSet:
 class DataSet:
     def __init__(self):
         self.data = {}
-        self.labels = {}
+        self.meta = {}
 
-    def add(self, name, shape=None, type=float, label=None):
+    def add(self, name, shape=None, type=float, **kwargs):
         self.data[name] = VarNode(name, shape=shape, type=type, active=False)
-        self.labels[name] = label
+        self.meta[name] = VarMeta(name, shape=shape, type=type, **kwargs)
 
     def __len__(self):
         return len(self.data)
@@ -415,8 +452,8 @@ class DataSet:
         )
         return lines
 
-    def get_info(self, name):
-        return self.data[name].shape, self.data[name].type, self.labels[name]
+    def get_shape(self, name):
+        return self.data[name].shape
 
 
 class OutputSet:
@@ -441,12 +478,12 @@ class OutputSet:
 
     def __init__(self, lagrangian_name="lagrangian__"):
         self.outputs = {}
-        self.labels = {}
+        self.meta = {}
         self.lagrangian_name = lagrangian_name
 
-    def add(self, name, type=float, shape=None, label="output"):
+    def add(self, name, shape=None, type=float, **kwargs):
         self.outputs[name] = self.OutputExpr(name, shape=shape, type=type)
-        self.labels[name] = label
+        self.meta[name] = VarMeta(name, shape=shape, type=type, **kwargs)
         return
 
     def clear(self):
@@ -482,8 +519,8 @@ class OutputSet:
 
         return
 
-    def get_info(self, name):
-        return self.outputs[name].shape, self.outputs[name].type, self.labels[name]
+    def get_shape(self, name):
+        return self.outputs[name].shape
 
     def evaluate(self, name, env):
         return self.outputs[name].node.evaluate(env)
@@ -534,7 +571,7 @@ class OutputSet:
             lines.append(f"A2D::A2DObj<{template_name}> {self.lagrangian_name}")
         return lines
 
-    def _lagrangian_evaluation(self, obj_expr=None):
+    def _lagrangian_evaluation(self, res_names, obj_expr=None):
         expr_list = []
 
         mult_names = self._get_multiplier_names()
@@ -543,15 +580,18 @@ class OutputSet:
             name = self.outputs[item].name
 
             if shape is None:
-                expr_list.append(f"{name} * {mult_names[name]}")
+                res_name = res_names[name]
+                expr_list.append(f"({res_name}) * {mult_names[name]}")
             elif len(shape) == 1:
                 for i in range(shape[0]):
-                    expr_list.append(f"{name}[{i}] * {mult_names[name]}[{i}]")
+                    res_name = res_names[name][i]
+                    expr_list.append(f"({res_name}) * {mult_names[name]}[{i}]")
             elif len(shape) == 2:
                 for i in range(shape[0]):
                     for j in range(shape[1]):
+                        res_name = res_names[name][i][j]
                         expr_list.append(
-                            f"{name}({i}, {j}) * {mult_names[name]}({i}, {j})"
+                            f"({res_name}) * {mult_names[name]}({i}, {j})"
                         )
 
         if obj_expr is None:
@@ -569,44 +609,44 @@ class OutputSet:
         lines = []
 
         if mode == "eval":
-            for item in self.outputs:
-                shape = self.outputs[item].shape
-                name = self.outputs[item].name
-                if shape is None:
-                    rhs = self.outputs[item].expr.generate_cpp()
-                    lines.append(f"{name} = {rhs}")
-                elif len(shape) == 1:
-                    for i in range(shape[0]):
-                        rhs = self.outputs[item].expr[i].generate_cpp()
-                        lines.append(f"{name}[{i}] = {rhs}")
-                elif len(shape) == 2:
-                    for i in range(shape[0]):
-                        for j in range(shape[1]):
-                            rhs = self.outputs[item].expr[i][j].generate_cpp()
-                            lines.append(f"{name}({i}, {j}) = {rhs}")
-
-            rhs = self._lagrangian_evaluation(obj_expr=obj_expr)
-            lines.append(f"{self.lagrangian_name} = {rhs}")
+            make_line = lambda name, rhs : f"{name} = {rhs}"
         else:
-            for item in self.outputs:
-                shape = self.outputs[item].shape
-                name = self.outputs[item].name
+            make_line = lambda name, rhs : f"A2D::Eval({rhs}, {name})"
 
-                if shape is None:
-                    rhs = self.outputs[item].expr.generate_cpp()
-                    lines.append(f"A2D::Eval({rhs}, {name})")
-                elif len(shape) == 1:
-                    for i in range(shape[0]):
-                        rhs = self.outputs[item].expr[i].generate_cpp()
-                        lines.append(f"A2D::Eval({rhs}, {name}[{i}])")
-                elif len(shape) == 2:
-                    for i in range(shape[0]):
-                        for j in range(shape[1]):
-                            rhs = self.outputs[item].expr[i][j].generate_cpp()
-                            lines.append(f"A2D::Eval({rhs}, {name}({i}, {j}))")
+        res_names = {}
+        for item in self.outputs:
+            shape = self.outputs[item].shape
+            name = self.outputs[item].name
+            if shape is None:
+                rhs = self.outputs[item].expr.generate_cpp()
+                if self.outputs[name].expr.active:
+                    res_names[name] = name
+                    lines.append(make_line(name, rhs))
+                else:
+                    res_names[name] = rhs
+            elif len(shape) == 1:
+                res_names[name] = []
+                for i in range(shape[0]):
+                    rhs = self.outputs[item].expr[i].generate_cpp()
+                    if self.outputs[name].expr[i].active:
+                        res_names[name].append(f"{name}[{i}]")
+                        lines.append(make_line(f"{name}[{i}]", rhs))
+                    else:
+                        res_names[name].append(rhs)
+            elif len(shape) == 2:
+                res_names[name] = []
+                for i in range(shape[0]):
+                    res_names[name][i].append([])
+                    for j in range(shape[1]):
+                        rhs = self.outputs[item].expr[i][j].generate_cpp()
+                        if self.outputs[name].expr[i][j].active:
+                            res_names[name][i].append(f"{name}({i}, {j})")
+                            lines.append(make_line(f"{name}({i}, {j}", rhs))
+                        else:
+                            res_names[name].append(rhs)
 
-            rhs = self._lagrangian_evaluation(obj_expr=obj_expr)
-            lines.append(f"A2D::Eval({rhs}, {self.lagrangian_name})")
+        rhs = self._lagrangian_evaluation(res_names, obj_expr=obj_expr)
+        lines.append(make_line(f"{self.lagrangian_name}", rhs))
 
         return lines
 
@@ -614,13 +654,17 @@ class OutputSet:
 class ObjectiveSet:
     def __init__(self):
         self.expr = {}
+        self.meta = {}
 
-    def add(self, name, type=float, shape=None):
+    def add(self, name, shape=None, type=float, **kwargs):
         if shape != None:
             raise ValueError("Objective must be a scalar")
         if len(self.expr) == 1:
             raise ValueError("Cannot add more than one objective")
+        if "scale" in kwargs:
+            raise ValueError("Objective function cannot be scaled through kwargs")
         self.expr[name] = None
+        self.meta[name] = VarMeta(name, shape=shape, type=type, **kwargs)
         return
 
     def __len__(self):
@@ -674,24 +718,39 @@ class Component:
         self.compute_args = compute_args
         return
 
-    def add_constant(self, name, value, type=float, label="const"):
-        self.constants.add(name, value, type=type, label=label)
+    def add_constant(self, name, value, **kwargs):
+        """
+        Add constant values to the component
+        """
+        self.constants.add(name, value=value, **kwargs)
         return
 
-    def add_input(self, name, type=float, shape=None, label="input"):
-        self.inputs.add(name, type=type, shape=shape, label=label)
+    def add_input(self, name, shape=None, lower=float("-inf"), upper=float("inf"), **kwargs):
+        """
+        Add inputs to the component. Note that inputs by default have no lower or upper bounds.
+        """
+        self.inputs.add(name, shape=shape, lower=lower, upper=upper, **kwargs)
         return
 
-    def add_output(self, name, type=float, shape=None, label="output"):
-        self.outputs.add(name, type=type, shape=shape, label=label)
+    def add_output(self, name, shape=None, lower=0.0, upper=0.0, **kwargs):
+        """
+        Add outputs to the component. By default, outputs are equality constraints.
+        """
+        self.outputs.add(name, shape=shape, lower=lower, upper=upper, **kwargs)
         return
 
-    def add_objective(self, name, type=float):
-        self.objective.add(name, type=type)
+    def add_objective(self, name, **kwargs):
+        """
+        Add a scalar objective function
+        """
+        self.objective.add(name, **kwargs)
         return
 
-    def add_data(self, name, type=float, shape=None):
-        self.data.add(name, type=type, shape=shape)
+    def add_data(self, name, shape=None, **kwargs):
+        """
+        Add component data that will be loaded into the problem
+        """
+        self.data.add(name, shape=shape, **kwargs)
         return
 
     def is_empty(self):
@@ -714,11 +773,11 @@ class Component:
     def get_var_shapes(self):
         var_shapes = {}
         for name in self.inputs:
-            shape, _, _ = self.inputs.get_info(name)
+            shape = self.inputs.get_shape(name)
             var_shapes[name] = shape
 
         for name in self.outputs:
-            shape, _, _ = self.outputs.get_info(name)
+            shape = self.outputs.get_shape(name)
             var_shapes[name] = shape
 
         return var_shapes
@@ -726,7 +785,7 @@ class Component:
     def get_data_shapes(self):
         data_shapes = {}
         for name in self.data:
-            shape, _, _ = self.data.get_info(name)
+            shape = self.data.get_shape(name)
             data_shapes[name] = shape
 
         return data_shapes

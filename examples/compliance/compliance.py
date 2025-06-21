@@ -3,6 +3,8 @@ import numpy as np  # used for plotting/analysis
 import argparse
 import time
 import matplotlib.pylab as plt
+from scipy.sparse.linalg import spsolve
+from scipy.sparse import csr_matrix
 
 
 def eval_shape_funcs(xi, eta):
@@ -139,7 +141,7 @@ class Topology(am.Component):
             compute_args.append({"n": n})
         self.set_compute_args(compute_args)
 
-        # The filter radius
+        # Constants
         self.add_constant("p", 3.0)
         self.add_constant("E", 1.0)
         self.add_constant("nu", 0.3)
@@ -149,7 +151,7 @@ class Topology(am.Component):
         self.add_data("x_coord", shape=(4,))
         self.add_data("y_coord", shape=(4,))
 
-        # The implicit topology input/output
+        # The inputs to the problem
         self.add_input("rho", shape=(4,))
         self.add_input("u", shape=(4,))
         self.add_input("v", shape=(4,))
@@ -157,6 +159,9 @@ class Topology(am.Component):
         # Add the residuals
         self.add_output("u_res", shape=(4,))
         self.add_output("v_res", shape=(4,))
+
+        # Add the objective
+        self.add_objective("compliance")
 
         return
 
@@ -191,10 +196,17 @@ class Topology(am.Component):
         self.vars["Ux"] = [[dot(Nx, u), dot(Ny, u)], [dot(Nx, v), dot(Ny, v)]]
         Ux = self.vars["Ux"]
 
+        self.vars["e"] = [
+            Ux[0, 0],
+            Ux[1, 1],
+            (Ux[0, 1] + Ux[1, 0]),
+        ]
+        e = self.vars["e"]
+
         self.vars["s"] = [
-            E0 / (1.0 - nu * nu) * (Ux[0, 0] + nu * Ux[1, 1]),
-            E0 / (1.0 - nu * nu) * (Ux[1, 1] + nu * Ux[0, 0]),
-            0.5 * E0 / (1.0 + nu) * (Ux[0, 1] + Ux[1, 0]),
+            E0 / (1.0 - nu * nu) * (e[0] + nu * e[1]),
+            E0 / (1.0 - nu * nu) * (e[1] + nu * e[0]),
+            0.5 * E0 / (1.0 + nu) * e[2],
         ]
         s = self.vars["s"]
 
@@ -213,16 +225,23 @@ class Topology(am.Component):
             detJ * (Nx[3] * s[2] + Ny[3] * s[1]),
         ]
 
+        # Add the objective values
+        self.objective["compliance"] = (
+            0.5 * detJ * (s[0] * e[0] + s[1] * e[1] + s[2] * e[2])
+        )
+
         return
 
 
-def mass_factory(pt: int):
-    qpts = [-1.0 / np.sqrt(3.0), 1.0 / np.sqrt(3.0)]
+class MassConstraint(am.Component):
+    def __init__(self):
+        super().__init__()
 
-    def init_func(self):
-        am.Component.__init__(self)
-        self.xi = qpts[pt % 2]
-        self.eta = qpts[pt // 2]
+        # Add keyword arguments for the compute function
+        compute_args = []
+        for n in range(4):
+            compute_args.append({"n": n})
+        self.set_compute_args(compute_args)
 
         self.add_constant("mass_fraction", value=0.4)
 
@@ -236,7 +255,12 @@ def mass_factory(pt: int):
         # Add the residuals
         self.add_output("mass_con")
 
-    def compute(self):
+    def compute(self, n=None):
+        qpts = [-1.0 / np.sqrt(3.0), 1.0 / np.sqrt(3.0)]
+
+        xi = qpts[n % 2]
+        eta = qpts[n // 2]
+
         mass_fraction = self.constants["mass_fraction"]
 
         # Extract the input variables
@@ -246,16 +270,13 @@ def mass_factory(pt: int):
         X = self.data["x_coord"]
         Y = self.data["y_coord"]
 
-        compute_detJ(self.xi, self.eta, X, Y, self.vars)
+        compute_detJ(xi, eta, X, Y, self.vars)
         detJ = self.vars["detJ"]
         rho0 = 0.25 * (rho[0] + rho[1] + rho[2] + rho[3])
 
         self.outputs["mass_con"] = detJ * (rho0 - mass_fraction)
 
-    class_name = f"Mass{pt}"
-    return type(
-        class_name, (am.Component,), {"__init__": init_func, "compute": compute}
-    )()
+        return
 
 
 class FixedBoundaryCondition(am.Component):
@@ -272,9 +293,22 @@ class FixedBoundaryCondition(am.Component):
         self.outputs["v_res"] = self.inputs["v"]
 
 
-class Compliance(am.Component):
-    pass
+class AppliedLoad(am.Component):
+    def __init__(self):
+        super().__init__()
 
+        self.add_output("u_res")
+        self.add_output("v_res")
+        self.add_constant("fx", value=-10.0)
+        self.add_constant("fy", value=-10.0)
+        return
+
+    def compute(self):
+        fx = self.constants["fx"]
+        fy = self.constants["fy"]
+        self.outputs["u_res"] = -fx   
+        self.outputs["v_res"] = -fy    
+        return
 
 class NodeSource(am.Component):
     def __init__(self):
@@ -332,8 +366,8 @@ parser.add_argument(
 )
 args = parser.parse_args()
 
-nx = 2 * 256
-ny = 2 * 128
+nx = 256
+ny = 128
 nnodes = (nx + 1) * (ny + 1)
 nelems = nx * ny
 
@@ -391,28 +425,29 @@ model.link("topo.v_res", "src.v_res", tgt_indices=conn)
 # Link the filtered density field
 model.link("topo.rho", "src.rho", tgt_indices=conn)
 
-# for n in range(0):
-#     topo = mass_factory(n)
-#     name = f"mass{n}"
+# Add the mass constraint
+mass_con = MassConstraint()
+model.add_component("mass", nelems, mass_con)
 
-#     model.add_component(name, nelems, topo)
+# Link the mass constraint inputs
+model.link("mass.x_coord", "src.x_coord", tgt_indices=conn)
+model.link("mass.y_coord", "src.y_coord", tgt_indices=conn)
+model.link("mass.rho", "src.rho", tgt_indices=conn)
 
-#     # Link the data
-#     model.link(name + ".x_coord", "src.x_coord", tgt_indices=conn)
-#     model.link(name + ".y_coord", "src.y_coord", tgt_indices=conn)
+# Set up the mass constraint
+model.link("mass.mass_con[1:]", "mass.mass_con[0]")
 
-#     # Link the filtered density field
-#     model.link(name + ".rho", "src.rho", tgt_indices=conn)
+# Add boundary conditions
+bcs = FixedBoundaryCondition()
+model.add_component("bcs", (ny + 1), bcs)
+model.link("src.u", "bcs.u", src_indices=nodes[0, :])
+model.link("src.v", "bcs.v", src_indices=nodes[0, :])
 
-#     if n == 0:
-#         model.link(
-#             name + ".mass_con",
-#             name + ".mass_con",
-#             src_indices=np.zeros(nelems - 1, dtype=int),
-#             tgt_indices=np.arange(1, nelems, dtype=int),
-#         )
-#     else:
-#         model.link(name + ".mass_con", f"mass{n-1}.mass_con")
+# Set the applied load
+load = AppliedLoad()
+model.add_component("load", 1, load)
+model.link("src.u_res", "load.u_res", src_indices=nodes[-1, 0])
+model.link("src.v_res", "load.v_res", src_indices=nodes[-1, 0])
 
 if args.build:
     model.generate_cpp()
@@ -429,7 +464,6 @@ if args.build:
         compile_args=compile_args, link_args=link_args, define_macros=define_macros
     )
 
-
 start = time.perf_counter()
 
 if args.order_type == "amd":
@@ -437,7 +471,7 @@ if args.order_type == "amd":
 elif args.order_type == "nd":
     order_type = am.OrderingType.NESTED_DISECTION
 elif args.order_type == "natural":
-    order_type = am.OrderingType.NESTED_DISECTION
+    order_type = am.OrderingType.NATURAL
 
 order_for_block = args.order_for_block
 model.initialize(order_type=order_type, order_for_block=order_for_block)
@@ -489,8 +523,6 @@ end = time.perf_counter()
 print(f"Residual computation time:  {end - start:.6f} seconds")
 
 if args.show_sparsity:
-    from scipy.sparse import csr_matrix  # For visualization
-
     nrows, ncols, nnz, rowp, cols = mat_obj.get_nonzero_structure()
     data = mat_obj.get_data()
     jac = csr_matrix((data, cols, rowp), shape=(nrows, ncols))
@@ -499,3 +531,28 @@ if args.show_sparsity:
     plt.spy(jac, markersize=0.2)
     plt.title("Sparsity pattern of matrix A")
     plt.show()
+
+# for i in range(20):
+#     # Compute the gradient and form the Hessian
+#     prob.gradient(x, grad)
+#     prob.hessian(x, mat_obj)
+
+#     nrows, ncols, nnz, rowp, cols = mat_obj.get_nonzero_structure()
+#     data = mat_obj.get_data()
+#     jac = csr_matrix((data, cols, rowp), shape=(nrows, ncols))
+
+#     p = spsolve(jac, grad.get_array())
+
+#     # Compute the update
+#     x.get_array()[:] -= 0.25 * p
+
+
+X, Y = np.meshgrid(xpts, ypts)
+vals = x.get_array()[model.get_indices("src.rho")]
+vals = vals.reshape((nx + 1, ny + 1)).T
+
+# Plot using contourf
+plt.contourf(X, Y, vals, levels=20, cmap="viridis")
+plt.colorbar(label="Z value")
+plt.xlabel("x")
+plt.ylabel("y")
