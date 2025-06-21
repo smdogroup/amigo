@@ -224,7 +224,8 @@ PYBIND11_MODULE(amigo, mod) {
                          mat.nnz * sizeof(double));
              return data;
            })
-      .def("mult", &amigo::CSRMat<double>::mult);
+      .def("mult", &amigo::CSRMat<double>::mult)
+      .def("add_diagonal", &amigo::CSRMat<double>::add_diagonal);
 
   bind_vector<int>(mod, "VectorInt");
   bind_vector<double>(mod, "Vector");

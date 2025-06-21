@@ -86,6 +86,33 @@ class CSRMat {
 
   void zero() { std::fill(data, data + nnz, 0.0); }
 
+  /**
+   * @brief Add diagonal entries to the matrix
+   *
+   * @param x The vector of diagonal elements
+   */
+  void add_diagonal(const std::shared_ptr<Vector<T>>& x) {
+    const T* x_array = x->get_array();
+    for (int row = 0; row < nrows; row++) {
+      int size = rowp[row + 1] - rowp[row];
+      int* start = &cols[rowp[row]];
+      int* end = start + size;
+      auto* it = std::lower_bound(start, end, row);
+      if (it != end && *it == row) {
+        data[it - cols] += x_array[row];
+      }
+    }
+  }
+
+  /**
+   * @brief Add a row to the matrix
+   *
+   * @tparam ArrayType Type of the array that stores the data
+   * @param row Row index
+   * @param nvalues Number of values to add
+   * @param indices Indices of length nvalues
+   * @param values Numerical values to add to the matrix
+   */
   template <class ArrayType>
   void add_row(int row, int nvalues, const int indices[],
                const ArrayType values) {

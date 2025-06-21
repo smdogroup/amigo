@@ -597,7 +597,9 @@ class Model:
             objs,
         )
 
-    def get_values_from_meta(self, meta_name: str):
+    def get_values_from_meta(
+        self, meta_name: str, x: Union[None, List, np.ndarray] = None
+    ):
         """
         Set values into the provided list or array.
 
@@ -617,7 +619,8 @@ class Model:
                 "Must call initialize before calling get_values_from_meta"
             )
 
-        x = np.zeros(self.num_variables)
+        if x is None:
+            x = np.zeros(self.num_variables)
         for comp_name, comp in self.comp.items():
             for var_name in comp.vars:
                 name = comp_name + "." + var_name
