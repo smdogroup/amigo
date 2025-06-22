@@ -2,8 +2,49 @@
 #define AMIGO_OPTIMIZER_H
 
 #include "component_group_base.h"
+#include "optimization_problem.h"
 
 namespace amigo {
+
+/**
+ * @brief Optimization vector that stores all the info
+ *
+ * @tparam T Numerical type for the computations
+ */
+template <typename T>
+class OptVector {
+ public:
+  OptVector(std::shared_ptr<OptimizationProblem<T>> problem) {
+    x = problem->create_vector();
+    xs = problem->create_vector();
+    zl = problem->create_vector();
+    zu = problem->create_vector();
+  }
+
+  OptVector(std::shared_ptr<Vector<T>> x,
+            std::shared_ptr<OptimizationProblem<T>> problem)
+      : x(x) {
+    xs = problem->create_vector();
+    zl = problem->create_vector();
+    zu = problem->create_vector();
+
+    // Set the design variable values in xs as well
+    Vector<T>& x_ = *x;
+    Vector<T>& xs_ = *xs;
+    int num_variables = problem->get_num_variables();
+    const Vector<int>& is_multplier = *problem->get_multiplier_indicator();
+    for (int i = 0; i < num_variables; i++) {
+      if (!is_multiplier[i]) {
+        xs_[i] = x_[i];
+      }
+    }
+  }
+
+  std::shared_ptr<Vector<T>> x;   // The primal-dual variables
+  std::shared_ptr<Vector<T>> xs;  // Primal-slack variables
+  std::shared_ptr<Vector<T>> zl;  // Multipliers for the lower bounds
+  std::shared_ptr<Vector<T>> zu;  // Multipliers for the upper bounds
+};
 
 /**
  * @brief Class for implementing the primary numerical contributions from an
@@ -97,38 +138,54 @@ namespace amigo {
  * [(H + D) |   A^{T} ][ px   ] = [ rx ]
  * [A       | -C^{-1} ][ plam ] = [ rc ]
  *
- * @tparam T
+ * @tparam T Numerical type for the computations
  */
-
-template <typename T>
-class OptVector {
- public:
-  OptVector(std::shared_ptr<OptimizationProblem<T>> problem) {
-    x = problem->create_vector();
-    xs = problem->create_vector();
-    zl = problem->create_vector();
-    zu = problem->create_vector();
-  }
-  std::shared_ptr<Vector<T>> x;   // The primal-dual variables
-  std::shared_ptr<Vector<T>> xs;  // Primal-slack variables
-  std::shared_ptr<Vector<T>> zl;  // Multipliers for the lower bounds
-  std::shared_ptr<Vector<T>> zu;  // Multipliers for the upper bounds
-};
-
 template <typename T>
 class Optimizer {
  public:
   Optimizer(std::shared_ptr<OptimizationProblem<T>> problem,
-            std::shared_ptr<Vector<T>> lb, std::shared_ptr<Vector<T>> ub)
-      : problem(problem), lb(lb), ub(ub) {}
+            std::shared_ptr<Vector<T>> lower, std::shared_ptr<Vector<T>> upper)
+      : problem(problem), lower(lower), upper(upper) {
+    diagonal = problem->create_vector();
+    num_variables = problem->get_num_variables();
+  }
 
   /**
    * @brief Create an instance of the optimization state vector
    *
    * @return std::shared_ptr<OptVector<T>>
    */
-  std::shared_ptr<OptVector<T>> create_vector() {
+  std::shared_ptr<OptVector<T>> create_opt_vector() {
     return std::make_shared<OptVector<T>>(problem);
+  }
+
+  /**
+   * @brief Create an instance of an optimization state vector with the provided
+   * initial point
+   *
+   * @return std::shared_ptr<OptVector<T>>
+   */
+  std::shared_ptr<OptVector<T>> create_opt_vector(
+      std::shared_ptr<Vector<T>> x) {
+    return std::make_shared<OptVector<T>>(x, problem);
+  }
+
+  /**
+   * @brief Make sure that the design variables are consistent between x and xs
+   *
+   * @param vars The variable vector
+   */
+  void make_vars_consistent(std::shared_ptr<OptVector<T>> vars) {
+    // Set the design variable values in xs as well
+    Vector<T>& x = *vars->x;
+    Vector<T>& xs = *vars->xs;
+    const Vector<int>& is_multplier = *problem->get_multiplier_indicator();
+
+    for (int i = 0; i < num_variables; i++) {
+      if (!is_multiplier[i]) {
+        xs[i] = x[i];
+      }
+    }
   }
 
   /**
@@ -142,18 +199,58 @@ class Optimizer {
    * res.zu = (ub - sx) * zu - barrier_param
    *
    * @param barrier_param The barrier parameter for the residual
+   * @param vars The optimization variables
+   * @param grad The gradient computed from the problem
+   * @param res The full KKT residual
    */
   void compute_residual(T barrier_param,
                         const std::shared_ptr<OptVector<T>> vars,
                         const std::shared_ptr<Vector<T>> grad,
                         std::shared_ptr<OptVector<T>> res) {
+    const Vector<int>& is_multplier = *problem->get_multiplier_indicator();
+
+    // Extract the vectors to make things easier
+    const Vector<T>& x = *vars->x;   // Primal and dual variables
+    const Vector<T>& xs = *vars->x;  // Primal and slack variables
+    const Vector<T>& lb = *lower;
+    const Vector<T>& ub = *upper;
+    const Vector<T>& g = *grad;
+
+    // Set references to the residuals
+    Vector<T>& rx = *res->x;
+    Vector<T>& rxs = *res->xs;
+    Vector<T>& rzl = *res->zl;
+    Vector<T>& rzu = *res->zu;
+
     // Compute the residual of the full KKT system
-    res->x->copy(grad);
-    res->x->axpy();
+    for (int i = 0; i < num_variables; i++) {
+      if (is_multiplier[i]) {
+        rx[i] = -(g[i] - xs[i]);
+        rxs[i] = x[i] + zl[i] - zu[i];
+      } else {
+        rx[i] = -(g[i] - zl[i] + zu[i]);
+        rxs[i] = rx[i];
+      }
+
+      rzl[i] = 0.0;
+      rzu[i] = 0.0;
+      if (lb[i] < ub[i]) {
+        if (!std::isinf(lb[i])) {
+          rzl[i] = barrier_param - (xs[i] - lb[i]) * zl[i];
+        }
+        if (!std::isinf(ub[i])) {
+          rzu[i] = barrier_param - (ub[i] - xs[i]) * zu[i];
+        }
+      }
+    }
   }
 
   /**
    * @brief Compute the reduced residual from the full primal-dual residual
+   *
+   * reduced = [ bx + (x - lbx)^{-1} * bzlx - (ubx - x)^{-1} * bzux ]
+   *           [ bc - C^{-1} * (blam + (s - lbc)^{-1} * bzlc -
+   *             (ubc - s)^{-1} * bzuc) ]
    *
    * @param vars The values of the optimization variables
    * @param res The full residual vector
@@ -162,37 +259,135 @@ class Optimizer {
   void compute_reduced_residual(const std::shared_ptr<OptVector<T>> vars,
                                 const std::shared_vector<OptVector<T>> res,
                                 std::shared_ptr<Vector<T>> reduced) {
-    // reduced = [ rx ]
-    //           [ rc ]
-    // rx = bx + (x - lbx)^{-1} * bzlx - (ubx - x)^{-1} * bzux
-    // rc = bc - C^{-1} * blam + C^{-1} * (s - lbc)^{-1} * bzlc -
-    //         C^{-1} * (ubc - s)^{-1} * bzuc
+    const Vector<int>& is_multplier = *problem->get_multiplier_indicator();
+
+    // Extract the optimization state vectors to make things easier
+    const Vector<T>& x = *vars->x;   // Primal and dual variables
+    const Vector<T>& xs = *vars->x;  // Primal and slack variables
+    const Vector<T>& lb = *lower;
+    const Vector<T>& ub = *upper;
+
+    // Set references to the input residuals
+    const Vector<T>& bx = *res->x;
+    const Vector<T>& bxs = *res->xs;
+    const Vector<T>& bzl = *res->zl;
+    const Vector<T>& bzu = *res->zu;
+
+    // Set references for the reduced residuals
+    Vector<T>& rx = *reduced;
+
+    for (int i = 0; i < num_variables; i++) {
+      rx[i] = res[i];
+
+      T contrib = 0.0;
+      if (lb[i] < ub[i]) {
+        if (!std::isinf(lb[i])) {
+          contrib += bzl[i] / (xs[i] - lb[i])
+        }
+        if (!std::isinf(ub[i])) {
+          contrib -= bzu[i] / (ub[i] - xs[i]);
+        }
+      }
+
+      if (is_multiplier[i]) {
+        T Cinv = compute_Cinv(lb[i], ub[i], zl[i], zu[i], xs[i]);
+        rx[i] -= Cinv * (bxs[i] + contrib);
+      } else {
+        rx[i] += contrib;
+      }
+    }
   }
 
   /**
    * @brief Compute the update for the full set of primal-dual variables
    *
    * @param vars The values of the optimization variables
-   * @param px The update to the reduced design variables
+   * @param reduced_update The update to the reduced design variables
    * @param update The full update of the optimization variables
    */
-  void compute_update_from_reduced(const std::shared_ptr<OptVector<T>> vars,
-                                   const std::shared_ptr<Vector<T>> px,
-                                   std::shared_ptr<OptVector<T>> update) {}
+  void compute_update_from_reduced(
+      const std::shared_ptr<OptVector<T>> vars,
+      const std::shared_vector<OptVector<T>> res,
+      const std::shared_ptr<Vector<T>> reduced_update,
+      std::shared_ptr<OptVector<T>> update) {
+    // Get the multiplier indicator array
+    const Vector<int>& is_multplier = *problem->get_multiplier_indicator();
+
+    // Extract the optimization state vectors to make things easier
+    const Vector<T>& x = *vars->x;   // Primal and dual variables
+    const Vector<T>& xs = *vars->x;  // Primal and slack variables
+    const Vector<T>& lb = *lower;
+    const Vector<T>& ub = *upper;
+
+    // Set references to the input residuals
+    const Vector<T>& bx = *res->x;
+    const Vector<T>& bxs = *res->xs;
+    const Vector<T>& bzl = *res->zl;
+    const Vector<T>& bzu = *res->zu;
+
+    // Set references for the full update
+    Vector<T>& px = *update->x;
+    Vector<T>& pxs = *update->xs;
+    Vector<T>& pzl = *update->zl;
+    Vector<T>& pzu = *update->zu;
+
+    // Copy the update for the design variables and dual variables
+    px->copy(*reduced_update);
+
+    // Set the values into the full update
+    for (int i = 0; i < num_variables; i++) {
+      pxs[i] = 0.0;
+      if (is_multiplier[i]) {
+        T Cinv = compute_Cinv(lb[i], ub[i], zl[i], zu[i], xs[i]);
+
+        T contrib = 0.0;
+        if (lb[i] < ub[i]) {
+          if (!std::isinf(lb[i])) {
+            contrib += bzl[i] / (xs[i] - lb[i])
+          }
+          if (!std::isinf(ub[i])) {
+            contrib -= bzu[i] / (ub[i] - xs[i]);
+          }
+        }
+
+        // Compute the update for the slacks, multipliers and bounds
+        pxs[i] = Cinv * (px[i] - bx[i] - contrib);
+      } else {
+        // Step should be consistent for the design variable components
+        pxs[i] = px[i];
+      }
+
+      pzl[i] = 0.0;
+      pzu[i] = 0.0;
+
+      // Compute the update for the design variable bounds
+      if (lb[i] < ub[i]) {
+        if (!std::isinf(lb[i])) {
+          pzl[i] = (bzl[i] - zl[i] * pxs[i]) / (x[i] - lb[i]);
+        }
+        if (!std::isinf(ub[i])) {
+          pzu[i] = (bzu[i] + zu[i] * pxs[i]) / (ub[i] - x[i]);
+        }
+      }
+    }
+  }
 
   /**
-   * @brief Compute the full KKT matrix, including design variables
-   */
-  void hessian(const std::shared_ptr<OptVector<T>> vars) {}
-
- private:
-  /**
-   * Compute the diagonal entries of the matrix
+   * @brief Add the diagonal contributions from the matrix
+   *
+   * This code adds the components of the matrix:
    *
    * [ D |         ]
    * [ 0 | -C^{-1} ]
+   *
+   * @param vars The values of the optimization variables
+   * @param mat The CSR Matrix for the Hessian
    */
-  void set_diagonal(const Vector<T> xs, Vector<T> diag) {
+  void add_diagonal(const std::shared_ptr<OptVector<T>> vars,
+                    std::shared_ptr<CSRMat<T>> mat) {
+    const Vector<int>& is_multplier = *problem->get_multiplier_indicator();
+    Vector<T>& diag = *diagonal;
+
     for (int i = 0; i < num_variables; i++) {
       diag[i] = 0.0;
       if (lb[i] < ub[i]) {
@@ -206,22 +401,175 @@ class Optimizer {
           diag[i] += zu[i] / (ub[i] - xs[i]);
         }
       }
-    }
 
-    // Now, set the values of -C^{-1}
-    for (int i = 0; i < num_constraints; i++) {
-      int index = constraints[i];
-      if (diag[index] != 0.0) {
-        diag[index] = -1.0 / diag[index];
+      if (is_multiplier[i]) {
+        // Set the values of -C^{-1}
+        if (diag[i] != 0.0) {
+          diag[i] = -1.0 / diag[i];
+        }
       }
     }
+
+    mat->add_diagonal(diagonal);
+  }
+
+  /**
+   * @brief Compute the max step length given the fraction to the boundary
+   *
+   * @param tau Fractional step to the boundary
+   * @param vars The optimization state variables
+   * @param update The update to the optimization state variables
+   * @param alpha_x_max The step in the primal variables
+   * @param alpha_z_max The step in the dual variables
+   */
+  void compute_max_step(const T tau, const std::shared_ptr<OptVector<T>> vars,
+                        const std::shared_ptr<OptVector<T>> update,
+                        T& alpha_x_max, T& alpha_z_max) {
+    // Get the multiplier indicator array
+    const Vector<int>& is_multplier = *problem->get_multiplier_indicator();
+
+    // Extract the optimization state vectors to make things easier
+    const Vector<T>& xs = *vars->x;  // Primal and slack variables
+    const Vector<T>& lb = *lower;
+    const Vector<T>& ub = *upper;
+
+    // Set references for the full update
+    Vector<T>& pxs = *update->xs;
+    Vector<T>& pzl = *update->zl;
+    Vector<T>& pzu = *update->zu;
+
+    // Set the max step for the design variables and multipliers
+    alpha_x_max = 1.0;
+    alpha_z_max = 1.0;
+
+    // Check for steps lengths for the design variables and slacks
+    for (int i = 0; i < num_variables; i++) {
+      if (lb[i] < ub[i]) {
+        if (is_multiplier[i]) {
+          if (!std::isinf(lb[i]) && pxs[i] < 0.0) {
+            T numer = xs[i] - lb[i];
+            T alpha = -tau * numer / pxs[i];
+            if (alpha < alpha_z_max) {
+              alpha_z_max = alpha;
+            }
+          }
+          if (!std::isinf(ub[i]) && pxs[i] > 0.0) {
+            T numer = ub[i] - xs[i];
+            T alpha = tau * numer / pxs[i];
+            if (alpha < alpha_z_max) {
+              alpha_z_max = alpha;
+            }
+          }
+        }
+      } else {
+        if (!std::isinf(lb[i]) && pxs[i] < 0.0) {
+          T numer = xs[i] - lb[i];
+          T alpha = -tau * numer / pxs[i];
+          if (alpha < alpha_x_max) {
+            alpha_x_max = alpha;
+          }
+        }
+        if (!std::isinf(ub[i]) && pxs[i] > 0.0) {
+          T numer = ub[i] - xs[i];
+          T alpha = tau * numer / pxs[i];
+          if (alpha < alpha_x_max) {
+            alpha_x_max = alpha;
+          }
+        }
+      }
+    }
+
+    // Check step lengths for the multipliers
+    for (int i = 0; i < num_variables; i++) {
+      if (lb[i] < ub[i]) {
+        if (!std::isinf(lb[i]) && pzl[i] < 0.0) {
+          T alpha = -tau * zl[i] / pzl[i];
+          if (alpha < alpha_z_max) {
+            alpha_z_max = alpha;
+          }
+        }
+        if (!std::isinf(ub[i]) && pzu[i] < 0.0) {
+          T alpha = -tau * zu[i] / pzu[i];
+          if (alpha < alpha_z_max) {
+            alpha_z_max = alpha;
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * @brief Apply the update with the provided step lengths
+   *
+   * @param alpha_x Step length for the primal variables
+   * @param alpha_z Step length for the dual variables
+   * @param update Update to the state variables
+   * @param vars Input/output variables that are updated
+   */
+  void apply_step_update(const T alpha_x, const T alpha_z,
+                         const std::shared_ptr<OptVector<T>> update,
+                         std::shared_ptr<OptVector<T>> vars) {
+    // Get the multiplier indicator array
+    const Vector<int>& is_multplier = *problem->get_multiplier_indicator();
+
+    // Extract the optimization state vectors to make things easier
+    Vector<T>& x = *vars->x;   // Primal and dual variables
+    Vector<T>& xs = *vars->x;  // Primal and slack variables
+    Vector<T>& lb = *lower;
+    Vector<T>& ub = *upper;
+
+    // Set references for the full update
+    const Vector<T>& px = *update->x;
+    const Vector<T>& pxs = *update->xs;
+    const Vector<T>& pzl = *update->zl;
+    const Vector<T>& pzu = *update->zu;
+
+    for (int i = 0; i < num_variables; i++) {
+      if (is_multiplier[i]) {
+        x[i] += alpha_z * px[i];
+        xs[i] += alpha_x * pxs[i];
+      } else {
+        x[i] += alpha_x * px[i];
+        xs[i] = x[i];
+      }
+
+      zl[i] += alpha_z * pzl[i];
+      zu[i] += alpha_z * pzu[i];
+    }
+  }
+
+ private:
+  T compute_Cinv(const T lb, const T ub, const T zl, const T zu, const T xs) {
+    T C = 0.0;
+    if (lb < ub) {
+      // If the lower bound isn't infinite, add its value
+      if (!std::isinf(lb)) {
+        C += zl / (xs - lb);
+      }
+
+      // If the upper bound isn't infinite, add its value
+      if (!std::isinf(ub)) {
+        C += zu / (ub - xs);
+      }
+    }
+
+    if (C != 0.0) {
+      return 1.0 / C;
+    }
+    return 0.0;
   }
 
   // The optimization problem
   std::shared_ptr<OptimizationProblem<T>> problem;
 
   // Lower and upper bounds for the design variables
-  std::shared_ptr<Vector<T>> lb, ub;
+  std::shared_ptr<Vector<T>> lower, upper;
+
+  // The number of primal and dual variables
+  int num_variables;
+
+  // Temporary array - storing the matrix diagonal
+  std::shared_ptr<Vector<T>> diagonal;
 };
 
 }  // namespace amigo

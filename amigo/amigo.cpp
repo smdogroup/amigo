@@ -237,9 +237,15 @@ PYBIND11_MODULE(amigo, mod) {
   py::class_<amigo::OptimizationProblem<double>,
              std::shared_ptr<amigo::OptimizationProblem<double>>>(
       mod, "OptimizationProblem")
-      .def(py::init<
-           int, int, int, bool,
-           std::vector<std::shared_ptr<amigo::ComponentGroupBase<double>>>>())
+      .def(py::init(
+          [](int data_size, int num_variables, py::array_t<int> con_indices,
+             std::vector<std::shared_ptr<amigo::ComponentGroupBase<double>>>
+                 &comps) {
+            int num_constraints = con_indices.size();
+            return std::make_shared<amigo::OptimizationProblem<double>>(
+                data_size, num_variables, num_constraints,
+                con_indices.mutable_data(), comps);
+          }))
       .def("get_data_vector",
            &amigo::OptimizationProblem<double>::get_data_vector)
       .def("create_vector", &amigo::OptimizationProblem<double>::create_vector)

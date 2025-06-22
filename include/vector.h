@@ -154,9 +154,15 @@ class Vector {
     }
   }
 
+  void copy(const Vector<T>& src) {
+    if (array) {
+      std::copy(src.array, src.array + size, array);
+    }
+  }
+
   void zero() {
     if (array) {
-      memset(array, 0, size * sizeof(T));
+      std::fill(array, array + size, T(0.0));
     }
   }
 

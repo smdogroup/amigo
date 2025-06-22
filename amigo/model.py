@@ -500,7 +500,6 @@ class Model:
         )
 
         self._reorder_indices(order_type, order_for_block)
-        self.order_for_block = order_for_block
 
         self.output_indices = self._get_output_indices()
         self.num_constraints = len(self.output_indices)
@@ -592,8 +591,7 @@ class Model:
         return OptimizationProblem(
             self.data_size,
             self.num_variables,
-            self.num_constraints,
-            self.order_for_block,
+            self.output_indices,
             objs,
         )
 
