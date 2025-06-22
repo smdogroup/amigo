@@ -23,6 +23,26 @@ class OptimizationProblem {
   }
 
   int get_num_variables() const { return num_variables; }
+  int get_num_constraints() const { return num_constraints; }
+
+  void add_lower(const Vector<T> x, const Vector<T> lb, const Vector<T> zl,
+                 Vector<T> diag) {
+    for (int i = 0; i < num_variables; i++) {
+      if (!std::isinf(lb[i])) {
+        diag[i] += zl[i] / (x[i] - lb[i]);
+      }
+    }
+  }
+
+  void add_upper(const Vector<T> x, Vector<T> Vec lb, Vector<T> Vec zl,
+                 Vector<T> diag) {
+    for (int i = 0; i < num_variables; i++) {
+      if (!std::isinf(ub[i])) {
+        diag[i] += zu[i] / (ub[i] - x[i]);
+      }
+    }
+  }
+
   Vec create_vector() const {
     return std::make_shared<Vector<T>>(num_variables);
   }
