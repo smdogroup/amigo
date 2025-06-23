@@ -2,6 +2,7 @@ from .amigo import Vector, OptimizationProblem, QuasidefCholesky, OrderingType
 from .component import Component
 from .model import Model
 from .optimizer import Optimizer
+from .utils import tocsr
 from .unary_operations import *
 
 

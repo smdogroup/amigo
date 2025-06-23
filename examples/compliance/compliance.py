@@ -318,8 +318,8 @@ class NodeSource(am.Component):
         # Filter input values
         self.add_input("x", value=0.5, lower=0.0, upper=1.0)
         self.add_input("rho", value=0.5, lower=0.0, upper=1.0)
-        self.add_input("u", value=0.0)
-        self.add_input("v", value=0.0)
+        self.add_input("u", value=0.0, lower=-100, upper=100)
+        self.add_input("v", value=0.0, lower=-100, upper=100)
 
         self.add_output("rho_res", value=1.0, lower=0.0, upper=0.0)
         self.add_output("u_res", value=1.0, lower=0.0, upper=0.0)
@@ -367,8 +367,12 @@ parser.add_argument(
 )
 args = parser.parse_args()
 
-nx = 256
-ny = 128
+# nx = 256
+# ny = 128
+# nx = 128
+# ny = 64
+nx = 64
+ny = 32
 nnodes = (nx + 1) * (ny + 1)
 nelems = nx * ny
 
@@ -490,19 +494,35 @@ data_array[model.get_indices("src.x_coord")] = x_coord
 data_array[model.get_indices("src.y_coord")] = y_coord
 
 # Set the initial problem variable values
-x = prob.create_vector()
-x_array = x.get_array()
-x_array[model.get_indices("src.u")] = x_coord + y_coord
-x_array[model.get_indices("src.v")] = x_coord + y_coord
+xdv = prob.create_vector()
+x = xdv.get_array()
 
 # Set initial design variable values
-x_array[model.get_indices("src.x")] = 1.0
-x_array[model.get_indices("src.rho")] = 1.0
+x[model.get_indices("src.x")] = 0.5
+x[model.get_indices("src.rho")] = 0.5
 
 # Set initial multiplier values for the constraints
-x_array[model.get_indices("src.rho_res")] = 1.0
-x_array[model.get_indices("src.u_res")] = 1.0
-x_array[model.get_indices("src.v_res")] = 1.0
+x[model.get_indices("src.rho_res")] = 1.0
+x[model.get_indices("src.u_res")] = 1.0
+x[model.get_indices("src.v_res")] = 1.0
+
+# Apply lower and upper bound constraints
+lower = prob.create_vector()
+upper = prob.create_vector()
+lb = lower.get_array()
+ub = upper.get_array()
+
+lb[model.get_indices("src.x")] = 0.0
+ub[model.get_indices("src.x")] = 1.0
+
+lb[model.get_indices("src.rho")] = 0.0
+ub[model.get_indices("src.rho")] = 1.0
+
+lb[model.get_indices("src.u")] = -100
+ub[model.get_indices("src.u")] = 100
+
+lb[model.get_indices("src.v")] = -100
+ub[model.get_indices("src.v")] = 100
 
 start = time.perf_counter()
 mat_obj = prob.create_csr_matrix()
@@ -510,33 +530,53 @@ end = time.perf_counter()
 print(f"Matrix initialization time: {end - start:.6f} seconds")
 
 start = time.perf_counter()
-prob.hessian(x, mat_obj)
+prob.hessian(xdv, mat_obj)
 end = time.perf_counter()
 print(f"Matrix computation time:    {end - start:.6f} seconds")
 
-grad = prob.create_vector()
-start = time.perf_counter()
-for i in range(10):
-    prob.gradient(x, grad)
-end = time.perf_counter()
-print(f"Residual computation time:  {end - start:.6f} seconds")
+H = am.tocsr(mat_obj)
+of = ["src.u_res", "src.v_res", "bcs.u_res", "bcs.v_res"]
+wrt = ["src.u", "src.v", "bcs.u", "bcs.v"]
+K, of_dict, wrt_dict = model.extract_submatrix(H, of=of, wrt=wrt)
 
-if args.show_sparsity:
-    nrows, ncols, nnz, rowp, cols = mat_obj.get_nonzero_structure()
-    data = mat_obj.get_data()
-    jac = csr_matrix((data, cols, rowp), shape=(nrows, ncols))
+print(K - K.T)
 
-    plt.figure(figsize=(6, 6))
-    plt.spy(jac, markersize=0.2)
-    plt.title("Sparsity pattern of matrix A")
-    plt.show()
+f = np.zeros(K.shape[0])
+f[of_dict["src.v_res"][nodes[-1, 0]]] = 1
+u = spsolve(K, f)
+
+print(K.shape)
+
+# grad = prob.create_vector()
+# start = time.perf_counter()
+# for i in range(10):
+#     prob.gradient(xdv, grad)
+# end = time.perf_counter()
+# print(f"Residual computation time:  {end - start:.6f} seconds")
+
+# if args.show_sparsity:
+#     nrows, ncols, nnz, rowp, cols = mat_obj.get_nonzero_structure()
+#     data = mat_obj.get_data()
+#     jac = csr_matrix((data, cols, rowp), shape=(nrows, ncols))
+
+#     plt.figure(figsize=(6, 6))
+#     plt.spy(jac, markersize=0.2)
+#     plt.title("Sparsity pattern of matrix A")
+#     plt.show()
+
+# opt = am.Optimizer(model, x=xdv, lower=lower, upper=upper)
+# opt.optimize({"max_iterations": 100})
 
 X, Y = np.meshgrid(xpts, ypts)
-vals = x.get_array()[model.get_indices("src.rho")]
-vals = vals.reshape((nx + 1, ny + 1)).T
+vals = u[wrt_dict["src.v"]].reshape((nx + 1, ny + 1)).T
+
+# vals = x.get_array()[model.get_indices("src.rho")]
+# vals = vals.reshape((nx + 1, ny + 1)).T
 
 # Plot using contourf
 plt.contourf(X, Y, vals, levels=20, cmap="viridis")
 plt.colorbar(label="Z value")
 plt.xlabel("x")
 plt.ylabel("y")
+
+plt.show()

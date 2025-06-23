@@ -600,6 +600,33 @@ class Model:
         """Retrieve the optimization problem"""
         return self.problem
 
+    def extract_submatrix(self, A, of: List[str], wrt: List[str]):
+        """
+        Given the matrix A, find the sub-matrix A[indices[of], indices[wrt]]
+        """
+
+        of_list = []
+        of_dict = {}
+        of_count = 0
+        for name in of:
+            idx = self.get_indices(name).ravel()
+            of_list.append(idx)
+            of_dict[name] = np.arange(of_count, of_count + idx.size)
+            of_count += idx.size
+        of_indices = np.concatenate(of_list)
+
+        wrt_list = []
+        wrt_dict = {}
+        wrt_count = 0
+        for name in wrt:
+            idx = self.get_indices(name).ravel()
+            wrt_list.append(idx)
+            wrt_dict[name] = np.arange(wrt_count, wrt_count + idx.size)
+            wrt_count += idx.size
+        wrt_indices = np.concatenate(wrt_list)
+
+        return A[of_indices, :][:, wrt_indices], of_dict, wrt_dict
+
     def get_values_from_meta(
         self, meta_name: str, x: Union[None, List, np.ndarray] = None
     ):
