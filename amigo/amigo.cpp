@@ -277,7 +277,12 @@ PYBIND11_MODULE(amigo, mod) {
       .def("solve", &amigo::QuasidefCholesky<double>::solve);
 
   py::class_<amigo::OptVector<double>,
-             std::shared_ptr<amigo::OptVector<double>>>(mod, "OptVector");
+             std::shared_ptr<amigo::OptVector<double>>>(mod, "OptVector")
+      .def_readwrite("x", &amigo::OptVector<double>::x)
+      .def_readwrite("xs", &amigo::OptVector<double>::xs)
+      .def_readwrite("zl", &amigo::OptVector<double>::zl)
+      .def_readwrite("zu", &amigo::OptVector<double>::zu)
+      .def("copy", &amigo::OptVector<double>::copy);
 
   py::class_<amigo::InteriorPointOptimizer<double>,
              std::shared_ptr<amigo::InteriorPointOptimizer<double>>>(

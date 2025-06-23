@@ -640,8 +640,12 @@ class OutputSet:
             expr = ""
         else:
             expr = f"{obj_expr}"
+
         if len(expr_list) > 0:
-            expr = expr_list[0]
+            if obj_expr is None:
+                expr = expr_list[0]
+            else:
+                expr += " + " + expr_list[0]
             for i in range(1, len(expr_list)):
                 expr += " + " + expr_list[i]
 

@@ -334,8 +334,17 @@ x[q_idx[:, 1]] = np.linspace(0, np.pi, num_time_steps + 1)
 x[q_idx[:, 2]] = 1.0
 x[q_idx[:, 3]] = 1.0
 
-opt = am.Optimizer(model, xdv)
-opt.optimize()
+# Apply lower and upper bound constraints
+lower = prob.create_vector()
+upper = prob.create_vector()
+lb = lower.get_array()
+ub = upper.get_array()
+
+lb[model.get_indices("cart.x")] = -50
+ub[model.get_indices("cart.x")] = 50
+
+opt = am.Optimizer(model, xdv, lower=lower, upper=upper)
+opt.optimize({"max_iterations": 100})
 
 d = x[model.get_indices("cart.q[:, 0]")]
 theta = x[model.get_indices("cart.q[:, 1]")]
@@ -346,7 +355,7 @@ plot(d, theta, xctrl)
 visualize(d, theta)
 
 if args.show_sparsity:
-    H = opt._get_scipy_csr_mat()
+    H = opt.get_scipy_csr_mat()
     plt.figure(figsize=(6, 6))
     plt.spy(H, markersize=0.2)
     plt.title("Sparsity pattern of matrix A")
