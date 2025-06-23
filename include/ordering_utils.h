@@ -13,14 +13,14 @@ extern "C" {
 
 namespace amigo {
 
-enum class OrderingType { NESTED_DISECTION, AMD, NATURAL };
+enum class OrderingType { NESTED_DISSECTION, AMD, NATURAL };
 
 class OrderingUtils {
  public:
   static void reorder(OrderingType order, int nrows, int *rowp, int *cols,
                       int **perm_, int **iperm_) {
-    if (order == OrderingType ::NESTED_DISECTION) {
-      nested_disection(nrows, rowp, cols, perm_, iperm_);
+    if (order == OrderingType ::NESTED_DISSECTION) {
+      nested_dissection(nrows, rowp, cols, perm_, iperm_);
     } else if (order == OrderingType ::AMD) {
       amd(nrows, rowp, cols, 0, nullptr, perm_, iperm_);
     } else {  // order == OrderingType::NATURAL
@@ -37,7 +37,7 @@ class OrderingUtils {
 
   static void reorder_block(OrderingType order, int nrows, int *rowp, int *cols,
                             int nmult, int *mult, int **perm_, int **iperm_) {
-    if (order == OrderingType ::NESTED_DISECTION ||
+    if (order == OrderingType ::NESTED_DISSECTION ||
         order == OrderingType::NATURAL) {
       reorder(order, nrows, rowp, cols, perm_, iperm_);
       int *perm = *perm_;
@@ -66,7 +66,7 @@ class OrderingUtils {
   }
 
   /**
-   * @brief Compute a nested disection ordering.
+   * @brief Compute a nested dissection ordering.
    *
    * Note that the CSR structure must not include the diagonal element (compute
    * with include_diagonal = false).
@@ -76,8 +76,8 @@ class OrderingUtils {
    *
    * Note that for a variable k, these arrays satisfy iperm[perm[k]] = k
    */
-  static void nested_disection(int nrows, int *rowp, int *cols, int **perm_,
-                               int **iperm_) {
+  static void nested_dissection(int nrows, int *rowp, int *cols, int **perm_,
+                                int **iperm_) {
     int *perm = new int[nrows];
     int *iperm = new int[nrows];
 #ifdef AMIGO_USE_METIS

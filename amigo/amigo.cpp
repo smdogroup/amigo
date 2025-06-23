@@ -198,7 +198,7 @@ PYBIND11_MODULE(amigo, mod) {
   mod.attr("AMIGO_INCLUDE_PATH") = AMIGO_INCLUDE_PATH;
 
   py::enum_<amigo::OrderingType>(mod, "OrderingType")
-      .value("NESTED_DISECTION", amigo::OrderingType::NESTED_DISECTION)
+      .value("NESTED_DISSECTION", amigo::OrderingType::NESTED_DISSECTION)
       .value("AMD", amigo::OrderingType::AMD)
       .value("NATURAL", amigo::OrderingType::NATURAL)
       .export_values();

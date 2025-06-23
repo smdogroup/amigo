@@ -468,7 +468,7 @@ start = time.perf_counter()
 if args.order_type == "amd":
     order_type = am.OrderingType.AMD
 elif args.order_type == "nd":
-    order_type = am.OrderingType.NESTED_DISECTION
+    order_type = am.OrderingType.NESTED_DISSECTION
 elif args.order_type == "natural":
     order_type = am.OrderingType.NATURAL
 
