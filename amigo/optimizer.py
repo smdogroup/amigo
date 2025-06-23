@@ -1,113 +1,114 @@
 import numpy as np
 from scipy.sparse import csr_matrix
 from scipy.sparse.linalg import spsolve
-from .amigo import QuasidefCholesky
+from .amigo import InteriorPointOptimizer
 
 
 class Optimizer:
-    def __init__(self, model, prob, x_init=None):
+    def __init__(self, model, x=None, lower=None, upper=None, options={}):
         self.model = model
-        self.prob = prob
-        self.x_init = x_init
+        self.prob = self.model.get_opt_problem()
 
-        self.num_variables = 3421
-        self.num_constraints = 1612
+        if x is None:
+            self.x = self.prob.create_vector()
+            self.x.get_array()[:] = model.get_values_from_meta("value")
+        else:
+            self.x = x
 
-        self.x = self.prob.create_vector()
-        self.g = self.prob.create_vector()
+        if lower is None:
+            self.lower = self.prob.create_vector()
+            self.lower.get_array()[:] = model.get_values_from_meta("lower")
+        else:
+            self.lower = lower
 
-        self.diag = self.prob.create_vector()
-        self.mat_obj = self.prob.create_csr_matrix()
+        if upper is None:
+            self.upper = self.prob.create_vector()
+            self.upper.get_array()[:] = model.get_values_from_meta("upper")
+        else:
+            self.upper = upper
 
-        self.chol = QuasidefCholesky(self.diag, self.mat_obj)
+        # Create the interior point optimizer object
+        self.optimizer = InteriorPointOptimizer(self.prob, self.lower, self.upper)
+
+        # Create data that will be used in conjunction with the optimizer
+        self.vars = self.optimizer.create_opt_vector(self.x)
+        self.res = self.optimizer.create_opt_vector()
+        self.update = self.optimizer.create_opt_vector()
+
+        # Create vectors that store problem-specific information
+        self.grad = self.prob.create_vector()
+        self.px = self.prob.create_vector()
+        self.bx = self.prob.create_vector()
+
+        # Create hessian matrix object
+        self.hess = self.prob.create_csr_matrix()
         self.nrows, self.ncols, self.nnz, self.rowp, self.cols = (
-            self.mat_obj.get_nonzero_structure()
+            self.hess.get_nonzero_structure()
         )
 
-        self.check()
+    def _get_scipy_csr_mat(self):
+        data = self.hess.get_data()
+        return csr_matrix((data, self.cols, self.rowp), shape=(self.nrows, self.ncols))
 
-    def check(self, dh=1e-7):
-        # x = self.x.get_array()
-        # if self.x_init is not None:
-        #     x[:] = self.x_init
+    def _solve(self, hess, b, p):
+        """
+        Solve the KKT syste - many different appraoches could be inserted here
+        """
 
-        # px = np.random.uniform(size=x.shape)
+        H = self._get_scipy_csr_mat()
 
-        # g1 = self.gradient().copy()
-        # jac = self.hessian()
-        # ans = jac @ px
-
-        # x[:] += dh * px
-
-        # g2 = self.gradient().copy()
-        # fd = (g2 - g1) / dh
-
-        # err = fd - ans
-
-        # print("Max absolute error = ", np.max(np.absolute(err)))
-        # print("Max relative error = ", np.max(np.absolute(err / fd)))
+        # Compute the solution using scipy
+        self.px.get_array()[:] = spsolve(H, self.bx.get_array())
 
         return
 
-    def gradient(self):
-        self.prob.gradient(self.x, self.g)
-        return self.g.get_array()
+    def optimize(self, max_iters=50):
 
-    def hessian(self):
-        self.prob.hessian(self.x, self.mat_obj)
-        data = self.mat_obj.get_data()
-        jac = csr_matrix((data, self.cols, self.rowp), shape=(self.nrows, self.ncols))
-        return jac
+        barrier_param = 1.0
+        tau = 0.95
 
-    def factor(self, max_try=10):
-        # d = self.diag.get_array()
-        # d[:] *= 0.25
+        self.optimizer.initialize_multipliers_and_slacks(self.vars)
 
-        for i in range(max_try):
-            print("starting factorization")
-            info = self.chol.factor()
-            print("done factorization")
-            if info == 0:
-                break
-            else:
-                print("Failed with infro = ", info)
-                d = self.diag.get_array()
-
-                ndof = self.num_variables - self.num_constraints
-                for k in range(ndof):
-                    d[k] += 1 * (i + 1)
-                for k in range(ndof, self.num_variables):
-                    d[k] += 1 * (i + 1)
-        if info != 0:
-            raise RuntimeError("Factorization failed")
-
-    def optimize(self, max_iters=75):
-        x = self.x.get_array()
-        if self.x_init is not None:
-            x[:] = self.x_init
-
-        gnrms = []
+        x = np.zeros((max_iters, self.x.get_array().size))
 
         for i in range(max_iters):
-            g = self.gradient()
+            print(f"Iteration {i}")
+            x[i, :] = self.x.get_array()
 
-            gnrm = np.linalg.norm(g)
-            gnrms.append(gnrm)
+            # Compute the gradient and the Hessian matrix
+            self.prob.gradient(self.x, self.grad)
+            self.prob.hessian(self.x, self.hess)
 
-            print("||g[%3d]||: " % (i), gnrm)
-            if gnrm < 1e-10:
-                break
+            # Compute the complete KKT residual
+            self.optimizer.compute_residual(
+                barrier_param, self.vars, self.grad, self.res
+            )
 
-            self.hessian()
-            self.factor()
-            self.chol.solve(self.g)
-            # p = spsolve(H, g)
+            # Compute the reduced residual for the right-hand-side of the KKT system
+            self.optimizer.compute_reduced_residual(self.vars, self.res, self.bx)
 
-            if i < 20:
-                x[:] -= 0.01 * g[:]
-            elif gnrm < 100.0:
-                x[:] -= g[:]
-            else:
-                x[:] -= 0.1 * g[:]
+            # Add the diagonal contributions to the Hessian matrix
+            self.optimizer.add_diagonal(self.vars, self.hess)
 
-        return x[:], gnrms
+            # Solve the KKT system
+            self._solve(self.hess, self.bx, self.px)
+
+            # Compute the full update based on the reduced variable update
+            self.optimizer.compute_update_from_reduced(
+                self.vars, self.res, self.px, self.update
+            )
+
+            # Check the update
+            self.optimizer.check_update(self.vars, self.res, self.update, self.hess)
+
+            # Compute the max step in the multipliers
+            alpha_x, alpha_z = self.optimizer.compute_max_step(
+                tau, self.vars, self.update
+            )
+
+            # Compute the full update
+            self.optimizer.apply_step_update(alpha_x, alpha_z, self.update, self.vars)
+
+            barrier_param = np.max((1e-10, 0.5 * barrier_param))
+
+        return x

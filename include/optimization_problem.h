@@ -8,27 +8,50 @@ namespace amigo {
 template <typename T>
 class OptimizationProblem {
  public:
-  using Vec = std::shared_ptr<Vector<T>>;
-  using Mat = std::shared_ptr<CSRMat<T>>;
-
-  OptimizationProblem(int data_size, int num_variables, int num_constraints,
-                      bool order_for_block,
-                      std::vector<std::shared_ptr<ComponentGroupBase<T>>> comps)
+  template <class ArrayType>
+  OptimizationProblem(
+      int data_size, int num_variables, int num_constraints,
+      const ArrayType constraint_index,
+      std::vector<std::shared_ptr<ComponentGroupBase<T>>>& comps)
       : data_size(data_size),
         num_variables(num_variables),
         num_constraints(num_constraints),
-        order_for_block(order_for_block),
         comps(comps) {
+    is_multiplier = std::make_shared<Vector<int>>(num_variables);
+    is_multiplier->zero();
+
+    Vector<int>& is_mult = *is_multiplier;
+
+    // Check whether this numbering of the problem is set up for block 2x2
+    order_for_block = true;
+    int sqdef_index = num_variables - num_constraints;
+    for (int i = 0; i < num_constraints; i++) {
+      if (constraint_index[i] < sqdef_index) {
+        order_for_block = false;
+      }
+
+      if (is_mult[constraint_index[i]] == 0) {
+        is_mult[constraint_index[i]] = 1;
+      } else {
+        throw std::runtime_error("Cannot use duplicate constraint indices");
+      }
+    }
+
     data_vec = std::make_shared<Vector<T>>(data_size);
   }
 
   int get_num_variables() const { return num_variables; }
-  Vec create_vector() const {
+  int get_num_constraints() const { return num_constraints; }
+
+  std::shared_ptr<Vector<T>> create_vector() const {
     return std::make_shared<Vector<T>>(num_variables);
   }
-  Vec get_data_vector() { return data_vec; }
+  std::shared_ptr<Vector<T>> get_data_vector() { return data_vec; }
+  const std::shared_ptr<Vector<int>> get_multiplier_indicator() const {
+    return is_multiplier;
+  }
 
-  T lagrangian(Vec x) const {
+  T lagrangian(std::shared_ptr<Vector<T>> x) const {
     T lagrange = 0.0;
     for (size_t i = 0; i < comps.size(); i++) {
       lagrange += comps[i]->lagrangian(*data_vec, *x);
@@ -36,28 +59,32 @@ class OptimizationProblem {
     return lagrange;
   }
 
-  void gradient(const Vec x, Vec g) const {
+  void gradient(const std::shared_ptr<Vector<T>> x,
+                std::shared_ptr<Vector<T>> g) const {
     g->zero();
     for (size_t i = 0; i < comps.size(); i++) {
       comps[i]->add_gradient(*data_vec, *x, *g);
     }
   }
 
-  void hessian_product(const Vec x, const Vec p, Vec h) const {
+  void hessian_product(const std::shared_ptr<Vector<T>> x,
+                       const std::shared_ptr<Vector<T>> p,
+                       std::shared_ptr<Vector<T>> h) const {
     h->zero();
     for (size_t i = 0; i < comps.size(); i++) {
       comps[i]->add_hessian_product(*data_vec, *x, *p, *h);
     }
   }
 
-  void hessian(const Vec x, Mat mat) const {
+  void hessian(const std::shared_ptr<Vector<T>> x,
+               std::shared_ptr<CSRMat<T>> mat) const {
     mat->zero();
     for (size_t i = 0; i < comps.size(); i++) {
       comps[i]->add_hessian(*data_vec, *x, *mat);
     }
   }
 
-  Mat create_csr_matrix() const {
+  std::shared_ptr<CSRMat<T>> create_csr_matrix() const {
     std::vector<int> intervals(comps.size() + 1);
     intervals[0] = 0;
     for (size_t i = 0; i < comps.size(); i++) {
@@ -100,7 +127,8 @@ class OptimizationProblem {
   int num_constraints;
   bool order_for_block;
   std::vector<std::shared_ptr<ComponentGroupBase<T>>> comps;
-  Vec data_vec;
+  std::shared_ptr<Vector<T>> data_vec;
+  std::shared_ptr<Vector<int>> is_multiplier;
 };
 
 }  // namespace amigo

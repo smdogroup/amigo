@@ -500,12 +500,12 @@ class Model:
         )
 
         self._reorder_indices(order_type, order_for_block)
-        self.order_for_block = order_for_block
 
         self.output_indices = self._get_output_indices()
         self.num_constraints = len(self.output_indices)
 
         self._initialized = True
+        self.problem = self._create_opt_problem()
 
         return
 
@@ -572,7 +572,7 @@ class Model:
 
         return self.comp[comp_name].get_meta(name)
 
-    def create_opt_problem(self):
+    def _create_opt_problem(self):
         """
         Create the optimization problem object that is used to evaluate the gradient and
         Hessian of the Lagrangian.
@@ -592,10 +592,13 @@ class Model:
         return OptimizationProblem(
             self.data_size,
             self.num_variables,
-            self.num_constraints,
-            self.order_for_block,
+            self.output_indices,
             objs,
         )
+
+    def get_opt_problem(self):
+        """Retrieve the optimization problem"""
+        return self.problem
 
     def get_values_from_meta(
         self, meta_name: str, x: Union[None, List, np.ndarray] = None
@@ -632,7 +635,19 @@ class Model:
 
         return x
 
-    def generate_cpp(self):
+    def build_module(self, compile_args=[], link_args=[], define_macros=[]):
+        """
+        Generate the model code and build it. Additional compile, link arguments and macros can be added here.
+        """
+
+        self._generate_cpp()
+        self._build_module(
+            compile_args=compile_args, link_args=link_args, define_macros=define_macros
+        )
+
+        return
+
+    def _generate_cpp(self):
         """
         Generate the C++ header and pybind11 wrapper for the model.
 
@@ -687,7 +702,7 @@ class Model:
 
         return
 
-    def build_module(self, compile_args=[], link_args=[], define_macros=[]):
+    def _build_module(self, compile_args=[], link_args=[], define_macros=[]):
         """
         Quick setup for building the extension module. Some care is required with this.
         """

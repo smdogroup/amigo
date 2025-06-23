@@ -209,8 +209,6 @@ model.link("helmholtz.x_coord", "src.x_coord", tgt_indices=conn)
 model.link("helmholtz.rho", "src.rho", tgt_indices=conn)
 
 if args.build:
-    model.generate_cpp()
-
     compile_args = []
     link_args = ["-lblas", "-llapack"]
     define_macros = []
@@ -234,7 +232,7 @@ elif args.order_type == "natural":
 
 order_for_block = args.order_for_block
 model.initialize(order_type=order_type, order_for_block=order_for_block)
-prob = model.create_opt_problem()
+prob = model.get_opt_problem()
 
 end = time.perf_counter()
 print(f"Initialization time:        {end - start:.6f} seconds")

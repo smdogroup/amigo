@@ -77,14 +77,15 @@ def get_extensions():
     compile_args = []
     define_macros = []
     if sys.platform == "win32":
-        compile_args = ["/std:c++17", "/permissive-"]
+        compile_args += ["/std:c++17", "/permissive-"]
     elif sys.platform == "darwin":
-        compile_args = ["-std=c++17"]
-        define_macros = [("AMIGO_USE_METIS", "1")]
+        compile_args += ["-std=c++17"]
+        define_macros += [("AMIGO_USE_METIS", "1")]
     else:
-        link_args = ["-lblas", "-llapack"]
-        compile_args = ["-std=c++17"]
-        define_macros = [("AMIGO_USE_METIS", "1")]
+        link_args += ["-lblas", "-llapack"]
+        compile_args += ["-std=c++17"]
+        define_macros += [("AMIGO_USE_METIS", "1")]
+
     if use_openmp:
         compile_args += ["-fopenmp"]
         link_args += ["-fopenmp"]

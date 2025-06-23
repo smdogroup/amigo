@@ -451,8 +451,6 @@ model.link("src.u_res", "load.u_res", src_indices=nodes[-1, 0])
 model.link("src.v_res", "load.v_res", src_indices=nodes[-1, 0])
 
 if args.build:
-    model.generate_cpp()
-
     compile_args = []
     link_args = ["-lblas", "-llapack"]
     define_macros = []
@@ -478,7 +476,7 @@ order_for_block = args.order_for_block
 model.initialize(order_type=order_type, order_for_block=order_for_block)
 
 # Initialize the problem
-prob = model.create_opt_problem()
+prob = model.get_opt_problem()
 
 end = time.perf_counter()
 print(f"Initialization time:        {end - start:.6f} seconds")
