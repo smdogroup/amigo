@@ -4,9 +4,49 @@ Amigo is a python library that is designed for solving multidisciplinary analysi
 
 All application code is written in python and automatically compiled to c++. Automatic differentiation is used throughout to evaluate first and second derivatives using A2D. Different backends can be used: Serial, OpenMP and CUDA for Nvidia GPUs. The user written python code is independent of the backend used.
 
-## A simple example
+## Rosenbrock example
 
-To illustrate some of the features of Amigo, below is some code from the cart pole optimization example.
+To illustrate some of the features of Amigo, below are two short examples.
+
+First, the Rosenbrock function is a frequently used example problem in optimization. In Amigo, all analysis occurs within classes that are derived from `amigo.Component`.
+
+The inputs, outpus, objective function, data and class constants are defined in the constructor. Values are accessed through dictionary member data structures `self.inputs`, `self.outputs`, `self.objective`, `self.data` and `self.constants`. Additionally, intermediate variable values can be defined on the fly and utilized through a `self.vars` dictionary.
+
+The Rosenbrock component takes two inputs `x1` and `x2` and provides the objective value `obj` and a constraint `con`.
+
+```python
+import amigo as am
+
+class Rosenbrock(am.Component):
+    def __init__(self):
+        super().__init__()
+
+        self.add_input("x1", value=-1.0, lower=-2.0, upper=2.0)
+        self.add_input("x2", value=-1.0, lower=-2.0, upper=2.0)
+        self.add_objective("obj")
+        self.add_output("con", value=0.0, lower=-float("inf"), upper=0.0)
+
+    def compute(self):
+        x1 = self.inputs["x1"]
+        x2 = self.inputs["x2"]
+        self.objective["obj"] = (1 - x1) ** 2 + 100 * (x2 - x1**2) ** 2
+        self.outputs["con"] = x1**2 + x2**2 - 1.0
+
+model = am.Model("rosenbrock")
+model.add_component("rosenbrock", 1, Rosenbrock())
+
+model.build_module()
+model.initialize()
+
+opt = am.Optimizer(model)
+opt.optimize()
+```
+
+The Amigo model is created by initializing the `amigo.Model` object and adding components to it. The code is then created and compiled by `model.build_module()`.
+
+Note when `model.build_module()` is called, the module is compiled. Whenever python code within the component class is changed, the module must be re-built. This must occur before initialization.
+
+## Cart pole system example
 
 The system dynamics are encoded within a `CartComponent` class that inherits from `amigo.Component`. In the constructor, you must specify what `constants`, `inputs`, `outputs` and `data` (not illustrated in this example) the component requires.
 
@@ -76,8 +116,6 @@ class CartComponent(am.Component):
 
 To create a model, you create the components, and specify how many instances of that component are used within the component group.
 
-Variables are linked between components 
-
 ```python
 # Create instances of the component classes
 cart = CartComponent()
@@ -94,11 +132,11 @@ model.add_component("ic", 1, ic)
 model.add_component("fc", 1, fc)
 ```
 
-Indices within the model are linked with text-based linking arguments. The names provided to the linking command are scoped by `component_name.variable_name`. 
+Variables are linked between components through an explicit linking process. Indices within the model are linked with text-based linking arguments. The names provided to the linking command are scoped by `component_name.variable_name`. 
 
-You can also add sub-models to the model by calling `model.sub_model("sub_mudel", sub_model)`. In this case the scope becomes `sub_model.component_name.variable_name`. In this case, any links specified in the sub-model are added to the model.
+You can also add sub-models to the model by calling `model.sub_model("sub_mudel", sub_model)`. In this case the scope becomes `sub_model.component_name.variable_name`. Any links specified in the sub-model are added to the model.
 
-Linking establishes that two `inputs` from different components are the same. You cannot link `inputs` to `outputs`. Linking two `outputs` together means that the sum of the two output values are used as the constraint.
+Linking establishes that two `inputs` from different components are the same. You cannot link `inputs` to `outputs`. Linking two `outputs` together means that the sum of the two output values are used as a constraint.
 
 ```python
 # Link the initial and final conditions
