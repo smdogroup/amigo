@@ -104,6 +104,27 @@ class Optimizer:
             line += f"{lb[i]:10.3e} {ub[i]:10.3e}"
             print(line)
 
+    def write_log(self, iteration, iter_data):
+        # Write out to the log information about this line
+        if iteration % 10 == 0:
+            line = f"{'iteration':>10s} "
+            for name in iter_data:
+                if name != "iteration":
+                    line += f"{name:>15s} "
+            print(line)
+
+        line = f"{iteration:10d} "
+        for name in iter_data:
+            if name != "iteration":
+                data = iter_data[name]
+                if isinstance(data, (int, np.integer)):
+                    line += f"{iter_data[name]:15d} "
+                else:
+                    line += f"{iter_data[name]:15.6e} "
+        print(line)
+
+        return
+
     def get_options(self, options={}):
         default = {
             "max_iterations": 100,
@@ -115,18 +136,31 @@ class Optimizer:
             "max_line_search_iterations": 10,
             "check_update_step": False,
             "backtracting_factor": 0.5,
+            "record_components": [],
         }
 
         default.update(options)
         return default
 
     def optimize(self, options={}):
+        """
+        Optimize the problem with the specified input options
+        """
+
         # Get the set of options
         options = self.get_options(options=options)
+
+        # Data that is recorded at each iteration
+        opt_data = {"options": options, "converged": False, "iterations": []}
 
         barrier_param = options["initial_barrier_param"]
         max_iters = options["max_iterations"]
         tau = options["fraction_to_boundary"]
+        tol = options["convergence_tolerance"]
+        record_components = options["record_components"]
+
+        # Create a view into x using the component indices
+        xview = ModelVector(self.model, x=self.vars.x)
 
         self.optimizer.initialize_multipliers_and_slacks(self.vars)
 
@@ -136,16 +170,33 @@ class Optimizer:
         line_iters = 0
         alpha_prev = 0.0
         for i in range(max_iters):
+            iter_data = {}
+
             # Compute the complete KKT residual
             res_norm = self.optimizer.compute_residual(
                 barrier_param, self.vars, self.grad, self.res
             )
 
+            # Set information about the residual norm into the
+            iter_data = {
+                "iteration": i,
+                "residual": res_norm,
+                "barrier_param": barrier_param,
+                "line_iters": line_iters,
+                "alpha": alpha_prev,
+            }
+
+            self.write_log(i, iter_data)
+
+            iter_data["x"] = {}
+            for name in record_components:
+                iter_data["x"][name] = xview[name].tolist()
+
+            opt_data["iterations"].append(iter_data)
+
             barrier_converged = False
-            if (
-                barrier_param <= 0.1 * options["convergence_tolerance"]
-                and res_norm < options["convergence_tolerance"]
-            ):
+            if barrier_param <= 0.1 * tol and res_norm < tol:
+                opt_data["converged"] = True
                 break
             elif res_norm < 0.1 * barrier_param:
                 barrier_converged = True
@@ -159,15 +210,6 @@ class Optimizer:
                 res_norm = self.optimizer.compute_residual(
                     barrier_param, self.vars, self.grad, self.res
                 )
-
-            # Compute the residual norm
-            if i % 10 == 0:
-                line = f"{'Iter':>10s} {'Residual':>15s} {'mu':>15s} "
-                line += f"{'Line iters':>15s} {'alpha':>15s}"
-                print(line)
-            line = f"{i:10d} {res_norm:15.4e} {barrier_param:15.4e} "
-            line += f"{line_iters:15d} {alpha_prev:15.4e}"
-            print(line)
 
             # Compute the reduced residual for the right-hand-side of the KKT system
             self.optimizer.compute_reduced_residual(self.vars, self.res, self.bx)
@@ -221,4 +263,4 @@ class Optimizer:
 
             alpha_prev = alpha
 
-        return
+        return opt_data

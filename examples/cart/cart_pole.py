@@ -1,6 +1,7 @@
 import amigo as am
 import numpy as np
 import argparse
+import json
 import matplotlib.pylab as plt
 import niceplots
 
@@ -174,11 +175,11 @@ def plot(d, theta, xctrl):
     return
 
 
-def plot_convergence(gnrms):
+def plot_convergence(nrms):
     with plt.style.context(niceplots.get_style()):
         fig, ax = plt.subplots(1, 1)
 
-        ax.semilogy(gnrms, marker="o", clip_on=False, lw=2.0)
+        ax.semilogy(nrms, marker="o", clip_on=False, lw=2.0)
         ax.set_ylabel("KKT residual norm")
         ax.set_xlabel("Iteration")
 
@@ -313,7 +314,11 @@ if args.build:
         compile_args=compile_args, link_args=link_args, define_macros=define_macros
     )
 
-model.initialize()
+model.initialize(order_type=am.OrderingType.NESTED_DISSECTION)
+
+with open("cart_pole_model.json", "w") as fp:
+    json.dump(model.get_serializable_data(), fp, indent=2)
+
 
 print(f"Num variables:              {model.num_variables}")
 print(f"Num constraints:            {model.num_constraints}")
@@ -337,18 +342,25 @@ lower["cart.x"] = -50
 upper["cart.x"] = 50
 
 opt = am.Optimizer(model, x, lower=lower, upper=upper)
-opt.optimize({"max_iterations": 100})
+data = opt.optimize({"max_iterations": 100, "record_components": ["cart.x[-1]"]})
+
+with open("cart_opt_data.json", "w") as fp:
+    json.dump(data, fp, indent=2)
 
 d = x["cart.q[:, 0]"]
 theta = x["cart.q[:, 1]"]
 xctrl = x["cart.x"]
 
+norms = []
+for iter_data in data["iterations"]:
+    norms.append(iter_data["residual"])
+
 plot(d, theta, xctrl)
-# plot_convergence(gnrm)
+plot_convergence(norms)
 visualize(d, theta)
 
 if args.show_sparsity:
-    H = opt.get_scipy_csr_mat()
+    H = am.tocsr(opt.solver.hess)
     plt.figure(figsize=(6, 6))
     plt.spy(H, markersize=0.2)
     plt.title("Sparsity pattern of matrix A")

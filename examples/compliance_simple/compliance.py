@@ -1,8 +1,10 @@
 import amigo as am
 import numpy as np  # used for plotting/analysis
 import argparse
+import json
 import time
 import matplotlib.pylab as plt
+import niceplots
 
 
 def eval_shape_funcs(xi, eta):
@@ -266,6 +268,31 @@ class NodeSource(am.Component):
         pass
 
 
+def plot_convergence(nrms):
+    with plt.style.context(niceplots.get_style()):
+        fig, ax = plt.subplots(1, 1)
+
+        ax.semilogy(nrms, marker="o", clip_on=False, lw=2.0)
+        ax.set_ylabel("KKT residual norm")
+        ax.set_xlabel("Iteration")
+
+        niceplots.adjust_spines(ax)
+
+        fontname = "Helvetica"
+        ax.xaxis.label.set_fontname(fontname)
+        ax.yaxis.label.set_fontname(fontname)
+
+        # Update tick labels
+        for tick in ax.get_xticklabels():
+            tick.set_fontname(fontname)
+
+        for tick in ax.get_yticklabels():
+            tick.set_fontname(fontname)
+
+        fig.savefig("residual_norm.svg")
+        fig.savefig("residual_norm.png")
+
+
 parser = argparse.ArgumentParser()
 parser.add_argument(
     "--build", dest="build", action="store_true", default=False, help="Enable building"
@@ -455,7 +482,15 @@ options = {
     "initial_barrier_param": 0.1,
     "max_line_search_iterations": 1,
 }
-opt.optimize(options)
+data = opt.optimize(options)
+
+with open("cart_opt_data.json", "w") as fp:
+    json.dump(data, fp, indent=2)
+
+norms = []
+for iter_data in data["iterations"]:
+    norms.append(iter_data["residual"])
+plot_convergence(norms)
 
 # Extract the optimized values
 vals = x["src.rho"]
@@ -474,7 +509,6 @@ ax.axis("off")
 # Set the number of levels to use.
 levels = np.linspace(0.0, 1.0, 26)
 ax.contourf(X, Y, vals, levels, cmap="coolwarm", extend="max")
-
 
 plt.savefig(
     "compliance.png", dpi=500, transparent=True, bbox_inches="tight", pad_inches=0.01

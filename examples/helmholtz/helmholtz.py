@@ -266,7 +266,7 @@ end = time.perf_counter()
 print(f"Matrix computation time:    {end - start:.6f} seconds")
 
 start = time.perf_counter()
-chol = am.QuasidefCholesky(diag, mat)
+chol = am.SparseCholesky(mat)
 flag = chol.factor()
 print("flag = ", flag)
 chol.solve(ans)
