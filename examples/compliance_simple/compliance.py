@@ -3,8 +3,6 @@ import numpy as np  # used for plotting/analysis
 import argparse
 import time
 import matplotlib.pylab as plt
-from scipy.sparse.linalg import spsolve
-from scipy.sparse import csr_matrix
 
 
 def eval_shape_funcs(xi, eta):
@@ -66,71 +64,6 @@ def compute_shape_derivs(xi, eta, X, Y, vars):
     return N, N_xi, N_ea
 
 
-class Helmholtz(am.Component):
-    def __init__(self):
-        super().__init__()
-
-        # Add keyword arguments for the compute function
-        compute_args = []
-        for n in range(4):
-            compute_args.append({"n": n})
-        self.set_compute_args(compute_args)
-
-        # The filter radius
-        self.add_constant("r_filter", 0.2)
-
-        # The x/y coordinates
-        self.add_data("x_coord", shape=(4,))
-        self.add_data("y_coord", shape=(4,))
-
-        # The implicit topology input/output
-        self.add_input("x", shape=(4,), value=0.5, lower=0.0, upper=1.0)
-        self.add_input("rho", shape=(4,), value=0.5, lower=0.0, upper=1.0)
-
-        # Add the residual
-        self.add_output("rho_res", shape=(4,), value=1.0, lower=0.0, upper=0.0)
-
-        return
-
-    def compute(self, n=None):
-        qpts = [-1.0 / np.sqrt(3.0), 1.0 / np.sqrt(3.0)]
-        xi = qpts[n % 2]
-        eta = qpts[n // 2]
-
-        r = self.constants["r_filter"]
-        x = self.inputs["x"]
-        rho = self.inputs["rho"]
-
-        X = self.data["x_coord"]
-        Y = self.data["y_coord"]
-
-        N, N_xi, N_ea = compute_shape_derivs(xi, eta, X, Y, self.vars)
-
-        Nx = self.vars["Nx"]
-        Ny = self.vars["Ny"]
-
-        self.vars["x0"] = dot(N, x)
-        self.vars["rho0"] = dot(N, rho)
-        self.vars["rho_x"] = dot(Nx, rho)
-        self.vars["rho_y"] = dot(Ny, rho)
-
-        x0 = self.vars["x0"]
-        rho0 = self.vars["rho0"]
-        rho_x = self.vars["rho_x"]
-        rho_y = self.vars["rho_y"]
-
-        detJ = self.vars["detJ"]
-
-        self.outputs["rho_res"] = [
-            detJ * (N[0] * (rho0 - x0) + r * r * (Nx[0] * rho_x + Ny[0] * rho_y)),
-            detJ * (N[1] * (rho0 - x0) + r * r * (Nx[1] * rho_x + Ny[1] * rho_y)),
-            detJ * (N[2] * (rho0 - x0) + r * r * (Nx[2] * rho_x + Ny[2] * rho_y)),
-            detJ * (N[3] * (rho0 - x0) + r * r * (Nx[3] * rho_x + Ny[3] * rho_y)),
-        ]
-
-        return
-
-
 class Topology(am.Component):
     def __init__(self):
         super().__init__()
@@ -183,13 +116,13 @@ class Topology(am.Component):
         # Extract the input data
         X = self.data["x_coord"]
         Y = self.data["y_coord"]
-        compute_shape_derivs(xi, eta, X, Y, self.vars)
+        N, N_xi, N_ea = compute_shape_derivs(xi, eta, X, Y, self.vars)
 
         # Set the values of the derivatives of the shape functions
         Nx = self.vars["Nx"]
         Ny = self.vars["Ny"]
 
-        rho0 = 0.25 * (rho[0] + rho[1] + rho[2] + rho[3])
+        rho0 = dot(N, rho)
         # self.vars["E0"] = E * (rho0**p + kappa)
         self.vars["E0"] = E * (rho0 + kappa)
         E0 = self.vars["E0"]
@@ -317,12 +250,10 @@ class NodeSource(am.Component):
     def __init__(self):
         super().__init__()
 
-        self.add_input("x", value=0.5, lower=0.0, upper=1.0)
         self.add_input("rho", value=0.5, lower=0.0, upper=1.0)
         self.add_input("u", value=0.0, lower=-100, upper=100)
         self.add_input("v", value=0.0, lower=-100, upper=100)
 
-        self.add_output("rho_res", value=1.0, lower=0.0, upper=0.0)
         self.add_output("u_res", value=1.0, lower=0.0, upper=0.0)
         self.add_output("v_res", value=1.0, lower=0.0, upper=0.0)
 
@@ -368,11 +299,8 @@ parser.add_argument(
 )
 args = parser.parse_args()
 
-# nx = 128
-# ny = 64
-
-nx = 64
-ny = 32
+nx = 128
+ny = 64
 
 nnodes = (nx + 1) * (ny + 1)
 nelems = nx * ny
@@ -403,16 +331,6 @@ model = am.Model(module_name)
 
 node_src = NodeSource()
 model.add_component("src", nnodes, node_src)
-
-helmholtz = Helmholtz()
-model.add_component("helmholtz", nelems, helmholtz)
-
-# Link the inputs and the outputs
-model.link("helmholtz.x_coord", "src.x_coord", tgt_indices=conn)
-model.link("helmholtz.y_coord", "src.y_coord", tgt_indices=conn)
-model.link("helmholtz.x", "src.x", tgt_indices=conn)
-model.link("helmholtz.rho", "src.rho", tgt_indices=conn)
-model.link("helmholtz.rho_res", "src.rho_res", tgt_indices=conn)
 
 topo = Topology()
 model.add_component("topo", nelems, topo)
@@ -502,21 +420,17 @@ data["src.y_coord"] = y_coord
 x = model.create_vector()
 
 # Set initial design variable values
-x["src.x"] = 0.5
 x["src.rho"] = 0.5
 
 # Set initial multiplier values for the constraints
-x["src.rho_res"] = 1.0
 x["src.u_res"] = 1.0
 x["src.v_res"] = 1.0
 
 # Apply lower and upper bound constraints
 lower = model.create_vector()
 upper = model.create_vector()
-lower["src.x"] = 1e-3
-upper["src.x"] = 1.0
 lower["src.rho"] = 1e-3
-upper["src.rho"] = float("inf")
+upper["src.rho"] = 1.0
 
 start = time.perf_counter()
 mat_obj = prob.create_csr_matrix()
@@ -543,23 +457,28 @@ options = {
 }
 opt.optimize(options)
 
+# Extract the optimized values
 vals = x["src.rho"]
 vals = vals.reshape((nx + 1, ny + 1)).T
 
+# Set the x and y coordinates
 X, Y = np.meshgrid(xpts, ypts)
-plt.figure()
-plt.contourf(X, Y, vals, levels=20, cmap="viridis")
-plt.colorbar(label="rho value")
-plt.xlabel("x")
-plt.ylabel("y")
 
-vals = x["src.x"]
-vals = vals.reshape((nx + 1, ny + 1)).T
+# Plot the result as a figure
+fig, ax = plt.subplots(figsize=(8, 4))
+ax.set_aspect("equal")
+ax.get_xaxis().set_ticks([])
+ax.get_yaxis().set_ticks([])
+ax.axis("off")
 
-plt.figure()
-plt.contourf(X, Y, vals, levels=20, cmap="viridis")
-plt.colorbar(label="x value")
-plt.xlabel("x")
-plt.ylabel("y")
+# Set the number of levels to use.
+levels = np.linspace(0.0, 1.0, 26)
+ax.contourf(X, Y, vals, levels, cmap="coolwarm", extend="max")
 
+
+plt.savefig(
+    "compliance.png", dpi=500, transparent=True, bbox_inches="tight", pad_inches=0.01
+)
+
+fig.tight_layout(pad=0.01)
 plt.show()

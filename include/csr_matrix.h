@@ -29,12 +29,26 @@ class CSRMat {
       : nrows(nrows), ncols(ncols), nnz(nnz), sqdef_index(sqdef_index) {
     rowp = new int[nrows + 1];
     cols = new int[nnz];
+    diag = new int[nrows];
     std::copy(rowp_, rowp_ + (nrows + 1), rowp);
     std::copy(cols_, cols_ + nnz, cols);
 
     // Sort the column indices for later use
     for (int i = 0; i < nrows; i++) {
-      std::sort(&cols[rowp[i]], &cols[rowp[i + 1]]);
+      int size = rowp[i + 1] - rowp[i];
+      int* start = &cols[rowp[i]];
+      int* end = start + size;
+
+      // Sort the columns
+      std::sort(start, end);
+
+      // Set the diagonal elements of the matrix
+      auto* it = std::lower_bound(start, end, i);
+      if (it != end && *it == i) {
+        diag[i] = it - cols;
+      } else {
+        diag[i] = rowp[i];
+      }
     }
 
     data = new T[nnz];
@@ -74,6 +88,21 @@ class CSRMat {
     // Compute the number of non-zeros
     nnz = rowp[nrows];
 
+    diag = new int[nrows];
+    for (int i = 0; i < nrows; i++) {
+      int size = rowp[i + 1] - rowp[i];
+      int* start = &cols[rowp[i]];
+      int* end = start + size;
+
+      // Set the diagonal elements of the matrix
+      auto* it = std::lower_bound(start, end, i);
+      if (it != end && *it == i) {
+        diag[i] = it - cols;
+      } else {
+        diag[i] = rowp[i];
+      }
+    }
+
     // Don't forget to allocate the space
     data = new T[nnz];
     std::fill(data, data + nnz, 0.0);
@@ -81,10 +110,26 @@ class CSRMat {
   ~CSRMat() {
     delete[] rowp;
     delete[] cols;
+    delete[] diag;
     delete[] data;
   }
 
   void zero() { std::fill(data, data + nnz, 0.0); }
+
+  void gauss_seidel(const std::shared_ptr<Vector<T>>& y,
+                    std::shared_ptr<Vector<T>>& x) const {
+    const T* y_array = y->get_array();
+    T* x_array = x->get_array();
+
+    for (int i = 0; i < nrows; i++) {
+      T val = y_array[i];
+      for (int jp = rowp[i]; jp < rowp[i + 1]; jp++) {
+        val -= data[jp] * x_array[cols[jp]];
+      }
+
+      x_array[i] = x_array[i] + val / data[diag[i]];
+    }
+  }
 
   /**
    * @brief Add diagonal entries to the matrix
@@ -152,6 +197,7 @@ class CSRMat {
   int nnz;    // Number of non-zeros in the matrix
   int* rowp;  // Pointer into the column array
   int* cols;  // Column indices
+  int* diag;  // The diagonal entry
   T* data;    // Matrix values
 
   // Specific to symmetric quasi-definite matrices. Which index is where

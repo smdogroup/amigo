@@ -5,7 +5,7 @@ import matplotlib.pylab as plt
 import niceplots
 
 final_time = 2.0
-num_time_steps = 200
+num_time_steps = 1000
 
 
 class TrapezoidRule(am.Component):
@@ -101,8 +101,6 @@ class Objective(am.Component):
         return
 
     def compute(self):
-        dt = self.constants["dt"]
-
         x1 = self.inputs["x1"]
         x2 = self.inputs["x2"]
 

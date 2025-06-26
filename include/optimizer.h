@@ -158,7 +158,6 @@ class InteriorPointOptimizer {
                          std::shared_ptr<Vector<T>> lower,
                          std::shared_ptr<Vector<T>> upper)
       : problem(problem), lower(lower), upper(upper) {
-    diagonal = problem->create_vector();
     num_variables = problem->get_num_variables();
   }
 
@@ -468,16 +467,16 @@ class InteriorPointOptimizer {
   /**
    * @brief Add the diagonal contributions from the matrix
    *
-   * This code adds the components of the matrix:
+   * This code computes the components of the matrix:
    *
    * [ D |         ]
    * [ 0 | -C^{-1} ]
    *
    * @param vars The values of the optimization variables
-   * @param mat The CSR Matrix for the Hessian
+   * @param diag The CSR Matrix for the Hessian
    */
-  void add_diagonal(const std::shared_ptr<OptVector<T>> vars,
-                    std::shared_ptr<CSRMat<T>> mat) const {
+  void compute_diagonal(const std::shared_ptr<OptVector<T>> vars,
+                        std::shared_ptr<Vector<T>> diagonal) const {
     const Vector<int>& is_multiplier = *problem->get_multiplier_indicator();
 
     const Vector<T>& xs = *vars->xs;  // Primal and slack variables
@@ -509,8 +508,6 @@ class InteriorPointOptimizer {
         }
       }
     }
-
-    mat->add_diagonal(diagonal);
   }
 
   /**
@@ -763,9 +760,6 @@ class InteriorPointOptimizer {
 
   // The number of primal and dual variables
   int num_variables;
-
-  // Temporary array - storing the matrix diagonal
-  std::shared_ptr<Vector<T>> diagonal;
 };
 
 }  // namespace amigo

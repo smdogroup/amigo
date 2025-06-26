@@ -5,14 +5,40 @@ from .amigo import InteriorPointOptimizer
 from .model import ModelVector
 
 
+class DirectScipySolver:
+    def __init__(self, problem):
+        self.problem = problem
+        self.hess = self.problem.create_csr_matrix()
+        self.nrows, self.ncols, self.nnz, self.rowp, self.cols = (
+            self.hess.get_nonzero_structure()
+        )
+
+    def solve(self, x, diag, bx, px):
+        """
+        Solve the KKT syste - many different appraoches could be inserted here
+        """
+
+        # Compute the Hessian
+        self.problem.hessian(x, self.hess)
+        self.hess.add_diagonal(diag)
+
+        data = self.hess.get_data()
+        H = csr_matrix((data, self.cols, self.rowp), shape=(self.nrows, self.ncols))
+
+        # Compute the solution using scipy
+        px.get_array()[:] = spsolve(H, bx.get_array())
+
+        return
+
+
 class Optimizer:
-    def __init__(self, model, x=None, lower=None, upper=None):
+    def __init__(self, model, x=None, lower=None, upper=None, solver=None):
         self.model = model
-        self.prob = self.model.get_opt_problem()
+        self.problem = self.model.get_opt_problem()
 
         # Get the vector of initial values if none are specified
         if x is None:
-            self.x = self.prob.create_vector()
+            self.x = self.problem.create_vector()
             self.x.get_array()[:] = model.get_values_from_meta("value")
         elif isinstance(x, ModelVector):
             self.x = x.get_opt_problem_vec()
@@ -21,22 +47,28 @@ class Optimizer:
 
         # Get the lower and upper bounds if none are specified
         if lower is None:
-            self.lower = self.prob.create_vector()
+            self.lower = self.problem.create_vector()
             self.lower.get_array()[:] = model.get_values_from_meta("lower")
         elif isinstance(lower, ModelVector):
             self.lower = lower.get_opt_problem_vec()
         else:
             self.lower = lower
         if upper is None:
-            self.upper = self.prob.create_vector()
+            self.upper = self.problem.create_vector()
             self.upper.get_array()[:] = model.get_values_from_meta("upper")
         elif isinstance(upper, ModelVector):
             self.upper = upper.get_opt_problem_vec()
         else:
             self.upper = upper
 
+        # Set the solver for the KKT system
+        if solver is None:
+            self.solver = DirectScipySolver(self.problem)
+        else:
+            self.solver = solver
+
         # Create the interior point optimizer object
-        self.optimizer = InteriorPointOptimizer(self.prob, self.lower, self.upper)
+        self.optimizer = InteriorPointOptimizer(self.problem, self.lower, self.upper)
 
         # Create data that will be used in conjunction with the optimizer
         self.vars = self.optimizer.create_opt_vector(self.x)
@@ -45,34 +77,10 @@ class Optimizer:
         self.temp = self.optimizer.create_opt_vector()
 
         # Create vectors that store problem-specific information
-        self.grad = self.prob.create_vector()
-        self.px = self.prob.create_vector()
-        self.bx = self.prob.create_vector()
-
-        # Create hessian matrix object
-        self.hess = self.prob.create_csr_matrix()
-        self.nrows, self.ncols, self.nnz, self.rowp, self.cols = (
-            self.hess.get_nonzero_structure()
-        )
-
-    def get_scipy_csr_mat(self, obj=None):
-        if obj is None:
-            data = self.hess.get_data()
-        else:
-            data = obj.get_data()
-        return csr_matrix((data, self.cols, self.rowp), shape=(self.nrows, self.ncols))
-
-    def _solve(self, hess, bx, px):
-        """
-        Solve the KKT syste - many different appraoches could be inserted here
-        """
-
-        H = self.get_scipy_csr_mat(obj=hess)
-
-        # Compute the solution using scipy
-        px.get_array()[:] = spsolve(H, bx.get_array())
-
-        return
+        self.grad = self.problem.create_vector()
+        self.diag = self.problem.create_vector()
+        self.px = self.problem.create_vector()
+        self.bx = self.problem.create_vector()
 
     def write_state_vars(self, vars):
 
@@ -123,7 +131,7 @@ class Optimizer:
         self.optimizer.initialize_multipliers_and_slacks(self.vars)
 
         # Compute the gradient
-        self.prob.gradient(self.vars.x, self.grad)
+        self.problem.gradient(self.vars.x, self.grad)
 
         line_iters = 0
         alpha_prev = 0.0
@@ -164,14 +172,11 @@ class Optimizer:
             # Compute the reduced residual for the right-hand-side of the KKT system
             self.optimizer.compute_reduced_residual(self.vars, self.res, self.bx)
 
-            # Compute the Hessian
-            self.prob.hessian(self.vars.x, self.hess)
-
             # Add the diagonal contributions to the Hessian matrix
-            self.optimizer.add_diagonal(self.vars, self.hess)
+            self.optimizer.compute_diagonal(self.vars, self.diag)
 
             # Solve the KKT system
-            self._solve(self.hess, self.bx, self.px)
+            self.solver.solve(self.vars.x, self.diag, self.bx, self.px)
 
             # Compute the full update based on the reduced variable update
             self.optimizer.compute_update_from_reduced(
@@ -200,7 +205,7 @@ class Optimizer:
                 self.optimizer.apply_step_update(alpha, alpha, self.update, self.temp)
 
                 # Compute the gradient at the new point
-                self.prob.gradient(self.temp.x, self.grad)
+                self.problem.gradient(self.temp.x, self.grad)
                 res_norm_new = self.optimizer.compute_residual(
                     barrier_param, self.temp, self.grad, self.res
                 )

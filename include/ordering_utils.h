@@ -13,16 +13,18 @@ extern "C" {
 
 namespace amigo {
 
-enum class OrderingType { NESTED_DISSECTION, AMD, NATURAL };
+enum class OrderingType { NESTED_DISSECTION, AMD, MULTI_COLOR, NATURAL };
 
 class OrderingUtils {
  public:
   static void reorder(OrderingType order, int nrows, int *rowp, int *cols,
                       int **perm_, int **iperm_) {
-    if (order == OrderingType ::NESTED_DISSECTION) {
+    if (order == OrderingType::NESTED_DISSECTION) {
       nested_dissection(nrows, rowp, cols, perm_, iperm_);
-    } else if (order == OrderingType ::AMD) {
+    } else if (order == OrderingType::AMD) {
       amd(nrows, rowp, cols, 0, nullptr, perm_, iperm_);
+    } else if (order == OrderingType::MULTI_COLOR) {
+      multi_color(nrows, rowp, cols, perm_, iperm_);
     } else {  // order == OrderingType::NATURAL
       // Natural ordering
       int *perm = new int[nrows];
@@ -37,8 +39,8 @@ class OrderingUtils {
 
   static void reorder_block(OrderingType order, int nrows, int *rowp, int *cols,
                             int nmult, int *mult, int **perm_, int **iperm_) {
-    if (order == OrderingType ::NESTED_DISSECTION ||
-        order == OrderingType::NATURAL) {
+    if (order == OrderingType::NESTED_DISSECTION ||
+        order == OrderingType::NATURAL || order == OrderingType::MULTI_COLOR) {
       reorder(order, nrows, rowp, cols, perm_, iperm_);
       int *perm = *perm_;
       int *iperm = *iperm_;
@@ -115,6 +117,83 @@ class OrderingUtils {
 
     *perm_ = perm;
     *iperm_ = iperm;
+  }
+
+  /**
+   * @brief Perform a multicolor ordering of CSR data
+   *
+   * @param nrows Number of rows in the matrix
+   * @param rowp Pointer into the column index
+   * @param cols Column array
+   * @param perm_ Permutation of the array
+   * @param iperm_ Inverse permutation
+   */
+  static void multi_color(int nrows, const int *rowp, const int *cols,
+                          int **perm_, int **iperm_) {
+    int *colors = new int[nrows];
+    int *tmp = new int[nrows + 1];
+    std::fill(colors, colors + nrows, -1);
+    std::fill(tmp, tmp + nrows, -1);
+
+    int num_colors = 0;
+    for (int i = 0; i < nrows; i++) {
+      // Find the minimum color that is not referred to by any adjacent
+      // node.
+      for (int jp = rowp[i]; jp < rowp[i + 1]; jp++) {
+        int j = cols[jp];
+        if (colors[j] >= 0) {
+          tmp[colors[j]] = i;
+        }
+      }
+
+      // Set the color for this variable if it already exists
+      int flag = 1;
+      for (int k = 0; k < num_colors; k++) {
+        if (tmp[k] != i) {
+          colors[i] = k;
+          flag = 0;
+          break;
+        }
+      }
+
+      // Create a new color
+      if (flag) {
+        colors[i] = num_colors;
+        num_colors++;
+      }
+    }
+
+    // Now that all the nodes have been colored, order them
+    std::fill(tmp, tmp + (num_colors + 1), 0);
+
+    // Count up the number of nodes for each color
+    for (int i = 0; i < nrows; i++) {
+      tmp[colors[i] + 1]++;
+    }
+
+    // Set tmp as an offset for each color
+    for (int i = 1; i < num_colors + 1; i++) {
+      tmp[i] += tmp[i - 1];
+    }
+
+    int *iperm = new int[nrows];
+    int *perm = new int[nrows];
+
+    // Create the new color variables
+    for (int i = 0; i < nrows; i++) {
+      iperm[i] = tmp[colors[i]];
+      tmp[colors[i]]++;
+    }
+
+    for (int i = 0; i < nrows; i++) {
+      iperm[perm[i]] = i;
+    }
+
+    delete[] tmp;
+    delete[] colors;
+
+    *iperm_ = iperm;
+    *perm_ = perm;
   }
 
   /**

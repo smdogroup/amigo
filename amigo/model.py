@@ -1,9 +1,7 @@
 import numpy as np
 import ast
 import sys
-import os
 import importlib
-import inspect
 from .amigo import (
     OrderingType,
     reorder_model,

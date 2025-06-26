@@ -200,6 +200,7 @@ PYBIND11_MODULE(amigo, mod) {
   py::enum_<amigo::OrderingType>(mod, "OrderingType")
       .value("NESTED_DISSECTION", amigo::OrderingType::NESTED_DISSECTION)
       .value("AMD", amigo::OrderingType::AMD)
+      .value("MULTI_COLOR", amigo::OrderingType::MULTI_COLOR)
       .value("NATURAL", amigo::OrderingType::NATURAL)
       .export_values();
 
@@ -225,6 +226,7 @@ PYBIND11_MODULE(amigo, mod) {
                          mat.nnz * sizeof(double));
              return data;
            })
+      .def("gauss_seidel", &amigo::CSRMat<double>::gauss_seidel)
       .def("mult", &amigo::CSRMat<double>::mult)
       .def("add_diagonal", &amigo::CSRMat<double>::add_diagonal);
 
@@ -312,7 +314,8 @@ PYBIND11_MODULE(amigo, mod) {
            &amigo::InteriorPointOptimizer<double>::compute_reduced_residual)
       .def("compute_update_from_reduced",
            &amigo::InteriorPointOptimizer<double>::compute_update_from_reduced)
-      .def("add_diagonal", &amigo::InteriorPointOptimizer<double>::add_diagonal)
+      .def("compute_diagonal",
+           &amigo::InteriorPointOptimizer<double>::compute_diagonal)
       .def("compute_max_step",
            [](const amigo::InteriorPointOptimizer<double> &self,
               const double tau,
