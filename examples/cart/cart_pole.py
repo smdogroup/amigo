@@ -21,7 +21,7 @@ class TrapezoidRule(am.Component):
         self.add_input("q1dot")
         self.add_input("q2dot")
 
-        self.add_output("res")
+        self.add_constraint("res")
 
         return
 
@@ -33,7 +33,7 @@ class TrapezoidRule(am.Component):
         q1dot = self.inputs["q1dot"]
         q2dot = self.inputs["q2dot"]
 
-        self.outputs["res"] = q2 - q1 - 0.5 * dt * (q1dot + q2dot)
+        self.constraints["res"] = q2 - q1 - 0.5 * dt * (q1dot + q2dot)
 
         return
 
@@ -51,7 +51,7 @@ class CartComponent(am.Component):
         self.add_input("q", shape=(4), label="state")
         self.add_input("qdot", shape=(4), label="rate")
 
-        self.add_output("res", shape=(4), label="residual")
+        self.add_constraint("res", shape=(4), label="residual")
 
         return
 
@@ -83,7 +83,7 @@ class CartComponent(am.Component):
             L * m2 * cost * sint * q[3] * q[3] + x * cost + (m1 + m2) * g * sint
         )
 
-        self.outputs["res"] = res
+        self.constraints["res"] = res
 
         return
 
@@ -116,11 +116,11 @@ class InitialConditions(am.Component):
         super().__init__()
 
         self.add_input("q", shape=4)
-        self.add_output("res", shape=4)
+        self.add_constraint("res", shape=4)
 
     def compute(self):
         q = self.inputs["q"]
-        self.outputs["res"] = [q[0], q[1], q[2], q[3]]
+        self.constraints["res"] = [q[0], q[1], q[2], q[3]]
 
 
 # Set the final conditions
@@ -131,12 +131,12 @@ class FinalConditions(am.Component):
         self.add_constant("pi", value=np.pi)
 
         self.add_input("q", shape=4)
-        self.add_output("res", shape=4)
+        self.add_constraint("res", shape=4)
 
     def compute(self):
         pi = self.constants["pi"]
         q = self.inputs["q"]
-        self.outputs["res"] = [q[0] - 2.0, q[1] - pi, q[2], q[3]]
+        self.constraints["res"] = [q[0] - 2.0, q[1] - pi, q[2], q[3]]
 
 
 def plot(d, theta, xctrl):

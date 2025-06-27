@@ -19,7 +19,7 @@ class Paraboloid(am.Component):
         self.add_objective("f_xy")
 
         # Add a constraint for the values
-        self.add_output("con", value=0.0, lower=0.0, upper=10.0)
+        self.add_constraint("con", value=0.0, lower=0.0, upper=10.0)
 
         return
 
@@ -35,9 +35,9 @@ class Paraboloid(am.Component):
         obj = (x - a) ** 2 + x * y + (y + b) ** 2 - a
         self.objective["f_xy"] = obj
 
-        # Compute and set the output constraint
+        # Compute and set the constraint
         con = x + y
-        self.outputs["con"] = con
+        self.constraints["con"] = con
 
         return
 
@@ -92,5 +92,5 @@ if __name__ == "__main__":
     print(f"%15s %20.10f %20.10f %20.8e" % ("x", x_exp, x_star, x_err))
     print(f"%15s %20.10f %20.10f %20.8e" % ("y", y_exp, y_star, y_err))
 
-    # QUESTION: is there a way to extract the outputs after optimization like with design vars?
+    # QUESTION: is there a way to extract the constraints after optimization like with design vars?
     # f_xy_star = x["paraboloid.f_xy"]

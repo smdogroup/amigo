@@ -81,12 +81,12 @@ class Helmholtz(am.Component):
         self.add_data("x_coord", shape=(4,))
         self.add_data("y_coord", shape=(4,))
 
-        # The implicit topology input/output
+        # The implicit topology input/constraint
         self.add_input("x", shape=(4,), value=0.5, lower=0.0, upper=1.0)
         self.add_input("rho", shape=(4,), value=0.5, lower=0.0, upper=1.0)
 
         # Add the residual
-        self.add_output("rho_res", shape=(4,), value=1.0, lower=0.0, upper=0.0)
+        self.add_constraint("rho_res", shape=(4,), value=1.0, lower=0.0, upper=0.0)
 
         return
 
@@ -119,7 +119,7 @@ class Helmholtz(am.Component):
 
         detJ = self.vars["detJ"]
 
-        self.outputs["rho_res"] = [
+        self.constraints["rho_res"] = [
             detJ * (N[0] * (rho0 - x0) + r * r * (Nx[0] * rho_x + Ny[0] * rho_y)),
             detJ * (N[1] * (rho0 - x0) + r * r * (Nx[1] * rho_x + Ny[1] * rho_y)),
             detJ * (N[2] * (rho0 - x0) + r * r * (Nx[2] * rho_x + Ny[2] * rho_y)),
@@ -155,8 +155,8 @@ class Topology(am.Component):
         self.add_input("v", shape=(4,), value=0.0)
 
         # Add the residuals
-        self.add_output("u_res", shape=(4,), value=1.0, lower=0.0, upper=0.0)
-        self.add_output("v_res", shape=(4,), value=1.0, lower=0.0, upper=0.0)
+        self.add_constraint("u_res", shape=(4,), value=1.0, lower=0.0, upper=0.0)
+        self.add_constraint("v_res", shape=(4,), value=1.0, lower=0.0, upper=0.0)
 
         # Add the objective
         self.add_objective("compliance")
@@ -210,14 +210,14 @@ class Topology(am.Component):
         s = self.vars["s"]
 
         detJ = self.vars["detJ"]
-        self.outputs["u_res"] = [
+        self.constraints["u_res"] = [
             detJ * (Nx[0] * s[0] + Ny[0] * s[2]),
             detJ * (Nx[1] * s[0] + Ny[1] * s[2]),
             detJ * (Nx[2] * s[0] + Ny[2] * s[2]),
             detJ * (Nx[3] * s[0] + Ny[3] * s[2]),
         ]
 
-        self.outputs["v_res"] = [
+        self.constraints["v_res"] = [
             detJ * (Nx[0] * s[2] + Ny[0] * s[1]),
             detJ * (Nx[1] * s[2] + Ny[1] * s[1]),
             detJ * (Nx[2] * s[2] + Ny[2] * s[1]),
@@ -248,11 +248,11 @@ class MassConstraint(am.Component):
         self.add_data("x_coord", shape=(4,))
         self.add_data("y_coord", shape=(4,))
 
-        # The implicit topology input/output
+        # The implicit topology input/constraint
         self.add_input("rho", shape=(4,), value=0.5, lower=0.0, upper=1.0)
 
         # Add the residuals
-        self.add_output("mass_con", value=1.0, lower=0.0, upper=0.0)
+        self.add_constraint("mass_con", value=1.0, lower=0.0, upper=0.0)
 
     def compute(self, n=None):
         qpts = [-1.0 / np.sqrt(3.0), 1.0 / np.sqrt(3.0)]
@@ -273,7 +273,7 @@ class MassConstraint(am.Component):
         detJ = self.vars["detJ"]
         rho0 = 0.25 * (rho[0] + rho[1] + rho[2] + rho[3])
 
-        self.outputs["mass_con"] = detJ * (rho0 - mass_fraction)
+        self.constraints["mass_con"] = detJ * (rho0 - mass_fraction)
 
         return
 
@@ -285,20 +285,20 @@ class FixedBoundaryCondition(am.Component):
         self.add_input("u", value=1.0)
         self.add_input("lam", value=1.0)
 
-        self.add_output("disp_res", value=1.0, lower=0.0, upper=0.0)
-        self.add_output("bc_res", value=1.0, lower=0.0, upper=0.0)
+        self.add_constraint("disp_res", value=1.0, lower=0.0, upper=0.0)
+        self.add_constraint("bc_res", value=1.0, lower=0.0, upper=0.0)
 
     def compute(self):
-        self.outputs["bc_res"] = self.inputs["u"]
-        self.outputs["disp_res"] = self.inputs["lam"]
+        self.constraints["bc_res"] = self.inputs["u"]
+        self.constraints["disp_res"] = self.inputs["lam"]
 
 
 class AppliedLoad(am.Component):
     def __init__(self):
         super().__init__()
 
-        self.add_output("u_res", value=1.0, lower=0.0, upper=0.0)
-        self.add_output("v_res", value=1.0, lower=0.0, upper=0.0)
+        self.add_constraint("u_res", value=1.0, lower=0.0, upper=0.0)
+        self.add_constraint("v_res", value=1.0, lower=0.0, upper=0.0)
         self.add_constant("fx", value=-10.0)
         self.add_constant("fy", value=-10.0)
         return
@@ -306,8 +306,8 @@ class AppliedLoad(am.Component):
     def compute(self):
         fx = self.constants["fx"]
         fy = self.constants["fy"]
-        self.outputs["u_res"] = -fx
-        self.outputs["v_res"] = -fy
+        self.constraints["u_res"] = -fx
+        self.constraints["v_res"] = -fy
         return
 
 
@@ -320,17 +320,12 @@ class NodeSource(am.Component):
         self.add_input("u", value=0.0, lower=-100, upper=100)
         self.add_input("v", value=0.0, lower=-100, upper=100)
 
-        self.add_output("rho_res", value=1.0, lower=0.0, upper=0.0)
-        self.add_output("u_res", value=1.0, lower=0.0, upper=0.0)
-        self.add_output("v_res", value=1.0, lower=0.0, upper=0.0)
+        self.add_constraint("rho_res", value=1.0, lower=0.0, upper=0.0)
+        self.add_constraint("u_res", value=1.0, lower=0.0, upper=0.0)
+        self.add_constraint("v_res", value=1.0, lower=0.0, upper=0.0)
 
         self.add_data("x_coord")
         self.add_data("y_coord")
-
-        self.empty = True
-
-    def compute(self):
-        pass
 
 
 parser = argparse.ArgumentParser()
@@ -405,7 +400,7 @@ model.add_component("src", nnodes, node_src)
 helmholtz = Helmholtz()
 model.add_component("helmholtz", nelems, helmholtz)
 
-# Link the inputs and the outputs
+# Link the inputs and the constraints
 model.link("helmholtz.x_coord", "src.x_coord", tgt_indices=conn)
 model.link("helmholtz.y_coord", "src.y_coord", tgt_indices=conn)
 model.link("helmholtz.x", "src.x", tgt_indices=conn)
@@ -419,7 +414,7 @@ model.add_component("topo", nelems, topo)
 model.link("topo.x_coord", "src.x_coord", tgt_indices=conn)
 model.link("topo.y_coord", "src.y_coord", tgt_indices=conn)
 
-# Link the inputs and the outputs
+# Link the inputs and the constraints
 model.link("topo.u", "src.u", tgt_indices=conn)
 model.link("topo.v", "src.v", tgt_indices=conn)
 

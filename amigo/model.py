@@ -173,8 +173,8 @@ class ComponentGroup:
     def get_input_names(self):
         return self.comp_obj.get_input_names()
 
-    def get_output_names(self):
-        return self.comp_obj.get_output_names()
+    def get_constraint_names(self):
+        return self.comp_obj.get_constraint_names()
 
     def get_data_names(self):
         return self.comp_obj.get_data_names()
@@ -188,8 +188,8 @@ class ComponentGroup:
     def get_meta(self, name):
         if name in self.comp_obj.inputs:
             return self.comp_obj.inputs.get_meta(name)
-        elif name in self.comp_obj.outputs:
-            return self.comp_obj.outputs.get_meta(name)
+        elif name in self.comp_obj.constraints:
+            return self.comp_obj.constraints.get_meta(name)
         elif name in self.comp_obj.data:
             return self.comp_obj.data.get_meta(name)
         elif name in self.comp_obj.objective:
@@ -198,7 +198,7 @@ class ComponentGroup:
             return self.comp_obj.constants.get_meta(name)
         else:
             raise ValueError(
-                f"No input, output, data, objective or constant for {self.class_name}.{name}"
+                f"No input, constraint, data, objective or constant for {self.class_name}.{name}"
             )
 
     def get_indices(self, vars: dict):
@@ -296,7 +296,7 @@ class Model:
         self._initialized = False
 
         self.input_names = {}
-        self.output_names = {}
+        self.constraint_names = {}
         self.data_names = {}
 
     def _get_group_shapes(self, size: int, var_shapes: dict):
@@ -314,7 +314,7 @@ class Model:
         Add a component group to the model.
 
         This function adds the component group to the model. No ordering or linking
-        operations are performed until initialize() is called. All inputs and outputs from
+        operations are performed until initialize() is called. All inputs and constraints from
         comp_obj are referred to by: name.var or name.var[i, j], where numpy-type index
         slicing can be used to denote slices of variables.
 
@@ -348,7 +348,7 @@ class Model:
         Add an entire model class as a sub-model.
 
         This function adds the entire sub-model class. The sub-model name must be unique,
-        but the same model sub-class can be added more than once. All inputs and outputs
+        but the same model sub-class can be added more than once. All inputs and constraints
         from the sub-model are referred to by name.comp_name.var or name.comp_name.var[i, j],
         where numpy-type index slicing ca be used.
 
@@ -398,17 +398,18 @@ class Model:
         tgt_indices: Union[None, list, np.ndarray] = None,
     ):
         """
-        Link two inputs, outputs or data components so that they are the same.
+        Link two inputs, constraints, outputs or data components so that they are the same.
 
-        You cannot link intputs to outputs. You can only link inputs to inputs and outputs
-        to outputs and data to data. The outputs are used as constraints within the optimization problem.
-        The inputs are the design variables. The data is constant data for each component.
+        You cannot link intputs to outputs or constraints . You can only link inputs to inputs
+        and outputs to outputs, constraints to constraints and data to data. The inputs are the
+        design variables. The data is constant data for each component.
 
-        The inputs/outputs are specified as sub_model.group.var[0, 1] or sub_model.group.var[:, 1]
+        The inputs/constraints are specified as sub_model.group.var[0, 1] or sub_model.group.var[:, 1]
         or sub_model.group.var, or any sliced numpy view.
 
         The purpose of the link statements is to enforce which input variables are the same.
-        If outputs are linked, then the resulting constraints are summed across all group components.
+        If constraints or outputs are linked, then the resulting values are summed across
+        all group components.
 
         Args:
             src_expr (str): Source variable name
@@ -442,7 +443,7 @@ class Model:
             b_type = self._get_expr_type(b_var)
 
             # Check if the types are consistent
-            is_var = a_type == b_type and (a_type == "input" or b_type == "output")
+            is_var = a_type == b_type and (a_type == "input" or b_type == "constraint")
             is_data = a_type == b_type and a_type == "data"
 
             if (type == "vars" and is_var) or (type == "data" and is_data):
@@ -492,8 +493,10 @@ class Model:
             arrays.append(comp.get_indices(comp.vars))
 
         if order_for_block:
-            output_indices = self._get_output_indices()
-            iperm = reorder_model(order_type, arrays, output_indices=output_indices)
+            constraint_indices = self._get_constraint_indices()
+            iperm = reorder_model(
+                order_type, arrays, constraint_indices=constraint_indices
+            )
         else:
             iperm = reorder_model(order_type, arrays)
 
@@ -505,16 +508,16 @@ class Model:
 
         return
 
-    def _get_output_indices(self):
+    def _get_constraint_indices(self):
         """
         Get the output indices. This must be called after _init_indices
         """
         # Get the indices of variable names
         temp = np.zeros(self.num_variables, dtype=int)
         for name, comp in self.comp.items():
-            outputs = comp.get_output_names()
-            for outname in outputs:
-                temp[comp.vars[outname]] = 1
+            cons = comp.get_constraint_names()
+            for conname in cons:
+                temp[comp.vars[conname]] = 1
 
         return np.nonzero(temp)[0]
 
@@ -532,8 +535,8 @@ class Model:
 
         self._reorder_indices(order_type, order_for_block)
 
-        self.output_indices = self._get_output_indices()
-        self.num_constraints = len(self.output_indices)
+        self.constraint_indices = self._get_constraint_indices()
+        self.num_constraints = len(self.constraint_indices)
 
         self._initialized = True
         self.problem = self._create_opt_problem()
@@ -547,13 +550,13 @@ class Model:
 
         if name in self.comp[comp_name].get_input_names():
             return "input"
-        elif name in self.comp[comp_name].get_output_names():
-            return "output"
+        elif name in self.comp[comp_name].get_constraint_names():
+            return "constraint"
         elif name in self.comp[comp_name].get_data_names():
             return "data"
         else:
             raise ValueError(
-                f"Name {comp_name}.{name} is neither an input, output or data"
+                f"Name {comp_name}.{name} is neither an input, constraint, output or data"
             )
 
     def get_indices(self, name: str):
@@ -587,7 +590,7 @@ class Model:
                 return self.comp[comp_name].get_data(name)[indices]
         else:
             raise ValueError(
-                f"Name {comp_name}.{name} is not an input, output or data name"
+                f"Name {comp_name}.{name} is not an input, constraint, output or data name"
             )
 
     def get_meta(self, name: str):
@@ -623,7 +626,7 @@ class Model:
         return OptimizationProblem(
             self.data_size,
             self.num_variables,
-            self.output_indices,
+            self.constraint_indices,
             objs,
         )
 
@@ -680,21 +683,21 @@ class Model:
 
     def get_all_names(self):
         """
-        Get the scoped names of all inputs, outputs and data within the model
+        Get the scoped names of all inputs, constraints and data within the model
         """
         inputs = []
-        outputs = []
+        cons = []
         data = []
 
         for comp_name, comp in self.comp.items():
             for name in comp.get_input_names():
                 inputs.append(".".join([comp_name, name]))
-            for name in comp.get_output_names():
-                outputs.append(".".join([comp_name, name]))
+            for name in comp.get_constraint_names():
+                cons.append(".".join([comp_name, name]))
             for name in comp.get_data_names():
                 data.append(".".join([comp_name, name]))
 
-        return inputs, outputs, data
+        return inputs, cons, data
 
     def get_values_from_meta(
         self, meta_name: str, x: Union[None, List, np.ndarray] = None
@@ -856,10 +859,10 @@ class Model:
                 inputs[input_name] = self.comp[name].get_meta(input_name).todict()
             subtree["inputs"] = inputs
 
-            outputs = {}
-            for output_name in self.comp[name].get_output_names():
-                outputs[output_name] = self.comp[name].get_meta(output_name).todict()
-            subtree["outputs"] = outputs
+            cons = {}
+            for con_name in self.comp[name].get_constraint_names():
+                cons[con_name] = self.comp[name].get_meta(con_name).todict()
+            subtree["constraints"] = cons
         else:
             children = []
             if "children" in tree:

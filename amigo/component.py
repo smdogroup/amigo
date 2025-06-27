@@ -1,3 +1,4 @@
+import types
 from .expressions import *
 
 _cpp_type_map = {int: "int", float: "double", complex: "std::complex<double>"}
@@ -173,7 +174,7 @@ def _generate_cpp_types(inputs, template_name="T__"):
 class Meta:
     def __init__(self, name, var_type, **kwargs):
         self.name = name
-        options = ["input", "output", "data", "objective", "constant"]
+        options = ["input", "constraint", "output", "data", "objective", "constant"]
         if var_type not in options:
             raise ValueError(f"{var_type} not one of {options}")
         self.var_type = var_type
@@ -510,8 +511,8 @@ class DataSet:
         return self.meta[name]
 
 
-class OutputSet:
-    class OutputExpr:
+class ConstraintSet:
+    class ConstrExpr:
         def __init__(self, name, type=float, shape=None):
             self.name = name
             self.shape = _normalize_shape(shape)
@@ -531,56 +532,56 @@ class OutputSet:
                     ]
 
     def __init__(self, lagrangian_name="lagrangian__"):
-        self.outputs = {}
+        self.cons = {}
         self.meta = {}
         self.lagrangian_name = lagrangian_name
 
     def add(self, name, shape=None, type=float, **kwargs):
-        self.outputs[name] = self.OutputExpr(name, shape=shape, type=type)
-        self.meta[name] = Meta(name, "output", shape=shape, type=type, **kwargs)
+        self.cons[name] = self.ConstrExpr(name, shape=shape, type=type)
+        self.meta[name] = Meta(name, "constraint", shape=shape, type=type, **kwargs)
         return
 
     def clear(self):
-        for name in self.outputs:
-            self.outputs[name].clear_expr()
+        for name in self.cons:
+            self.cons[name].clear_expr()
         return
 
     def __len__(self):
-        return len(self.outputs)
+        return len(self.cons)
 
     def __iter__(self):
-        return iter(self.outputs)
+        return iter(self.cons)
 
     def __getitem__(self, name):
-        return self.outputs[name]
+        return self.cons[name]
 
     def __setitem__(self, name, expr):
-        if name not in self.outputs:
-            raise KeyError(f"{name} not in declared outputs")
+        if name not in self.cons:
+            raise KeyError(f"{name} not in declared constraints")
 
         if isinstance(expr, Expr):
-            if self.outputs[name].shape is None:
-                self.outputs[name].expr = expr
+            if self.cons[name].shape is None:
+                self.cons[name].expr = expr
         else:
-            shape = self.outputs[name].shape
+            shape = self.cons[name].shape
             if len(shape) == 1:
                 for i in range(shape[0]):
-                    self.outputs[name].expr[i] = expr[i]
+                    self.cons[name].expr[i] = expr[i]
             elif len(shape) == 2:
                 for i in range(shape[0]):
                     for j in range(shape[1]):
-                        self.outputs[name].expr[i][j] = expr[i][j]
+                        self.cons[name].expr[i][j] = expr[i][j]
 
         return
 
     def get_shape(self, name):
-        return self.outputs[name].shape
+        return self.cons[name].shape
 
     def get_meta(self, name):
         return self.meta[name]
 
     def evaluate(self, name, env):
-        return self.outputs[name].node.evaluate(env)
+        return self.cons[name].node.evaluate(env)
 
     def _get_multiplier_names(self):
         mult_names = {}
@@ -590,7 +591,7 @@ class OutputSet:
         return mult_names
 
     def generate_cpp_types(self, template_name="T__"):
-        return _generate_cpp_types(self.outputs, template_name=template_name)
+        return _generate_cpp_types(self.cons, template_name=template_name)
 
     def generate_cpp_input_decl(
         self,
@@ -604,7 +605,7 @@ class OutputSet:
     ):
         mult_names = self._get_multiplier_names()
         lines = _generate_cpp_input_decl(
-            self.outputs,
+            self.cons,
             alt_names=mult_names,
             offset=offset,
             mode=mode,
@@ -618,7 +619,7 @@ class OutputSet:
 
     def generate_cpp_decl(self, mode="eval", template_name="T__"):
         lines = _generate_cpp_var_decl(
-            self.outputs, mode=mode, template_name=template_name
+            self.cons, mode=mode, template_name=template_name
         )
         if mode == "eval":
             lines.append(f"{template_name} {self.lagrangian_name}")
@@ -632,9 +633,9 @@ class OutputSet:
         expr_list = []
 
         mult_names = self._get_multiplier_names()
-        for item in self.outputs:
-            shape = self.outputs[item].shape
-            name = self.outputs[item].name
+        for item in self.cons:
+            shape = self.cons[item].shape
+            name = self.cons[item].name
 
             if shape is None:
                 res_name = res_names[name]
@@ -673,12 +674,12 @@ class OutputSet:
             make_line = lambda name, rhs: f"A2D::Eval({rhs}, {name})"
 
         res_names = {}
-        for item in self.outputs:
-            shape = self.outputs[item].shape
-            name = self.outputs[item].name
+        for item in self.cons:
+            shape = self.cons[item].shape
+            name = self.cons[item].name
             if shape is None:
-                rhs = self.outputs[item].expr.generate_cpp()
-                if self.outputs[name].expr.active:
+                rhs = self.cons[item].expr.generate_cpp()
+                if self.cons[name].expr.active:
                     res_names[name] = name
                     lines.append(make_line(name, rhs))
                 else:
@@ -686,8 +687,8 @@ class OutputSet:
             elif len(shape) == 1:
                 res_names[name] = []
                 for i in range(shape[0]):
-                    rhs = self.outputs[item].expr[i].generate_cpp()
-                    if self.outputs[name].expr[i].active:
+                    rhs = self.cons[item].expr[i].generate_cpp()
+                    if self.cons[name].expr[i].active:
                         res_names[name].append(f"{name}[{i}]")
                         lines.append(make_line(f"{name}[{i}]", rhs))
                     else:
@@ -697,8 +698,8 @@ class OutputSet:
                 for i in range(shape[0]):
                     res_names[name][i].append([])
                     for j in range(shape[1]):
-                        rhs = self.outputs[item].expr[i][j].generate_cpp()
-                        if self.outputs[name].expr[i][j].active:
+                        rhs = self.cons[item].expr[i][j].generate_cpp()
+                        if self.cons[name].expr[i][j].active:
                             res_names[name][i].append(f"{name}({i}, {j})")
                             lines.append(make_line(f"{name}({i}, {j}", rhs))
                         else:
@@ -758,10 +759,9 @@ class Component:
         self.constants = ConstantSet()
         self.inputs = InputSet()
         self.vars = VarSet()
-        self.outputs = OutputSet()
+        self.constraints = ConstraintSet()
         self.objective = ObjectiveSet()
         self.data = DataSet()
-        self.empty = False
 
         # Set the compute function arguments
         self.compute_args = [{}]
@@ -795,11 +795,11 @@ class Component:
         self.inputs.add(name, shape=shape, lower=lower, upper=upper, **kwargs)
         return
 
-    def add_output(self, name, shape=None, lower=0.0, upper=0.0, **kwargs):
+    def add_constraint(self, name, shape=None, lower=0.0, upper=0.0, **kwargs):
         """
-        Add outputs to the component. By default, outputs are equality constraints.
+        Add constraint to the component. By default, constraints are equality constraints.
         """
-        self.outputs.add(name, shape=shape, lower=lower, upper=upper, **kwargs)
+        self.constraints.add(name, shape=shape, lower=lower, upper=upper, **kwargs)
         return
 
     def add_objective(self, name, **kwargs):
@@ -816,13 +816,31 @@ class Component:
         self.data.add(name, shape=shape, **kwargs)
         return
 
+    def compute(self):
+        pass
+
+    def analyze(self):
+        pass
+
+    def _is_overridden(self, method_name):
+        instance_method = getattr(self, method_name)
+        base_method = getattr(type(self).__bases__[0], method_name, None)
+
+        # Unbind methods so we compare function objects directly
+        if isinstance(instance_method, types.MethodType):
+            instance_method = instance_method.__func__
+        if isinstance(base_method, types.MethodType):
+            base_method = base_method.__func__
+
+        return instance_method is not base_method
+
     def is_empty(self):
-        if (len(self.objective) == 0 and len(self.outputs) == 0) or self.empty:
+        if not self._is_overridden("compute"):
             return True
         return False
 
     def clear(self):
-        self.outputs.clear()
+        self.constraints.clear()
         self.vars.clear()
         self.objective.clear()
         return
@@ -833,11 +851,11 @@ class Component:
             inputs.append(name)
         return inputs
 
-    def get_output_names(self):
-        outputs = []
-        for name in self.outputs:
-            outputs.append(name)
-        return outputs
+    def get_constraint_names(self):
+        cons = []
+        for name in self.constraints:
+            cons.append(name)
+        return cons
 
     def get_data_names(self):
         data = []
@@ -851,8 +869,8 @@ class Component:
             shape = self.inputs.get_shape(name)
             var_shapes[name] = shape
 
-        for name in self.outputs:
-            shape = self.outputs.get_shape(name)
+        for name in self.constraints:
+            shape = self.constraints.get_shape(name)
             var_shapes[name] = shape
 
         return var_shapes
@@ -871,11 +889,11 @@ class Component:
             using = f"using Input = A2D::VarTuple<{template_name}"
 
             input = self.inputs.generate_cpp_types(template_name=template_name)
-            output = self.outputs.generate_cpp_types(template_name=template_name)
+            cons = self.constraints.generate_cpp_types(template_name=template_name)
 
             for val in input:
                 using += f", {val}"
-            for val in output:
+            for val in cons:
                 using += f", {val}"
             using += ">"
 
@@ -910,7 +928,7 @@ class Component:
             # Re-initialize any variables or other arguments
             self.clear()
 
-            # Perform the computation to get the outputs as a function of the inputs
+            # Perform the computation to get the constraints as a function of the inputs
             if len(args) > 0:
                 self.compute(**args)
             else:
@@ -989,7 +1007,7 @@ class Component:
                     cpp += "    " + line + ";\n"
 
                 offset = self.inputs.get_num_inputs()
-                out_decl = self.outputs.generate_cpp_input_decl(
+                out_decl = self.constraints.generate_cpp_input_decl(
                     mode=mode,
                     offset=offset,
                     template_name=template_name,
@@ -1007,7 +1025,7 @@ class Component:
                 for line in var_decl:
                     cpp += "    " + line + ";\n"
 
-                out_decl = self.outputs.generate_cpp_decl(
+                out_decl = self.constraints.generate_cpp_decl(
                     mode=mode, template_name=template_name
                 )
                 for line in out_decl:
@@ -1019,12 +1037,12 @@ class Component:
 
                 obj_expr = self.objective.generate_cpp()
                 body = self.vars.generate_active_cpp(mode=mode)
-                body.extend(self.outputs.generate_cpp(mode=mode, obj_expr=obj_expr))
+                body.extend(self.constraints.generate_cpp(mode=mode, obj_expr=obj_expr))
 
                 if mode == "eval":
                     for line in body:
                         cpp += "    " + line + ";\n"
-                    cpp += "    " + f"return {self.outputs.lagrangian_name};\n"
+                    cpp += "    " + f"return {self.constraints.lagrangian_name};\n"
                 else:
                     cpp += "    " + f"auto {stack_name} = A2D::MakeStack(\n"
                     for index, line in enumerate(body):
@@ -1034,7 +1052,9 @@ class Component:
                         else:
                             cpp += ",\n"
 
-                    cpp += "    " + f"{self.outputs.lagrangian_name}.bvalue() = 1.0;\n"
+                    cpp += (
+                        "    " + f"{self.constraints.lagrangian_name}.bvalue() = 1.0;\n"
+                    )
                     cpp += "    " + f"{stack_name}.reverse();\n"
                     if mode == "hprod":
                         cpp += "    " + f"{stack_name}.hforward();\n"
