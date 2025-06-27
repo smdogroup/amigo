@@ -756,7 +756,6 @@ class Component:
 
         # Set the input values
         self.constants = ConstantSet()
-        self.data = InputSet()
         self.inputs = InputSet()
         self.vars = VarSet()
         self.outputs = OutputSet()
