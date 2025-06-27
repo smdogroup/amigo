@@ -10,7 +10,7 @@ To illustrate some of the features of Amigo, below are two short examples.
 
 First, the Rosenbrock function is a frequently used example problem in optimization. In Amigo, all analysis occurs within classes that are derived from `amigo.Component`.
 
-The inputs, outpus, objective function, data and class constants are defined in the constructor. Values are accessed through dictionary member data structures `self.inputs`, `self.outputs`, `self.objective`, `self.data` and `self.constants`. Additionally, intermediate variable values can be defined on the fly and utilized through a `self.vars` dictionary.
+The inputs, constraints, outputs, objective function, data and class constants are defined in the constructor. Values are accessed through dictionary member data structures `self.inputs`, `self.constraints`, `self.outputs`, `self.objective`, `self.data` and `self.constants`. Additionally, intermediate variable values can be defined on the fly and utilized through a `self.vars` dictionary.
 
 The Rosenbrock component takes two inputs `x1` and `x2` and provides the objective value `obj` and a constraint `con`.
 
@@ -24,13 +24,13 @@ class Rosenbrock(am.Component):
         self.add_input("x1", value=-1.0, lower=-2.0, upper=2.0)
         self.add_input("x2", value=-1.0, lower=-2.0, upper=2.0)
         self.add_objective("obj")
-        self.add_output("con", value=0.0, lower=-float("inf"), upper=0.0)
+        self.add_constraint("con", value=0.0, lower=-float("inf"), upper=0.0)
 
     def compute(self):
         x1 = self.inputs["x1"]
         x2 = self.inputs["x2"]
         self.objective["obj"] = (1 - x1) ** 2 + 100 * (x2 - x1**2) ** 2
-        self.outputs["con"] = x1**2 + x2**2 - 1.0
+        self.constraints["con"] = x1**2 + x2**2 - 1.0
 
 model = am.Model("rosenbrock")
 model.add_component("rosenbrock", 1, Rosenbrock())
@@ -48,9 +48,9 @@ Note when `model.build_module()` is called, the module is compiled. Whenever pyt
 
 ## Cart pole system example
 
-The system dynamics are encoded within a `CartComponent` class that inherits from `amigo.Component`. In the constructor, you must specify what `constants`, `inputs`, `outputs` and `data` (not illustrated in this example) the component requires.
+The system dynamics are encoded within a `CartComponent` class that inherits from `amigo.Component`. In the constructor, you must specify what `constants`, `inputs`, `constraints` and `data` (not illustrated in this example) the component requires.
 
-The only class member function that is used by Amigo is the `compute` function. The `inputs`, `outputs`, `constants` and `data` must be extracted from the dictionary-like member objects in the compute function. These are not numerical objects, but instead encode the mathematical operations that are reinterpreted to generate c++ code.
+The only class member function that is used by Amigo is the `compute` function. The `inputs`, `constraints`, `constants` and `data` must be extracted from the dictionary-like member objects in the compute function. These are not numerical objects, but instead encode the mathematical operations that are reinterpreted to generate c++ code.
 
 In some applications it can be simpler to create multiple versions of the compute function. In this case, you can set `amigo.Component.set_compute_args()`. which takes a list of dictionaries of keyword arguments, which will provide the compute function the provided keyword arguments.
 
@@ -72,8 +72,8 @@ class CartComponent(am.Component):
         self.add_input("q", shape=(4), label="state")
         self.add_input("qdot", shape=(4), label="rate")
 
-        # Output values are constraints within the optimization problem
-        self.add_output("res", shape=(4), lower=0.0, upper=0.0, label="residual")
+        # Constraints within the optimization problem
+        self.add_constraint("res", shape=(4), lower=0.0, upper=0.0, label="residual")
 
         return
 
@@ -109,7 +109,7 @@ class CartComponent(am.Component):
         )
 
         # Set the output
-        self.outputs["res"] = res
+        self.constraints["res"] = res
 
         return
 ```
@@ -134,9 +134,9 @@ model.add_component("fc", 1, fc)
 
 Variables are linked between components through an explicit linking process. Indices within the model are linked with text-based linking arguments. The names provided to the linking command are scoped by `component_name.variable_name`. 
 
-You can also add sub-models to the model by calling `model.sub_model("sub_mudel", sub_model)`. In this case the scope becomes `sub_model.component_name.variable_name`. Any links specified in the sub-model are added to the model.
+You can also add sub-models to the model by calling `model.sub_model("sub_model", sub_model)`. In this case the scope becomes `sub_model.component_name.variable_name`. Any links specified in the sub-model are added to the model.
 
-Linking establishes that two `inputs` from different components are the same. You cannot link `inputs` to `outputs`. Linking two `outputs` together means that the sum of the two output values are used as a constraint.
+Linking establishes that two `inputs` from different components are the same. Linking two `constraints` or two `outputs` together means that the sum of the two output values are used as a constraint. You cannot link between types for instance linking `inputs` to `constraints` or `outputs`. 
 
 ```python
 # Link the initial and final conditions
