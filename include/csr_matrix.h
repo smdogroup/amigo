@@ -210,11 +210,11 @@ class CSRMat {
       }
     }
 
-    delete[] subcolptr;
-
     mat->data = new T[mat->nnz];
-    extract_submatrix_values(nsubrows, subrows, nsubcols, subcols, mat);
+    extract_submatrix_values(nsubrows, subrows, nsubcols, subcols, mat,
+                             subcolptr);
 
+    delete[] subcolptr;
     return mat;
   }
 
@@ -225,31 +225,52 @@ class CSRMat {
    * @param subrows Rows of the submatrix (must be unique)
    * @param nsubcols Number of columns in the extracted matrix
    * @param subcols Columns of the submatrix (must be unique)
+   * @param subcolptr (optional) subcolptr pointer from columns to sub matrix
+   * colums
    * @return The submatrix with its numerical values
    */
   void extract_submatrix_values(int nsubrows, const int subrows[], int nsubcols,
-                                const int subcols[], CSRMat<T>* mat) const {
+                                const int subcols[], CSRMat<T>* mat,
+                                const int* _subcolptr = nullptr) const {
+    int* space = nullptr;
+    const int* subcolptr = nullptr;
+    if (_subcolptr) {
+      subcolptr = _subcolptr;
+    } else {
+      space = new int[ncols];
+      std::fill(space, space + nrows, -1);
+      for (int i = 0; i < nsubcols; i++) {
+        space[subcols[i]] = i;
+      }
+      subcolptr = space;
+    }
+
     std::fill(mat->data, mat->data + mat->nnz, T(0.0));
+    T* temp = new T[mat->ncols];
+    std::fill(temp, temp + mat->ncols, T(0.0));
 
     for (int isub = 0; isub < nsubrows; isub++) {
       int i = subrows[isub];
 
-      // Find the size and end of the submatrix
-      int size = rowp[i + 1] - rowp[i];
-      const int* start = &cols[rowp[i]];
-      const int* end = start + size;
-
-      // Set the values into the submatrix
-      for (int jp = mat->rowp[isub]; jp < mat->rowp[isub + 1]; jp++) {
-        // Set things up to search for the rows
-        int jsub = mat->cols[jp];
-        int j = subcols[jsub];
-
-        auto* it = std::lower_bound(start, end, j);
-        if (it != end && *it == j) {
-          mat->data[jp] = data[it - cols];
+      // Assign values to a row of the submatrix
+      for (int jp = rowp[i]; jp < rowp[i + 1]; jp++) {
+        int j = cols[jp];
+        int jsub = subcolptr[j];
+        if (jsub >= 0) {
+          temp[jsub] = data[jp];
         }
       }
+
+      // Extract the values from the submatrix row
+      for (int jp = mat->rowp[isub]; jp < mat->rowp[isub + 1]; jp++) {
+        int jsub = mat->cols[jp];
+        data[jp] = temp[jsub];
+      }
+    }
+
+    delete[] temp;
+    if (space) {
+      delete[] space;
     }
   }
 

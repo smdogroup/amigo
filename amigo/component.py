@@ -312,36 +312,36 @@ class InputSet:
 
 class ConstantSet:
     def __init__(self):
-        self.inputs = {}
+        self.consts = {}
         self.meta = {}
 
     def add(self, name, value, type=float, **kwargs):
         if "shape" in kwargs and kwargs["shape"] != None:
             raise ValueError("Constants must be scalars")
-        self.inputs[name] = ConstNode(name=name, value=value, type=type)
+        self.consts[name] = ConstNode(name=name, value=value, type=type)
         self.meta[name] = Meta(
             name, "constant", value=value, shape=None, type=type, **kwargs
         )
         return
 
     def __iter__(self):
-        return iter(self.inputs)
+        return iter(self.consts)
 
     def __getitem__(self, name):
-        if name not in self.inputs:
+        if name not in self.consts:
             raise KeyError(f"{name} not in declared constants")
-        return Expr(self.inputs[name])
+        return Expr(self.consts[name])
 
     def get_shape(self, name):
-        return self.inputs[name].shape
+        return self.consts[name].shape
 
     def get_meta(self, name):
         return self.meta[name]
 
     def generate_cpp_const_decl(self):
         lines = []
-        for name in self.inputs:
-            node = self.inputs[name]
+        for name in self.consts:
+            node = self.consts[name]
             lines.append(
                 f"static constexpr {_cpp_type_map[node.type]} {name} = {node.value}"
             )
@@ -586,6 +586,9 @@ class ConstraintSet:
 
         return
 
+    def get_num_constraints(self):
+        return len(self.cons)
+
     def get_shape(self, name):
         return self.cons[name].shape
 
@@ -763,8 +766,17 @@ class ObjectiveSet:
 
 
 class OutputSet:
+    class OutputExpr:
+        def __init__(self, name, type=float, shape=None, active=True):
+            self.name = name
+            self.shape = _normalize_shape(shape)
+            self.type = type
+            self.var = VarNode(name, shape=shape, type=type, active=active)
+            self.active = active
+            self.expr = None
+
     def __init__(self):
-        self.expr = {}
+        self.outputs = {}
         self.meta = {}
 
     def add(self, name, shape=None, type=float, **kwargs):
@@ -772,28 +784,28 @@ class OutputSet:
             raise ValueError("Output values must be scalar")
         if "scale" in kwargs:
             raise ValueError("Output values cannot be scaled through kwargs")
-        self.expr[name] = None
+        self.outputs[name] = self.OutputExpr(name, type=type, active=True)
         self.meta[name] = Meta(name, "output", shape=shape, type=type, **kwargs)
 
     def __len__(self):
-        return len(self.expr)
+        return len(self.outputs)
 
     def __setitem__(self, name, expr):
-        if name not in self.expr:
+        if name not in self.outputs:
             raise KeyError(f"{name} not the declared outputs")
-        self.expr[name] = expr
+        self.outputs[name].expr = expr
         return
 
     def clear(self):
-        for name in self.expr:
-            self.expr[name] = None
+        for name in self.outputs:
+            self.outputs[name].expr = None
 
     def generate_cpp_types(self, template_name="T__"):
-        return _generate_cpp_types(self.expr, template_name=template_name)
+        return _generate_cpp_types(self.outputs, template_name=template_name)
 
     def generate_cpp(self):
-        for name in self.expr:
-            rhs = self.expr[name].generate_cpp()
+        for name in self.outputs:
+            rhs = self.outputs[name].expr.generate_cpp()
             return rhs
         return None
 
@@ -875,7 +887,7 @@ class Component:
         """
         Add an output quantity of interest computed by analyze. These must be scalar
         """
-        self.outputs.add(name, **kwargs)
+        self.outputs.add(name, shape=None, **kwargs)
         return
 
     def compute(self, **kwargs):
@@ -982,7 +994,7 @@ class Component:
 
             output = self.outputs.generate_cpp_types(template_name=template_name)
 
-            for val in data:
+            for val in output:
                 using += f", {val}"
             using += ">"
 
@@ -1030,16 +1042,26 @@ class Component:
                 cpp += "  " + line + ";\n"
 
             # Add the input statement
-            using = self._get_using_statement(name="input", template_name=template_name)
-            cpp += "  " + using + ";\n"
-            cpp += "  " + "static constexpr int ncomp = Input::ncomp" + ";\n"
+            if len(self.inputs) > 0:
+                using = self._get_using_statement(
+                    name="input", template_name=template_name
+                )
+                cpp += "  " + using + ";\n"
+                cpp += "  " + "static constexpr int ncomp = Input::ncomp;\n"
+            else:
+                cpp += (
+                    "  "
+                    + f"using Input = typename A2D::VarTuple<{template_name}, {template_name}>;\n"
+                )
+                cpp += "  " + "static constexpr int ncomp = 0;\n"
 
+            # Add the data statement
             if len(self.data) > 0:
                 using = self._get_using_statement(
                     name="data", template_name=template_name
                 )
                 cpp += "  " + using + ";\n"
-                cpp += "  " + "static constexpr int ndata = Data::ncomp" + ";\n"
+                cpp += "  " + "static constexpr int ndata = Data::ncomp;\n"
             else:
                 cpp += (
                     "  "
@@ -1047,16 +1069,11 @@ class Component:
                 )
                 cpp += "  " + "static constexpr int ndata = 0;\n"
 
-            # Is compute actually empty?
+            # Is compute actually empty
             truth = "false"
             if self.is_compute_empty():
                 truth = "true"
             cpp += "  " + f"static constexpr bool is_compute_empty = {truth};\n"
-
-            truth = "false"
-            if self.is_analyze_empty():
-                truth = "true"
-            cpp += "  " + f"static constexpr bool is_analyze_empty = {truth};\n"
 
             for mode in ["eval", "rev", "hprod"]:
                 cpp += self._generate_compute_cpp(
@@ -1078,6 +1095,26 @@ class Component:
             else:
                 self.analyze()
 
+            # Add the output statement
+            if len(self.outputs) > 0:
+                using = self._get_using_statement(
+                    name="output", template_name=template_name
+                )
+                cpp += "  " + using + ";\n"
+                cpp += "  " + "static constexpr int noutputs = Output::ncomp;\n"
+            else:
+                cpp += (
+                    "  "
+                    + f"using Output = typename A2D::VarTuple<{template_name}, {template_name}>;\n"
+                )
+                cpp += "  " + "static constexpr int noutputs = 0;\n"
+
+            # Is analyze actually empty
+            truth = "false"
+            if self.is_analyze_empty():
+                truth = "true"
+            cpp += "  " + f"static constexpr bool is_analyze_empty = {truth};\n"
+
             cpp += self._generate_analyze_cpp()
 
             cpp += "};\n"
@@ -1098,22 +1135,19 @@ class Component:
         cpp = ""
 
         # Add the contributions for each of the functions
-        pre = "AMIGO_HOST_DEVICE static"
+        pre = "  AMIGO_HOST_DEVICE static"
         if mode == "eval":
             cpp += (
-                "  "
-                + f"{pre} {template_name} lagrange(Data& {data_name}, Input& {input_name})"
+                f"{pre} {template_name} lagrange(Data& {data_name}, Input& {input_name})"
                 + " {\n"
             )
         elif mode == "rev":
             cpp += (
-                "  "
                 f"{pre} void gradient(Data& {data_name}, Input& {input_name}, Input& {grad_name})"
                 + " {\n"
             )
         elif mode == "hprod":
             cpp += (
-                "  "
                 f"{pre} void hessian(Data& {data_name}, Input& {input_name}, Input& {prod_name}, "
                 f"Input& {grad_name}, Input& {hprod_name})" + " {\n"
             )
@@ -1189,8 +1223,48 @@ class Component:
 
         return cpp
 
-    def _generate_analyze_cpp(self):
+    def _generate_analyze_cpp(
+        self,
+        template_name="T__",
+        data_name="data__",
+        input_name="input__",
+        output_name="output__",
+    ):
         cpp = ""
+
+        pre = "  " + "AMIGO_HOST_DEVICE static"
+        cpp += (
+            f"{pre} void analyze(Data& {data_name}, Input& {input_name}, Output& {output_name})"
+            + " {\n"
+        )
+        data_decl = self.data.generate_cpp_input_decl(
+            template_name=template_name, data_name=data_name
+        )
+        for line in data_decl:
+            cpp += "    " + line + ";\n"
+
+        in_decl = self.inputs.generate_cpp_input_decl(
+            mode="eval",
+            template_name=template_name,
+            input_name=input_name,
+        )
+        for line in in_decl:
+            cpp += "    " + line + ";\n"
+
+        offset = self.inputs.get_num_inputs()
+        con_decl = self.constraints.generate_cpp_input_decl(
+            mode="eval",
+            offset=offset,
+            template_name=template_name,
+            input_name=input_name,
+        )
+        for line in con_decl:
+            cpp += "    " + line + ";\n"
+
+        offset += self.constraints.get_num_constraints()
+
+        cpp += "  }\n"
+
         return cpp
 
     def generate_pybind11(self, mod_ident="mod"):
