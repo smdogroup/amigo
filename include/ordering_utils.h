@@ -209,10 +209,11 @@ class OrderingUtils {
    * @param cols_ Array of column indices
    */
   template <class Functor>
-  static void create_csr_from_elements(int nrows, int ncols, int nelems,
-                                       const Functor &element_nodes,
-                                       bool include_diagonal, bool sort_columns,
-                                       int **rowp_, int **cols_) {
+  static void create_csr_from_element_conn(int nrows, int ncols, int nelems,
+                                           const Functor &element_nodes,
+                                           bool include_diagonal,
+                                           bool sort_columns, int **rowp_,
+                                           int **cols_) {
     int *node_to_elem_ptr = nullptr;
     int *node_to_elem = nullptr;
     compute_node_to_element_ptr(ncols, nelems, element_nodes, &node_to_elem_ptr,
@@ -557,6 +558,83 @@ class OrderingUtils {
 
     *elem_to_elem_ptr_ = elem_to_elem_ptr;
     *elem_to_elem_ = elem_to_elem;
+  }
+
+  /**
+   * Create a CSR matrix structure from the input/output relationships
+   *
+   * @param nrows Number of outputs
+   * @param ncols Number of inputs
+   * @param nelems Number of elements
+   * @param elements Function returning inputs/outputs for each element
+   * @param rowp_ Output pointer into the column indices
+   * @param cols_ Output columns for each row
+   */
+  template <class Functor>
+  static void create_csr_from_output_data(int nrows, int ncols, int nelems,
+                                          const Functor &elements, int **rowp_,
+                                          int **cols_) {
+    int *rowp = new int[nrows + 1];
+    std::fill(rowp, rowp + (nrows + 1), 0);
+    for (int elem = 0; elem < nelems; elem++) {
+      int nout, nin;
+      const int *outputs, *inputs;
+      elements(elem, &nout, &nin, &outputs, &inputs);
+
+      for (int i = 0; i < nout; i++) {
+        rowp[outputs[i] + 1] += nin;
+      }
+    }
+
+    // Figure out the size of the structure
+    for (int i = 0; i < nrows; i++) {
+      rowp[i + 1] += rowp[i];
+    }
+
+    int *cols = new int[rowp[nrows]];
+    for (int elem = 0; elem < nelems; elem++) {
+      int nout, nin;
+      const int *outputs, *inputs;
+      elements(elem, &nout, &nin, &outputs, &inputs);
+
+      for (int i = 0; i < nout; i++) {
+        int pos = rowp[i];
+        for (int j = 0; j < nin; j++) {
+          cols[pos + j] = inputs[j];
+        }
+        rowp[i] += nin;
+      }
+    }
+
+    for (int i = nrows; i > 0; i--) {
+      rowp[i] = rowp[i - 1];
+    }
+    rowp[0] = 0;
+
+    // Sort and uniquify the csr structure
+    int start = rowp[0];
+    for (int i = 0; i < nrows; i++) {
+      int size = rowp[i + 1] - start;
+      int *array = &cols[start];
+      std::sort(array, array + size);
+
+      // Uniquify an array with duplicates
+      int new_size = 0;
+      if (size > 0) {
+        new_size = 1;
+        for (int read_idx = 1; read_idx < size; read_idx++) {
+          if (array[read_idx] != array[new_size - 1]) {
+            array[new_size++] = array[read_idx];
+          }
+        }
+      }
+
+      start = rowp[i + 1];
+      rowp[i + 1] = rowp[i] + new_size;
+    }
+
+    *rowp_ = rowp;
+    *cols_ = cols;
   }
 };
 

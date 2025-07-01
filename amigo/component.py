@@ -1313,7 +1313,6 @@ class Component:
 
         offset += self.constraints.get_num_constraints()
         out_decl = self.outputs.generate_cpp_input_decl(
-            offset=offset,
             template_name=template_name,
             output_name=output_name,
         )
@@ -1328,9 +1327,14 @@ class Component:
 
         return cpp
 
-    def generate_pybind11(self, mod_ident="mod"):
+    def generate_pybind11(self, mod_ident="mod", wrapper_type="group"):
         # Collect all the group members together...
-        cls = f"amigo::ComponentGroup<double"
+        if wrapper_type == "group":
+            group_type = "ComponentGroup"
+        else:
+            group_type = "OutputGroup"
+
+        cls = f"amigo::{group_type}<double"
         for index, args in enumerate(self.args):
             if len(self.args) == 1:
                 class_name = self.name + "__"
@@ -1340,10 +1344,18 @@ class Component:
             cls += f", amigo::{class_name}<double>"
         cls += ">"
 
-        module_class_name = f'"{self.name}"'
+        if wrapper_type == "group":
+            module_class_name = f'"{self.name}"'
+        else:
+            module_class_name = f'"{self.name + "__output"}"'
 
-        cpp = f"py::class_<{cls}, amigo::ComponentGroupBase<double>, std::shared_ptr<{cls}>>"
+        cpp = f"py::class_<{cls}, amigo::{group_type}Base<double>, std::shared_ptr<{cls}>>"
         cpp += f"({mod_ident}, {module_class_name}).def("
-        cpp += "py::init<std::shared_ptr<amigo::Vector<int>>, std::shared_ptr<amigo::Vector<int>>>())"
+
+        vec_cls = "std::shared_ptr<amigo::Vector<int>>"
+        if wrapper_type == "group":
+            cpp += f"py::init<{vec_cls}, {vec_cls}>())"
+        else:
+            cpp += f"py::init<{vec_cls}, {vec_cls}, {vec_cls}>())"
 
         return cpp

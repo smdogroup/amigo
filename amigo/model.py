@@ -245,8 +245,8 @@ class ComponentGroup:
                         offset += 1
         return array
 
-    def create_model(self, module_name: str):
-        if not self.comp_obj.is_empty():
+    def create_group(self, module_name: str):
+        if not self.comp_obj.is_compute_empty():
             data_array = self.get_indices(self.data)
             vec_array = self.get_indices(self.vars)
 
@@ -258,6 +258,24 @@ class ComponentGroup:
             # Create the object
             return _import_class(module_name, self.class_name)(data_vec, vec)
         return None
+
+    def create_output(self, module_name: str):
+        if not self.comp_obj.is_compute_empty():
+            data_array = self.get_indices(self.data)
+            vec_array = self.get_indices(self.vars)
+            output_array = self.get_indices(self.outputs)
+
+            data_vec = VectorInt(np.prod(data_array.shape))
+            data_vec.get_array()[:] = data_array.ravel()
+            vec = VectorInt(np.prod(vec_array.shape))
+            vec.get_array()[:] = vec_array.ravel()
+            output_vec = VectorInt(np.prod(output_array.shape))
+            output_vec.get_array()[:] = output_array.ravel()
+
+            class_name = self.class_name + "__output"
+
+            # Create the object
+            return _import_class(module_name, class_name)(data_vec, vec, output_vec)
 
 
 class ModelVector:
@@ -436,7 +454,7 @@ class Model:
         self,
         links: list,
         pool: GlobalIndexPool,
-        type: str = "vars",
+        vtype: str = "vars",
     ):
         # Allocate the AliasTracker
         tracker = AliasTracker(pool.counter)
@@ -456,7 +474,7 @@ class Model:
             is_var = a_type == b_type and (a_type == "input" or b_type == "constraint")
             is_data = a_type == b_type and a_type == "data"
 
-            if (type == "vars" and is_var) or (type == "data" and is_data):
+            if (vtype == "vars" and is_var) or (vtype == "data" and is_data):
                 a_all = self.get_indices(a_var)
                 a_indices = self._get_slice_indices(a_all, a_slice, a_idx)
 
@@ -477,7 +495,7 @@ class Model:
                     )
             elif (not is_var) and (not is_data):
                 raise ValueError(
-                    f"Cannot link {type} for {a_expr} {a_type} and {b_expr} {b_type}"
+                    f"Cannot link {vtype} for {a_expr} {a_type} and {b_expr} {b_type}"
                 )
 
         # Order the aliased variables first. These are
@@ -485,8 +503,10 @@ class Model:
 
         # Order any remaining variables
         for name, comp in self.comp.items():
-            if type == "vars":
+            if vtype == "vars":
                 items = comp.vars.items()
+            elif vtype == "output":
+                items = comp.outputs.items()
             else:
                 items = comp.data.items()
 
@@ -537,10 +557,13 @@ class Model:
         """
 
         self.num_variables = self._init_indices(
-            self.links, self.index_pool, type="vars"
+            self.links, self.index_pool, vtype="vars"
         )
         self.data_size = self._init_indices(
-            self.links, self.data_index_pool, type="data"
+            self.links, self.data_index_pool, vtype="data"
+        )
+        self.num_outputs = self._init_indices(
+            self.links, self.output_index_pool, vtype="output"
         )
 
         self._reorder_indices(order_type, order_for_block)
@@ -564,6 +587,8 @@ class Model:
             return "constraint"
         elif name in self.comp[comp_name].get_data_names():
             return "data"
+        elif name in self.comp[comp_name].get_output_names():
+            return "output"
         else:
             raise ValueError(
                 f"Name {comp_name}.{name} is neither an input, constraint, output or data"
@@ -628,16 +653,18 @@ class Model:
             )
 
         objs = []
+        outs = []
         for name, comp in self.comp.items():
-            obj = comp.create_model(self.module_name)
+            obj = comp.create_group(self.module_name)
             if obj is not None:
                 objs.append(obj)
 
+            obj = comp.create_output(self.module_name)
+            if obj is not None:
+                outs.append(obj)
+
         return OptimizationProblem(
-            self.data_size,
-            self.num_variables,
-            self.constraint_indices,
-            objs,
+            self.data_size, self.num_variables, self.constraint_indices, objs, outs
         )
 
     def get_data_vector(self):
@@ -775,6 +802,7 @@ class Model:
         py11 += "#include <pybind11/pybind11.h>\n"
         py11 += "#include <pybind11/stl.h>\n"
         py11 += '#include "component_group.h"\n'
+        py11 += '#include "output_group.h"\n'
         py11 += f'#include "{self.module_name}.h"\n'
         py11 += "namespace py = pybind11;\n"
 
@@ -787,14 +815,27 @@ class Model:
         for name in self.comp:
             class_name = self.comp[name].class_name
             if class_name not in class_names:
-                if not self.comp[name].comp_obj.is_empty():
+                compute_empty = self.comp[name].comp_obj.is_compute_empty()
+                analyze_empty = self.comp[name].comp_obj.is_analyze_empty()
+                if not compute_empty or not analyze_empty:
                     class_names[class_name] = True
 
                     # Generate the C++
                     cpp += self.comp[name].comp_obj.generate_cpp()
 
+                # Generate the wrappers
+                if not compute_empty:
                     py11 += (
-                        self.comp[name].comp_obj.generate_pybind11(mod_ident=mod_ident)
+                        self.comp[name].comp_obj.generate_pybind11(
+                            mod_ident=mod_ident, wrapper_type="group"
+                        )
+                        + ";\n"
+                    )
+                if not analyze_empty:
+                    py11 += (
+                        self.comp[name].comp_obj.generate_pybind11(
+                            mod_ident=mod_ident, wrapper_type="output"
+                        )
                         + ";\n"
                     )
 

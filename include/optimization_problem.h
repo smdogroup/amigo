@@ -125,9 +125,10 @@ class OptimizationProblem {
     if (order_for_block) {
       sqdef_index = num_variables - num_constraints;
     }
-    return std::make_shared<CSRMat<T>>(num_variables, num_variables,
-                                       intervals[comps.size()], element_nodes,
-                                       sqdef_index);
+
+    return CSRMat<T>::create_from_element_conn(num_variables, num_variables,
+                                               intervals[comps.size()],
+                                               element_nodes, sqdef_index);
   }
 
   void analyze(const std::shared_ptr<Vector<T>> x,
@@ -146,42 +147,41 @@ class OptimizationProblem {
     }
   }
 
-  // std::shared_ptr<CSRMat<T>> create_output_csr_matrix() const {
-  //   std::vector<int> intervals(out_comps.size() + 1);
-  //   intervals[0] = 0;
-  //   for (size_t i = 0; i < out_comps.size(); i++) {
-  //     int length, noutputs, ninputs;
-  //     const int *outputs, *inputs;
-  //     out_comps[i]->get_layout_data(&length, &noutputs, &ninputs, &outputs,
-  //                                   &inputs);
-  //     intervals[i + 1] = intervals[i] + length;
-  //   }
+  std::shared_ptr<CSRMat<T>> create_output_csr_matrix() const {
+    std::vector<int> intervals(out_comps.size() + 1);
+    intervals[0] = 0;
+    for (size_t i = 0; i < out_comps.size(); i++) {
+      int length, noutputs, ninputs;
+      const int *outputs, *inputs;
+      out_comps[i]->get_layout_data(&length, &noutputs, &ninputs, &outputs,
+                                    &inputs);
+      intervals[i + 1] = intervals[i] + length;
+    }
 
-  //   auto element_nodes = [&](int element, const int** rows, const int** cols)
-  //   {
-  //     // upper_bound finds the first index i such that intervals[i] >
-  //     // element
-  //     auto it = std::upper_bound(intervals.begin(), intervals.end(),
-  //     element);
+    auto element_nodes = [&](int element, int* nrow, int* ncol,
+                             const int** rows, const int** cols) {
+      // upper_bound finds the first index i such that intervals[i] >
+      // element
+      auto it = std::upper_bound(intervals.begin(), intervals.end(), element);
 
-  //     // Decrement to get the interval where element fits: intervals[idx]
-  //     // <= element < intervals[idx+1]
-  //     int idx = static_cast<int>(it - intervals.begin()) - 1;
+      // Decrement to get the interval where element fits: intervals[idx]
+      // <= element < intervals[idx+1]
+      int idx = static_cast<int>(it - intervals.begin()) - 1;
 
-  //     int length, ncomp;
-  //     const int* data;
-  //     comps[idx]->get_layout_data(&length, &ncomp, &data);
+      int length;
+      const int *out, *in;
+      comps[idx]->get_layout_data(&length, nrow, ncol, &out, &in);
 
-  //     int elem = element - intervals[idx];
-  //     *rows = &data[ncomp * elem];
-  //     return ncomp;
-  //   };
+      int elem = element - intervals[idx];
+      *rows = &out[(*nrow) * elem];
+      *cols = &in[(*ncol) * elem];
+    };
 
-  //   int sqdef_index = -1;
-  //   return std::make_shared<CSRMat<T>>(num_outputs, num_variables,
-  //                                      intervals[out_comps.size()],
-  //                                      element_nodes, sqdef_index);
-  // }
+    int sqdef_index = -1;
+    return std::make_shared<CSRMat<T>>(num_outputs, num_variables,
+                                       intervals[out_comps.size()],
+                                       element_nodes, sqdef_index);
+  }
 
  private:
   int data_size;        // Size of the data vector
