@@ -809,11 +809,23 @@ class OutputSet:
     def generate_cpp_types(self, template_name="T__"):
         return _generate_cpp_types(self.outputs, template_name=template_name)
 
+    def generate_cpp_input_decl(
+        self, offset=0, template_name="R__", output_name="output__"
+    ):
+        return _generate_cpp_input_decl(
+            self.outputs,
+            offset=offset,
+            mode="eval",
+            template_name=template_name,
+            input_name=output_name,
+        )
+
     def generate_cpp(self):
+        lines = []
         for name in self.outputs:
             rhs = self.outputs[name].expr.generate_cpp()
-            return rhs
-        return None
+            lines.append(f"{name} = {rhs}")
+        return lines
 
     def get_meta(self, name):
         return self.meta[name]
@@ -1300,6 +1312,17 @@ class Component:
             cpp += "    " + line + ";\n"
 
         offset += self.constraints.get_num_constraints()
+        out_decl = self.outputs.generate_cpp_input_decl(
+            offset=offset,
+            template_name=template_name,
+            output_name=output_name,
+        )
+        for line in out_decl:
+            cpp += "    " + line + ";\n"
+
+        lines = self.outputs.generate_cpp()
+        for line in lines:
+            cpp += "    " + line + ";\n"
 
         cpp += "  }\n"
 
