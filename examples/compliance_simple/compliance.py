@@ -70,10 +70,10 @@ class Topology(am.Component):
         super().__init__()
 
         # Add keyword arguments for the compute function
-        compute_args = []
+        args = []
         for n in range(4):
-            compute_args.append({"n": n})
-        self.set_compute_args(compute_args)
+            args.append({"n": n})
+        self.set_args(args)
 
         # Constants
         self.add_constant("p", 3.0)
@@ -169,10 +169,10 @@ class MassConstraint(am.Component):
         super().__init__()
 
         # Add keyword arguments for the compute function
-        compute_args = []
+        args = []
         for n in range(4):
-            compute_args.append({"n": n})
-        self.set_compute_args(compute_args)
+            args.append({"n": n})
+        self.set_args(args)
 
         self.add_constant("mass_fraction", value=0.4)
 

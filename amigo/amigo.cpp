@@ -155,7 +155,7 @@ py::array_t<int> reorder_model(amigo::OrderingType order_type,
   bool sort_columns = true;
 
   int *rowp, *cols;
-  amigo::OrderingUtils::create_csr_from_elements(
+  amigo::OrderingUtils::create_csr_from_element_conn(
       nrows, ncols, nelems, element_nodes, include_diagonal, sort_columns,
       &rowp, &cols);
 
@@ -234,9 +234,10 @@ PYBIND11_MODULE(amigo, mod) {
            })
       .def("extract_submatrix_values",
            [](const amigo::CSRMat<double> &self, py::array_t<int> rows,
-              py::array_t<int> cols, amigo::CSRMat<double> &mat) {
+              py::array_t<int> cols,
+              std::shared_ptr<amigo::CSRMat<double>> mat) {
              self.extract_submatrix_values(rows.size(), rows.data(),
-                                           cols.size(), cols.data(), &mat);
+                                           cols.size(), cols.data(), mat);
            })
       .def("gauss_seidel", &amigo::CSRMat<double>::gauss_seidel)
       .def("mult", &amigo::CSRMat<double>::mult)
@@ -248,27 +249,40 @@ PYBIND11_MODULE(amigo, mod) {
   py::class_<amigo::ComponentGroupBase<double>,
              std::shared_ptr<amigo::ComponentGroupBase<double>>>(
       mod, "ComponentGroupBase");
+  py::class_<amigo::OutputGroupBase<double>,
+             std::shared_ptr<amigo::OutputGroupBase<double>>>(
+      mod, "OutputGroupBase");
 
   py::class_<amigo::OptimizationProblem<double>,
              std::shared_ptr<amigo::OptimizationProblem<double>>>(
       mod, "OptimizationProblem")
       .def(py::init(
-          [](int data_size, int num_variables, py::array_t<int> con_indices,
+          [](int data_size, int num_variables, int num_outputs,
+             py::array_t<int> con_indices,
              std::vector<std::shared_ptr<amigo::ComponentGroupBase<double>>>
-                 &comps) {
+                 &comps,
+             std::vector<std::shared_ptr<amigo::OutputGroupBase<double>>>
+                 &out_comps) {
             int num_constraints = con_indices.size();
             return std::make_shared<amigo::OptimizationProblem<double>>(
                 data_size, num_variables, num_constraints,
-                con_indices.mutable_data(), comps);
+                con_indices.mutable_data(), comps, num_outputs, out_comps);
           }))
       .def("get_data_vector",
            &amigo::OptimizationProblem<double>::get_data_vector)
       .def("create_vector", &amigo::OptimizationProblem<double>::create_vector)
+      .def("create_output_vector",
+           &amigo::OptimizationProblem<double>::create_output_vector)
       .def("lagrangian", &amigo::OptimizationProblem<double>::lagrangian)
       .def("gradient", &amigo::OptimizationProblem<double>::gradient)
       .def("create_csr_matrix",
            &amigo::OptimizationProblem<double>::create_csr_matrix)
-      .def("hessian", &amigo::OptimizationProblem<double>::hessian);
+      .def("hessian", &amigo::OptimizationProblem<double>::hessian)
+      .def("analyze", &amigo::OptimizationProblem<double>::analyze)
+      .def("create_output_csr_matrix",
+           &amigo::OptimizationProblem<double>::create_output_csr_matrix)
+      .def("analyze_jacobian",
+           &amigo::OptimizationProblem<double>::analyze_jacobian);
 
   py::class_<amigo::AliasTracker<int>>(mod, "AliasTracker")
       .def(py::init<int>(), py::arg("size"))

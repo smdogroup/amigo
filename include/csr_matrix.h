@@ -21,6 +21,20 @@ class CSRMat {
         cols(nullptr),
         data(nullptr),
         sqdef_index(-1) {}
+  ~CSRMat() {
+    if (rowp) {
+      delete[] rowp;
+    }
+    if (cols) {
+      delete[] cols;
+    }
+    if (diag) {
+      delete[] diag;
+    }
+    if (data) {
+      delete[] data;
+    }
+  }
 
   /**
    * @brief Construct a new CSRMat object
@@ -37,35 +51,18 @@ class CSRMat {
    * @param sqdef_index Index at which 2x2 negative definite block matrix begins
    */
   template <class ArrayType>
-  CSRMat(int nrows, int ncols, int nnz, const ArrayType rowp_,
-         const ArrayType cols_, int sqdef_index = -1)
-      : nrows(nrows), ncols(ncols), nnz(nnz), sqdef_index(sqdef_index) {
-    rowp = new int[nrows + 1];
-    cols = new int[nnz];
-    diag = new int[nrows];
+  static std::shared_ptr<CSRMat<T>> create_from_csr_data(int nrows, int ncols,
+                                                         int nnz,
+                                                         const ArrayType rowp_,
+                                                         const ArrayType cols_,
+                                                         int sqdef_index = -1) {
+    int* rowp = new int[nrows + 1];
+    int* cols = new int[nnz];
     std::copy(rowp_, rowp_ + (nrows + 1), rowp);
     std::copy(cols_, cols_ + nnz, cols);
 
-    // Sort the column indices for later use
-    for (int i = 0; i < nrows; i++) {
-      int size = rowp[i + 1] - rowp[i];
-      int* start = &cols[rowp[i]];
-      int* end = start + size;
-
-      // Sort the columns
-      std::sort(start, end);
-
-      // Set the diagonal elements of the matrix
-      auto* it = std::lower_bound(start, end, i);
-      if (it != end && *it == i) {
-        diag[i] = it - cols;
-      } else {
-        diag[i] = rowp[i];
-      }
-    }
-
-    data = new T[nnz];
-    std::fill(data, data + nnz, 0.0);
+    return std::make_shared<CSRMat<T>>(nrows, ncols, nnz, rowp, cols,
+                                       sqdef_index);
   }
 
   /**
@@ -88,53 +85,46 @@ class CSRMat {
    * @param sqdef_index Index at which 2x2 negative definite block matrix begins
    */
   template <class Functor>
-  CSRMat(int nrows, int ncols, int nelems, const Functor& element_nodes,
-         int sqdef_index = -1)
-      : nrows(nrows), ncols(ncols), sqdef_index(sqdef_index) {
+  static std::shared_ptr<CSRMat<T>> create_from_element_conn(
+      int nrows, int ncols, int nelems, const Functor& element_nodes,
+      int sqdef_index = -1) {
     // Create the CSR structure
     bool include_diagonal = true;
     bool sort_columns = true;
-    OrderingUtils::create_csr_from_elements(nrows, ncols, nelems, element_nodes,
-                                            include_diagonal, sort_columns,
-                                            &rowp, &cols);
+    int *rowp, *cols;
+    OrderingUtils::create_csr_from_element_conn(nrows, ncols, nelems,
+                                                element_nodes, include_diagonal,
+                                                sort_columns, &rowp, &cols);
 
-    // Compute the number of non-zeros
-    nnz = rowp[nrows];
-
-    diag = new int[nrows];
-    for (int i = 0; i < nrows; i++) {
-      int size = rowp[i + 1] - rowp[i];
-      int* start = &cols[rowp[i]];
-      int* end = start + size;
-
-      // Set the diagonal elements of the matrix
-      auto* it = std::lower_bound(start, end, i);
-      if (it != end && *it == i) {
-        diag[i] = it - cols;
-      } else {
-        diag[i] = -1;
-      }
-    }
-
-    // Don't forget to allocate the space
-    data = new T[nnz];
-    std::fill(data, data + nnz, 0.0);
-  }
-  ~CSRMat() {
-    if (rowp) {
-      delete[] rowp;
-    }
-    if (cols) {
-      delete[] cols;
-    }
-    if (diag) {
-      delete[] diag;
-    }
-    if (data) {
-      delete[] data;
-    }
+    int nnz = rowp[nrows];
+    return std::make_shared<CSRMat<T>>(nrows, ncols, nnz, rowp, cols,
+                                       sqdef_index);
   }
 
+  /**
+   * @brief Create a CSR structure from the input/output for each element
+   *
+   * @tparam Functor Class type for the functor
+   * @param nrows Number of rows
+   * @param ncols Number of columns
+   * @param nelems Number of elements in the connectivity matrix
+   * @param elements Functor returning the number of nodes and node numbers
+   */
+  template <class Functor>
+  static std::shared_ptr<CSRMat<T>> create_from_output_data(
+      int nrows, int ncols, int nelems, const Functor& elements) {
+    int *rowp, *cols;
+    OrderingUtils::create_csr_from_output_data(nrows, ncols, nelems, elements,
+                                               &rowp, &cols);
+    int nnz = rowp[nrows];
+    int sqdef_index = -1;
+    return std::make_shared<CSRMat<T>>(nrows, ncols, nnz, rowp, cols,
+                                       sqdef_index);
+  }
+
+  /**
+   * @brief Zero the numerical values
+   */
   void zero() { std::fill(data, data + nnz, 0.0); }
 
   /**
@@ -147,8 +137,10 @@ class CSRMat {
    * @param subcols Columns of the submatrix (must be unique)
    * @return The submatrix with its numerical values
    */
-  CSRMat<T>* extract_submatrix(int nsubrows, const int subrows[], int nsubcols,
-                               const int subcols[]) const {
+  std::shared_ptr<CSRMat<T>> extract_submatrix(int nsubrows,
+                                               const int subrows[],
+                                               int nsubcols,
+                                               const int subcols[]) const {
     int* subcolptr = new int[ncols];
     std::fill(subcolptr, subcolptr + nrows, -1);
     for (int i = 0; i < nsubcols; i++) {
@@ -156,7 +148,7 @@ class CSRMat {
     }
 
     // Count up the space for things
-    CSRMat<T>* mat = new CSRMat<T>();
+    std::shared_ptr<CSRMat<T>> mat = std::make_shared<CSRMat<T>>();
 
     mat->nrows = nsubrows;
     mat->ncols = nsubcols;
@@ -210,11 +202,11 @@ class CSRMat {
       }
     }
 
-    delete[] subcolptr;
-
     mat->data = new T[mat->nnz];
-    extract_submatrix_values(nsubrows, subrows, nsubcols, subcols, mat);
+    extract_submatrix_values(nsubrows, subrows, nsubcols, subcols, mat,
+                             subcolptr);
 
+    delete[] subcolptr;
     return mat;
   }
 
@@ -225,31 +217,53 @@ class CSRMat {
    * @param subrows Rows of the submatrix (must be unique)
    * @param nsubcols Number of columns in the extracted matrix
    * @param subcols Columns of the submatrix (must be unique)
+   * @param subcolptr (optional) subcolptr pointer from columns to sub matrix
+   * colums
    * @return The submatrix with its numerical values
    */
   void extract_submatrix_values(int nsubrows, const int subrows[], int nsubcols,
-                                const int subcols[], CSRMat<T>* mat) const {
+                                const int subcols[],
+                                std::shared_ptr<CSRMat<T>> mat,
+                                const int* _subcolptr = nullptr) const {
+    int* space = nullptr;
+    const int* subcolptr = nullptr;
+    if (_subcolptr) {
+      subcolptr = _subcolptr;
+    } else {
+      space = new int[ncols];
+      std::fill(space, space + nrows, -1);
+      for (int i = 0; i < nsubcols; i++) {
+        space[subcols[i]] = i;
+      }
+      subcolptr = space;
+    }
+
     std::fill(mat->data, mat->data + mat->nnz, T(0.0));
+    T* temp = new T[mat->ncols];
+    std::fill(temp, temp + mat->ncols, T(0.0));
 
     for (int isub = 0; isub < nsubrows; isub++) {
       int i = subrows[isub];
 
-      // Find the size and end of the submatrix
-      int size = rowp[i + 1] - rowp[i];
-      const int* start = &cols[rowp[i]];
-      const int* end = start + size;
-
-      // Set the values into the submatrix
-      for (int jp = mat->rowp[isub]; jp < mat->rowp[isub + 1]; jp++) {
-        // Set things up to search for the rows
-        int jsub = mat->cols[jp];
-        int j = subcols[jsub];
-
-        auto* it = std::lower_bound(start, end, j);
-        if (it != end && *it == j) {
-          mat->data[jp] = data[it - cols];
+      // Assign values to a row of the submatrix
+      for (int jp = rowp[i]; jp < rowp[i + 1]; jp++) {
+        int j = cols[jp];
+        int jsub = subcolptr[j];
+        if (jsub >= 0) {
+          temp[jsub] = data[jp];
         }
       }
+
+      // Extract the values from the submatrix row
+      for (int jp = mat->rowp[isub]; jp < mat->rowp[isub + 1]; jp++) {
+        int jsub = mat->cols[jp];
+        data[jp] = temp[jsub];
+      }
+    }
+
+    delete[] temp;
+    if (space) {
+      delete[] space;
     }
   }
 
@@ -344,7 +358,35 @@ class CSRMat {
   // A = [ A   B^{T} ]
   //     [ B   -C    ]
   int sqdef_index;  // Index at which C starts. Negative value indicates
-                    // that the matrix is not SQD.
+  // that the matrix is not SQD.
+
+  CSRMat(int nrows, int ncols, int nnz, int* rowp, int* cols,
+         int sqdef_index = -1)
+      : nrows(nrows),
+        ncols(ncols),
+        nnz(nnz),
+        rowp(rowp),
+        cols(cols),
+        sqdef_index(sqdef_index) {
+    diag = new int[nrows];
+    for (int i = 0; i < nrows; i++) {
+      int size = rowp[i + 1] - rowp[i];
+      int* start = &cols[rowp[i]];
+      int* end = start + size;
+
+      // Set the diagonal elements of the matrix
+      auto* it = std::lower_bound(start, end, i);
+      if (it != end && *it == i) {
+        diag[i] = it - cols;
+      } else {
+        diag[i] = -1;
+      }
+    }
+
+    // Don't forget to allocate the space
+    data = new T[nnz];
+    std::fill(data, data + nnz, 0.0);
+  }
 };
 
 }  // namespace amigo

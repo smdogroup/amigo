@@ -154,6 +154,8 @@ class ComponentGroup:
         index_pool: GlobalIndexPool,
         data_shapes: dict,
         data_index_pool: GlobalIndexPool,
+        out_shapes: dict,
+        out_index_pool: GlobalIndexPool,
     ):
         self.name = name
         self.size = size
@@ -169,6 +171,11 @@ class ComponentGroup:
         self.data = {}
         for data_name, shape in data_shapes.items():
             self.data[data_name] = data_index_pool.allocate(shape)
+
+        # Set up the outputs
+        self.outputs = {}
+        for out_name, shape in out_shapes.items():
+            self.outputs[out_name] = out_index_pool.allocate(shape)
 
     def get_input_names(self):
         return self.comp_obj.get_input_names()
@@ -196,6 +203,8 @@ class ComponentGroup:
             return self.comp_obj.objective.get_meta(name)
         elif name in self.comp_obj.constants:
             return self.comp_obj.constants.get_meta(name)
+        elif name in self.comp_obj.outputs:
+            return self.comp_obj.outputs.get_meta(name)
         else:
             raise ValueError(
                 f"No input, constraint, data, objective or constant for {self.class_name}.{name}"
@@ -236,8 +245,8 @@ class ComponentGroup:
                         offset += 1
         return array
 
-    def create_model(self, module_name: str):
-        if not self.comp_obj.is_empty():
+    def create_group(self, module_name: str):
+        if not self.comp_obj.is_compute_empty():
             data_array = self.get_indices(self.data)
             vec_array = self.get_indices(self.vars)
 
@@ -249,6 +258,24 @@ class ComponentGroup:
             # Create the object
             return _import_class(module_name, self.class_name)(data_vec, vec)
         return None
+
+    def create_output(self, module_name: str):
+        if not self.comp_obj.is_analyze_empty():
+            data_array = self.get_indices(self.data)
+            vec_array = self.get_indices(self.vars)
+            output_array = self.get_indices(self.outputs)
+
+            data_vec = VectorInt(np.prod(data_array.shape))
+            data_vec.get_array()[:] = data_array.ravel()
+            vec = VectorInt(np.prod(vec_array.shape))
+            vec.get_array()[:] = vec_array.ravel()
+            output_vec = VectorInt(np.prod(output_array.shape))
+            output_vec.get_array()[:] = output_array.ravel()
+
+            class_name = self.class_name + "__output"
+
+            # Create the object
+            return _import_class(module_name, class_name)(data_vec, vec, output_vec)
 
 
 class ModelVector:
@@ -292,12 +319,9 @@ class Model:
         self.comp = {}
         self.index_pool = GlobalIndexPool()
         self.data_index_pool = GlobalIndexPool()
+        self.output_index_pool = GlobalIndexPool()
         self.links = []
         self._initialized = False
-
-        self.input_names = {}
-        self.constraint_names = {}
-        self.data_names = {}
 
     def _get_group_shapes(self, size: int, var_shapes: dict):
         for var_name in var_shapes:
@@ -330,6 +354,8 @@ class Model:
         var_shapes = self._get_group_shapes(size, vs)
         ds = comp_obj.get_data_shapes()
         data_shapes = self._get_group_shapes(size, ds)
+        ts = comp_obj.get_output_shapes()
+        out_shapes = self._get_group_shapes(size, ts)
 
         self.comp[name] = ComponentGroup(
             name,
@@ -339,6 +365,8 @@ class Model:
             self.index_pool,
             data_shapes,
             self.data_index_pool,
+            out_shapes,
+            self.output_index_pool,
         )
 
         return
@@ -426,7 +454,7 @@ class Model:
         self,
         links: list,
         pool: GlobalIndexPool,
-        type: str = "vars",
+        vtype: str = "vars",
     ):
         # Allocate the AliasTracker
         tracker = AliasTracker(pool.counter)
@@ -444,9 +472,14 @@ class Model:
 
             # Check if the types are consistent
             is_var = a_type == b_type and (a_type == "input" or b_type == "constraint")
-            is_data = a_type == b_type and a_type == "data"
+            is_data = a_type == b_type and (a_type == "data")
+            is_output = a_type == b_type and (a_type == "output")
 
-            if (type == "vars" and is_var) or (type == "data" and is_data):
+            if (
+                (vtype == "vars" and is_var)
+                or (vtype == "data" and is_data)
+                or (vtype == "output" and is_output)
+            ):
                 a_all = self.get_indices(a_var)
                 a_indices = self._get_slice_indices(a_all, a_slice, a_idx)
 
@@ -467,7 +500,7 @@ class Model:
                     )
             elif (not is_var) and (not is_data):
                 raise ValueError(
-                    f"Cannot link {type} for {a_expr} {a_type} and {b_expr} {b_type}"
+                    f"Cannot link {vtype} for {a_expr} {a_type} and {b_expr} {b_type}"
                 )
 
         # Order the aliased variables first. These are
@@ -475,8 +508,10 @@ class Model:
 
         # Order any remaining variables
         for name, comp in self.comp.items():
-            if type == "vars":
+            if vtype == "vars":
                 items = comp.vars.items()
+            elif vtype == "output":
+                items = comp.outputs.items()
             else:
                 items = comp.data.items()
 
@@ -527,10 +562,13 @@ class Model:
         """
 
         self.num_variables = self._init_indices(
-            self.links, self.index_pool, type="vars"
+            self.links, self.index_pool, vtype="vars"
         )
         self.data_size = self._init_indices(
-            self.links, self.data_index_pool, type="data"
+            self.links, self.data_index_pool, vtype="data"
+        )
+        self.num_outputs = self._init_indices(
+            self.links, self.output_index_pool, vtype="output"
         )
 
         self._reorder_indices(order_type, order_for_block)
@@ -554,6 +592,8 @@ class Model:
             return "constraint"
         elif name in self.comp[comp_name].get_data_names():
             return "data"
+        elif name in self.comp[comp_name].get_output_names():
+            return "output"
         else:
             raise ValueError(
                 f"Name {comp_name}.{name} is neither an input, constraint, output or data"
@@ -618,16 +658,23 @@ class Model:
             )
 
         objs = []
+        outs = []
         for name, comp in self.comp.items():
-            obj = comp.create_model(self.module_name)
+            obj = comp.create_group(self.module_name)
             if obj is not None:
                 objs.append(obj)
+
+            obj = comp.create_output(self.module_name)
+            if obj is not None:
+                outs.append(obj)
 
         return OptimizationProblem(
             self.data_size,
             self.num_variables,
+            self.num_outputs,
             self.constraint_indices,
             objs,
+            outs,
         )
 
     def get_data_vector(self):
@@ -635,6 +682,9 @@ class Model:
 
     def create_vector(self):
         return ModelVector(self, self.problem.create_vector())
+
+    def create_output_vector(self):
+        return ModelVector(self, self.problem.create_output_vector())
 
     def get_opt_problem(self):
         """Retrieve the optimization problem"""
@@ -655,12 +705,12 @@ class Model:
         idx_list = []
         idx_dict = {}
         idx_count = 0
-        for name in of:
+        for name in names:
             idx = self.get_indices(name).ravel()
             idx_list.append(idx)
             idx_dict[name] = np.arange(idx_count, idx_count + idx.size, dtype=int)
             idx_count += idx.size
-        indices = np.concatenate(of_list)
+        indices = np.concatenate(idx_list)
 
         return indices, idx_dict
 
@@ -688,6 +738,7 @@ class Model:
         inputs = []
         cons = []
         data = []
+        outputs = []
 
         for comp_name, comp in self.comp.items():
             for name in comp.get_input_names():
@@ -696,8 +747,10 @@ class Model:
                 cons.append(".".join([comp_name, name]))
             for name in comp.get_data_names():
                 data.append(".".join([comp_name, name]))
+            for name in comp.get_output_names():
+                outputs.append(".".join([comp_name, name]))
 
-        return inputs, cons, data
+        return inputs, cons, data, outputs
 
     def get_values_from_meta(
         self, meta_name: str, x: Union[None, List, np.ndarray] = None
@@ -765,6 +818,7 @@ class Model:
         py11 += "#include <pybind11/pybind11.h>\n"
         py11 += "#include <pybind11/stl.h>\n"
         py11 += '#include "component_group.h"\n'
+        py11 += '#include "output_group.h"\n'
         py11 += f'#include "{self.module_name}.h"\n'
         py11 += "namespace py = pybind11;\n"
 
@@ -777,14 +831,27 @@ class Model:
         for name in self.comp:
             class_name = self.comp[name].class_name
             if class_name not in class_names:
-                if not self.comp[name].comp_obj.is_empty():
+                compute_empty = self.comp[name].comp_obj.is_compute_empty()
+                analyze_empty = self.comp[name].comp_obj.is_analyze_empty()
+                if not compute_empty or not analyze_empty:
                     class_names[class_name] = True
 
                     # Generate the C++
                     cpp += self.comp[name].comp_obj.generate_cpp()
 
+                # Generate the wrappers
+                if not compute_empty:
                     py11 += (
-                        self.comp[name].comp_obj.generate_pybind11(mod_ident=mod_ident)
+                        self.comp[name].comp_obj.generate_pybind11(
+                            mod_ident=mod_ident, wrapper_type="group"
+                        )
+                        + ";\n"
+                    )
+                if not analyze_empty:
+                    py11 += (
+                        self.comp[name].comp_obj.generate_pybind11(
+                            mod_ident=mod_ident, wrapper_type="output"
+                        )
                         + ";\n"
                     )
 

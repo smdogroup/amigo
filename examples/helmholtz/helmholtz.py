@@ -69,10 +69,10 @@ class Helmholtz(am.Component):
         super().__init__()
 
         # Add keyword arguments for the compute function
-        compute_args = []
+        args = []
         for n in range(4):
-            compute_args.append({"n": n})
-        self.set_compute_args(compute_args)
+            args.append({"n": n})
+        self.set_args(args)
 
         # The filter radius
         self.add_constant("r_filter", 0.1)
