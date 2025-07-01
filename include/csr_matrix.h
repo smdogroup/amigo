@@ -97,9 +97,34 @@ class CSRMat {
                                                 sort_columns, &rowp, &cols);
 
     int nnz = rowp[nrows];
-    return std::make_shared<CSRMat<T>>(nrows, ncols, nnz, rowp, cols);
+    return std::make_shared<CSRMat<T>>(nrows, ncols, nnz, rowp, cols,
+                                       sqdef_index);
   }
 
+  /**
+   * @brief Create a CSR structure from the input/output for each element
+   *
+   * @tparam Functor Class type for the functor
+   * @param nrows Number of rows
+   * @param ncols Number of columns
+   * @param nelems Number of elements in the connectivity matrix
+   * @param elements Functor returning the number of nodes and node numbers
+   */
+  template <class Functor>
+  static std::shared_ptr<CSRMat<T>> create_from_output_data(
+      int nrows, int ncols, int nelems, const Functor& elements) {
+    int *rowp, *cols;
+    OrderingUtils::create_csr_from_output_data(nrows, ncols, nelems, elements,
+                                               &rowp, &cols);
+    int nnz = rowp[nrows];
+    int sqdef_index = -1;
+    return std::make_shared<CSRMat<T>>(nrows, ncols, nnz, rowp, cols,
+                                       sqdef_index);
+  }
+
+  /**
+   * @brief Zero the numerical values
+   */
   void zero() { std::fill(data, data + nnz, 0.0); }
 
   /**

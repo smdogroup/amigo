@@ -266,16 +266,23 @@ PYBIND11_MODULE(amigo, mod) {
             int num_constraints = con_indices.size();
             return std::make_shared<amigo::OptimizationProblem<double>>(
                 data_size, num_variables, num_constraints,
-                con_indices.mutable_data(), comps, out_comps);
+                con_indices.mutable_data(), comps, num_outputs, out_comps);
           }))
       .def("get_data_vector",
            &amigo::OptimizationProblem<double>::get_data_vector)
       .def("create_vector", &amigo::OptimizationProblem<double>::create_vector)
+      .def("create_output_vector",
+           &amigo::OptimizationProblem<double>::create_output_vector)
       .def("lagrangian", &amigo::OptimizationProblem<double>::lagrangian)
       .def("gradient", &amigo::OptimizationProblem<double>::gradient)
       .def("create_csr_matrix",
            &amigo::OptimizationProblem<double>::create_csr_matrix)
-      .def("hessian", &amigo::OptimizationProblem<double>::hessian);
+      .def("hessian", &amigo::OptimizationProblem<double>::hessian)
+      .def("analyze", &amigo::OptimizationProblem<double>::analyze)
+      .def("create_output_csr_matrix",
+           &amigo::OptimizationProblem<double>::create_output_csr_matrix)
+      .def("analyze_jacobian",
+           &amigo::OptimizationProblem<double>::analyze_jacobian);
 
   py::class_<amigo::AliasTracker<int>>(mod, "AliasTracker")
       .def(py::init<int>(), py::arg("size"))

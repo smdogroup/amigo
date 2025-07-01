@@ -260,7 +260,7 @@ class ComponentGroup:
         return None
 
     def create_output(self, module_name: str):
-        if not self.comp_obj.is_compute_empty():
+        if not self.comp_obj.is_analyze_empty():
             data_array = self.get_indices(self.data)
             vec_array = self.get_indices(self.vars)
             output_array = self.get_indices(self.outputs)
@@ -472,9 +472,14 @@ class Model:
 
             # Check if the types are consistent
             is_var = a_type == b_type and (a_type == "input" or b_type == "constraint")
-            is_data = a_type == b_type and a_type == "data"
+            is_data = a_type == b_type and (a_type == "data")
+            is_output = a_type == b_type and (a_type == "output")
 
-            if (vtype == "vars" and is_var) or (vtype == "data" and is_data):
+            if (
+                (vtype == "vars" and is_var)
+                or (vtype == "data" and is_data)
+                or (vtype == "output" and is_output)
+            ):
                 a_all = self.get_indices(a_var)
                 a_indices = self._get_slice_indices(a_all, a_slice, a_idx)
 
@@ -664,7 +669,12 @@ class Model:
                 outs.append(obj)
 
         return OptimizationProblem(
-            self.data_size, self.num_variables, self.constraint_indices, objs, outs
+            self.data_size,
+            self.num_variables,
+            self.num_outputs,
+            self.constraint_indices,
+            objs,
+            outs,
         )
 
     def get_data_vector(self):
@@ -672,6 +682,9 @@ class Model:
 
     def create_vector(self):
         return ModelVector(self, self.problem.create_vector())
+
+    def create_output_vector(self):
+        return ModelVector(self, self.problem.create_output_vector())
 
     def get_opt_problem(self):
         """Retrieve the optimization problem"""
@@ -692,12 +705,12 @@ class Model:
         idx_list = []
         idx_dict = {}
         idx_count = 0
-        for name in of:
+        for name in names:
             idx = self.get_indices(name).ravel()
             idx_list.append(idx)
             idx_dict[name] = np.arange(idx_count, idx_count + idx.size, dtype=int)
             idx_count += idx.size
-        indices = np.concatenate(of_list)
+        indices = np.concatenate(idx_list)
 
         return indices, idx_dict
 
@@ -725,6 +738,7 @@ class Model:
         inputs = []
         cons = []
         data = []
+        outputs = []
 
         for comp_name, comp in self.comp.items():
             for name in comp.get_input_names():
@@ -733,8 +747,10 @@ class Model:
                 cons.append(".".join([comp_name, name]))
             for name in comp.get_data_names():
                 data.append(".".join([comp_name, name]))
+            for name in comp.get_output_names():
+                outputs.append(".".join([comp_name, name]))
 
-        return inputs, cons, data
+        return inputs, cons, data, outputs
 
     def get_values_from_meta(
         self, meta_name: str, x: Union[None, List, np.ndarray] = None

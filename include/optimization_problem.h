@@ -158,8 +158,8 @@ class OptimizationProblem {
       intervals[i + 1] = intervals[i] + length;
     }
 
-    auto element_nodes = [&](int element, int* nrow, int* ncol,
-                             const int** rows, const int** cols) {
+    auto element = [&](int element, int* nrow, int* ncol, const int** rows,
+                       const int** cols) {
       // upper_bound finds the first index i such that intervals[i] >
       // element
       auto it = std::upper_bound(intervals.begin(), intervals.end(), element);
@@ -170,17 +170,15 @@ class OptimizationProblem {
 
       int length;
       const int *out, *in;
-      comps[idx]->get_layout_data(&length, nrow, ncol, &out, &in);
+      out_comps[idx]->get_layout_data(&length, nrow, ncol, &out, &in);
 
       int elem = element - intervals[idx];
       *rows = &out[(*nrow) * elem];
       *cols = &in[(*ncol) * elem];
     };
 
-    int sqdef_index = -1;
-    return std::make_shared<CSRMat<T>>(num_outputs, num_variables,
-                                       intervals[out_comps.size()],
-                                       element_nodes, sqdef_index);
+    return CSRMat<T>::create_from_output_data(num_outputs, num_variables,
+                                              intervals[comps.size()], element);
   }
 
  private:
