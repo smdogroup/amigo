@@ -38,8 +38,8 @@ class Optimizer:
 
         # Get the vector of initial values if none are specified
         if x is None:
-            self.x = self.problem.create_vector()
-            self.x.get_array()[:] = model.get_values_from_meta("value")
+            x = model.get_values_from_meta("value")
+            self.x = x.get_opt_problem_vec()
         elif isinstance(x, ModelVector):
             self.x = x.get_opt_problem_vec()
         else:
@@ -47,15 +47,15 @@ class Optimizer:
 
         # Get the lower and upper bounds if none are specified
         if lower is None:
-            self.lower = self.problem.create_vector()
-            self.lower.get_array()[:] = model.get_values_from_meta("lower")
+            lower = model.get_values_from_meta("lower")
+            self.lower = lower.get_opt_problem_vec()
         elif isinstance(lower, ModelVector):
             self.lower = lower.get_opt_problem_vec()
         else:
             self.lower = lower
         if upper is None:
-            self.upper = self.problem.create_vector()
-            self.upper.get_array()[:] = model.get_values_from_meta("upper")
+            upper = model.get_values_from_meta("upper")
+            self.upper = upper.get_opt_problem_vec()
         elif isinstance(upper, ModelVector):
             self.upper = upper.get_opt_problem_vec()
         else:

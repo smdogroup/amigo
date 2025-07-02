@@ -752,9 +752,7 @@ class Model:
 
         return inputs, cons, data, outputs
 
-    def get_values_from_meta(
-        self, meta_name: str, x: Union[None, List, np.ndarray] = None
-    ):
+    def get_values_from_meta(self, meta_name: str):
         """
         Set values into the provided list or array.
 
@@ -766,7 +764,7 @@ class Model:
             meta_name (str) : The name of the meta data to place into the array
 
         Returns:
-            x (np.ndarray) : The meta values assigned to each component
+            x (ModelVector) : The meta values assigned to each component
         """
 
         if not self._initialized:
@@ -774,8 +772,7 @@ class Model:
                 "Must call initialize before calling get_values_from_meta"
             )
 
-        if x is None:
-            x = np.zeros(self.num_variables)
+        x = ModelVector(self, self.problem.create_vector())
         for comp_name, comp in self.comp.items():
             for var_name in comp.vars:
                 name = comp_name + "." + var_name
@@ -783,7 +780,7 @@ class Model:
                 value = meta[meta_name]
                 if value is None:
                     value = 0.0
-                x[self.get_indices(name)] = value
+                x[name] = value
 
         return x
 
