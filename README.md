@@ -52,7 +52,7 @@ The system dynamics are encoded within a `CartComponent` class that inherits fro
 
 The only class member function that is used by Amigo is the `compute` function. The `inputs`, `constraints`, `constants` and `data` must be extracted from the dictionary-like member objects in the compute function. These are not numerical objects, but instead encode the mathematical operations that are reinterpreted to generate c++ code.
 
-In some applications it can be simpler to create multiple versions of the compute function. In this case, you can set `amigo.Component.set_compute_args()`. which takes a list of dictionaries of keyword arguments, which will provide the compute function the provided keyword arguments.
+In some applications it can be simpler to create multiple versions of the compute function. In this case, you can set `amigo.Component.set_args()`. which takes a list of dictionaries of keyword arguments, which will provide the compute function the provided keyword arguments.
 
 ```python
 import amigo as am
