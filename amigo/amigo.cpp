@@ -289,6 +289,8 @@ PYBIND11_MODULE(amigo, mod) {
         return std::make_shared<amigo::OptimizationProblem<double>>(
             comm, data_owners, var_owners, is_multiplier, components);
       }))
+      .def("get_num_variables",
+           &amigo::OptimizationProblem<double>::get_num_variables)
       .def("partition_from_root",
            &amigo::OptimizationProblem<double>::partition_from_root,
            py::arg("root") = 0)

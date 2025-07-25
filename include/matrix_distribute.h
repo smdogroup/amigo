@@ -195,7 +195,7 @@ class MatrixDistribute {
     const int *ext_cols;
     col_owners->get_ext_nodes(&ext_cols);
 
-    int num_local_cols = row_ranges[mpi_rank + 1] - row_ranges[mpi_rank];
+    int num_local_cols = col_ranges[mpi_rank + 1] - col_ranges[mpi_rank];
 
     // Set up the column indices that will be sent
     int ext_size = rowp[nrows] - rowp[num_local_rows];
@@ -238,14 +238,6 @@ class MatrixDistribute {
     delete[] in_requests;
     delete[] ext_requests;
 
-    // Now that everything is on the root processor, assemble it all together
-    // into a CSR matrix data structure. Include the local and external rows
-    int *assembled_rowp = new int[nrows + 1];
-
-    // Allocate the maximum size of the rows
-    int max_cols_size = rowp[nrows] + in_row_ptr[num_in_rows];
-    int *assembled_cols = new int[max_cols_size];
-
     // Set the pointer into the off-proc parts of the matrix
     int *ptr_to_rows = new int[num_in_procs + 1];
     int *index_to_rows = new int[num_in_procs];
@@ -254,6 +246,18 @@ class MatrixDistribute {
       index_to_rows[i] = ptr_to_rows[i];
       ptr_to_rows[i + 1] = ptr_to_rows[i] + in_row_count[i];
     }
+
+    delete[] ext_row_sizes;
+    delete[] in_row_count;
+    delete[] ext_row_count;
+
+    // Now that everything is on the root processor, assemble it all together
+    // into a CSR matrix data structure. Include the local and external rows
+    int *assembled_rowp = new int[nrows + 1];
+
+    // Allocate the maximum size of the rows
+    int max_cols_size = rowp[nrows] + in_row_ptr[num_in_rows];
+    int *assembled_cols = new int[max_cols_size];
 
     // Merge the data to form a larger CSR matrix structure
     int nnz = 0;
@@ -265,7 +269,7 @@ class MatrixDistribute {
         if (cols[jp] < num_local_cols) {
           col = cols[jp] + col_ranges[mpi_rank];
         } else {
-          col = ext_cols[cols[jp]];
+          col = ext_cols[cols[jp] - num_local_cols];
         }
 
         // Add the entry to the column
@@ -296,19 +300,18 @@ class MatrixDistribute {
       std::sort(&assembled_cols[start], &assembled_cols[start] + size);
       auto last =
           std::unique(&assembled_cols[start], &assembled_cols[start] + size);
-      nnz = last - assembled_cols;
 
+      // Update the size of the row
+      nnz = last - assembled_cols;
       assembled_rowp[i + 1] = nnz;
     }
-
-    delete[] ext_row_sizes;
-    delete[] in_row_count;
-    delete[] ext_row_count;
 
     // Create the CSR data structure
     csr = CSRMat<T>::create_from_csr_data(nrows, col_ranges[mpi_size], nnz,
                                           assembled_rowp, assembled_cols);
 
+    delete[] ptr_to_rows;
+    delete[] index_to_rows;
     delete[] assembled_rowp;
     delete[] assembled_cols;
   }
