@@ -309,6 +309,13 @@ parser.add_argument(
     default=False,
     help="Show the sparsity pattern",
 )
+parser.add_argument(
+    "--distribute",
+    dest="distribute",
+    action="store_true",
+    default=False,
+    help="Distribute the problem",
+)
 args = parser.parse_args()
 
 model = create_cart_model()

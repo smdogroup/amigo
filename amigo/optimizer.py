@@ -10,6 +10,11 @@ try:
 except:
     PETSc = None
 
+try:
+    from petsc4py import PETSc
+except:
+    PETSc = None
+
 
 class DirectScipySolver:
     def __init__(self, problem):
@@ -210,6 +215,8 @@ class Optimizer:
             self.diag = self.problem.create_vector()
             self.px = self.problem.create_vector()
             self.bx = self.problem.create_vector()
+
+        return
 
         return
 
