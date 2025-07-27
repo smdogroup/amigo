@@ -128,7 +128,12 @@ class CSRMat {
    * @return std::shared_ptr<CSRMat<T>>
    */
   std::shared_ptr<CSRMat<T>> duplicate() const {
-    return std::make_shared<CSRMat<T>>(nrows, ncols, nnz, rowp, cols,
+    int* dup_rowp = new int[nrows + 1];
+    int* dup_cols = new int[nnz];
+    std::copy(rowp, rowp + (nrows + 1), dup_rowp);
+    std::copy(cols, cols + nnz, dup_rowp);
+
+    return std::make_shared<CSRMat<T>>(nrows, ncols, nnz, dup_rowp, dup_cols,
                                        sqdef_index);
   }
 
