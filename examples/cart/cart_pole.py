@@ -295,18 +295,18 @@ parser.add_argument(
     help="Enable OpenMP",
 )
 parser.add_argument(
+    "--with-debug",
+    dest="use_debug",
+    action="store_true",
+    default=False,
+    help="Enable debug flags",
+)
+parser.add_argument(
     "--show-sparsity",
     dest="show_sparsity",
     action="store_true",
     default=False,
     help="Show the sparsity pattern",
-)
-parser.add_argument(
-    "--distribute",
-    dest="distribute",
-    action="store_true",
-    default=False,
-    help="Distribute the problem",
 )
 args = parser.parse_args()
 
@@ -322,16 +322,21 @@ if args.build:
         define_macros = [("AMIGO_USE_OPENMP", "1")]
 
     model.build_module(
-        compile_args=compile_args, link_args=link_args, define_macros=define_macros
+        compile_args=compile_args,
+        link_args=link_args,
+        define_macros=define_macros,
+        debug=args.use_debug,
     )
 
 comm = COMM_WORLD
 model.initialize(comm=comm)
 
 comm_rank = 0
-distribute = args.distribute
+distribute = False
 if comm is not None:
     comm_rank = comm.rank
+    if comm.size > 1:
+        distribute = True
 
 if comm_rank == 0:
     with open("cart_pole_model.json", "w") as fp:

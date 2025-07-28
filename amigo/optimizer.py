@@ -37,10 +37,8 @@ class DirectScipySolver:
 
 
 class DirectPetscSolver:
-    def __init__(self, comm, model, problem, mpi_problem):
+    def __init__(self, comm, mpi_problem):
         self.comm = comm
-        self.model = model
-        self.problem = problem
         self.mpi_problem = mpi_problem
         self.hess = self.mpi_problem.create_matrix()
         self.nrows_local = self.mpi_problem.get_num_variables()
@@ -78,25 +76,25 @@ class DirectPetscSolver:
         # Create KSP solver
         ksp = PETSc.KSP().create(comm=self.comm)
         ksp.setOperators(self.H)
-        ksp.setPCSide(PETSc.PC.Side.RIGHT)
         ksp.setTolerances(rtol=1e-16)
         ksp.setType("preonly")  # Do not iterate — direct solve only
 
         pc = ksp.getPC()
-        pc.setType("lu")
+        pc.setType("cholesky")
         pc.setFactorSolverType("mumps")
 
         M = pc.getFactorMatrix()
         M.setMumpsIcntl(6, 5)  # Reordering strategy
         M.setMumpsIcntl(7, 2)  # Use scaling
         M.setMumpsIcntl(13, 1)  # Control
+        M.setMumpsIcntl(24, 1)
         M.setMumpsIcntl(4, 1)  # Set verbosity of the output
         M.setMumpsCntl(1, 0.01)
 
         # ksp.setMonitor(
         #     lambda ksp, its, rnorm: print(f"Iter {its}: ||r|| = {rnorm:.3e}")
         # )
-        # ksp.setUp()
+        ksp.setUp()
 
         # Solve the system
         self.b.getArray()[:] = bx.get_array()[: self.nrows_local]
@@ -177,9 +175,7 @@ class Optimizer:
 
         # Set the solver for the KKT system
         if solver is None and self.distribute:
-            self.solver = DirectPetscSolver(
-                self.comm, self.model, self.problem, self.mpi_problem
-            )
+            self.solver = DirectPetscSolver(self.comm, self.mpi_problem)
         elif solver is None:
             self.solver = DirectScipySolver(self.problem)
         else:

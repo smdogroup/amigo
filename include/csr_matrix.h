@@ -316,8 +316,15 @@ class CSRMat {
    * @param x The vector of diagonal elements
    */
   void add_diagonal(const std::shared_ptr<Vector<T>>& x) {
+    int size = nrows;
+    if (row_owners) {
+      size = row_owners->get_local_size();
+    }
+    if (nrows < size) {
+      size = nrows;
+    }
     const T* x_array = x->get_array();
-    for (int row = 0; row < nrows; row++) {
+    for (int row = 0; row < size; row++) {
       if (diag[row] != -1) {
         data[diag[row]] += x_array[row];
       }
@@ -463,18 +470,29 @@ class CSRMat {
         col_owners(col_owners),
         sqdef_index(sqdef_index) {
     diag = new int[nrows];
-    for (int i = 0; i < nrows; i++) {
+
+    // Set the diagonal based on the
+    int rank;
+    MPI_Comm_rank(row_owners->get_mpi_comm(), &rank);
+    const int* row_ranges = row_owners->get_range();
+    int nrows_local = row_owners->get_local_size();
+
+    for (int i = 0; i < nrows_local; i++) {
       int size = rowp[i + 1] - rowp[i];
       int* start = &cols[rowp[i]];
       int* end = start + size;
+      int row = row_ranges[rank] + i;
 
       // Set the diagonal elements of the matrix
-      auto* it = std::lower_bound(start, end, i);
+      auto* it = std::lower_bound(start, end, row);
       if (it != end && *it == i) {
         diag[i] = it - cols;
       } else {
         diag[i] = -1;
       }
+    }
+    for (int i = nrows_local; i < nrows; i++) {
+      diag[i] = -1;
     }
 
     // Don't forget to allocate the space

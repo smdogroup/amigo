@@ -395,7 +395,10 @@ class OrderingUtils {
       const int *ptr;
       int nodes_per_element = element_nodes(i, &ptr);
       for (int j = 0; j < nodes_per_element; j++, ptr++) {
-        node_to_elem_ptr[ptr[0] + 1]++;
+        int node = ptr[0];
+        if (node >= 0 && node < nnodes) {
+          node_to_elem_ptr[ptr[0] + 1]++;
+        }
       }
     }
 
@@ -410,8 +413,10 @@ class OrderingUtils {
       int nodes_per_element = element_nodes(i, &ptr);
       for (int j = 0; j < nodes_per_element; j++, ptr++) {
         int node = ptr[0];
-        node_to_elem[node_to_elem_ptr[node]] = i;
-        node_to_elem_ptr[node]++;
+        if (node >= 0 && node < nnodes) {
+          node_to_elem[node_to_elem_ptr[node]] = i;
+          node_to_elem_ptr[node]++;
+        }
       }
     }
 
@@ -580,15 +585,17 @@ class OrderingUtils {
       for (int j = 0; j < nnodes_per_elem; j++, ptr++) {
         int node = ptr[0];
 
-        // Find the adjacent elements
-        int start = node_to_elem_ptr[node];
-        int end = node_to_elem_ptr[node + 1];
-        for (int k = start; k < end; k++) {
-          int e = node_to_elem[k];
+        if (node >= 0 && node < nnodes) {
+          // Find the adjacent elements
+          int start = node_to_elem_ptr[node];
+          int end = node_to_elem_ptr[node + 1];
+          for (int k = start; k < end; k++) {
+            int e = node_to_elem[k];
 
-          if (e != i && elem_flags[e] != i) {
-            count++;
-            elem_flags[e] = i;
+            if (e != i && elem_flags[e] != i) {
+              count++;
+              elem_flags[e] = i;
+            }
           }
         }
       }
@@ -609,16 +616,18 @@ class OrderingUtils {
       for (int j = 0; j < nnodes_per_elem; j++, ptr++) {
         int node = ptr[0];
 
-        // Find the adjacent elements
-        int start = node_to_elem_ptr[node];
-        int end = node_to_elem_ptr[node + 1];
-        for (int k = start; k < end; k++) {
-          int e = node_to_elem[k];
+        if (node >= 0 && node < nnodes) {
+          // Find the adjacent elements
+          int start = node_to_elem_ptr[node];
+          int end = node_to_elem_ptr[node + 1];
+          for (int k = start; k < end; k++) {
+            int e = node_to_elem[k];
 
-          if (e != i && elem_flags[e] != i) {
-            elem_to_elem[elem_to_elem_ptr[i] + count] = e;
-            count++;
-            elem_flags[e] = i;
+            if (e != i && elem_flags[e] != i) {
+              elem_to_elem[elem_to_elem_ptr[i] + count] = e;
+              count++;
+              elem_flags[e] = i;
+            }
           }
         }
       }
