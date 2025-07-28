@@ -804,7 +804,12 @@ class Model:
         return x
 
     def build_module(
-        self, comm=COMM_WORLD, compile_args=[], link_args=[], define_macros=[]
+        self,
+        comm=COMM_WORLD,
+        compile_args=[],
+        link_args=[],
+        define_macros=[],
+        debug=False,
     ):
         """
         Generate the model code and build it. Additional compile, link arguments and macros can be added here.
@@ -820,6 +825,7 @@ class Model:
                 compile_args=compile_args,
                 link_args=link_args,
                 define_macros=define_macros,
+                debug=debug,
             )
 
         if comm is not None:
@@ -896,7 +902,9 @@ class Model:
 
         return
 
-    def _build_module(self, compile_args=[], link_args=[], define_macros=[]):
+    def _build_module(
+        self, compile_args=[], link_args=[], define_macros=[], debug=False
+    ):
         """
         Quick setup for building the extension module. Some care is required with this.
         """
@@ -929,7 +937,8 @@ class Model:
         else:
             compile_args += ["-std=c++17"]
 
-        compile_args += ["-g", "-O0"]
+        if debug:
+            compile_args += ["-g", "-O0"]
 
         pybind11_include = pybind11.get_include()
         amigo_include = AMIGO_INCLUDE_PATH

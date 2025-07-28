@@ -3,6 +3,7 @@ from scipy.sparse import csr_matrix
 from scipy.sparse.linalg import spsolve
 from .amigo import InteriorPointOptimizer
 from .model import ModelVector
+from .utils import tocsr
 
 try:
     from petsc4py import PETSc
@@ -36,8 +37,9 @@ class DirectScipySolver:
 
 
 class DirectPetscSolver:
-    def __init__(self, comm, problem, mpi_problem):
+    def __init__(self, comm, model, problem, mpi_problem):
         self.comm = comm
+        self.model = model
         self.problem = problem
         self.mpi_problem = mpi_problem
         self.hess = self.mpi_problem.create_matrix()
@@ -46,15 +48,15 @@ class DirectPetscSolver:
             self.hess.get_nonzero_structure()
         )
 
-        # self.H = PETSc.Mat().create(comm=comm)
+        self.H = PETSc.Mat().create(comm=comm)
 
-        # s = (self.nrows_local, self.ncols)
-        # self.H.setSizes((s, s), bsize=1)
-        # self.H.setType(PETSc.Mat.Type.MPIAIJ)
+        s = (self.nrows_local, self.ncols)
+        self.H.setSizes((s, s), bsize=1)
+        self.H.setType(PETSc.Mat.Type.MPIAIJ)
 
-        # # Right-hand side and solution vector
-        # self.b = PETSc.Vec().createMPI(s, bsize=1, comm=comm)
-        # self.x = PETSc.Vec().createMPI(s, bsize=1, comm=comm)
+        # Right-hand side and solution vector
+        self.b = PETSc.Vec().createMPI(s, bsize=1, comm=comm)
+        self.x = PETSc.Vec().createMPI(s, bsize=1, comm=comm)
 
         return
 
@@ -63,53 +65,47 @@ class DirectPetscSolver:
         self.mpi_problem.hessian(x, self.hess)
         self.hess.add_diagonal(diag)
 
+        # Extract the Hessian entries
         data = self.hess.get_data()
 
-        # Try to compare the serial and distributed matrices
-        x_serial = self.problem.create_vector()
-        self.problem.gather_vector(self.mpi_problem, x, x_serial)
+        nnz = self.rowp[self.nrows_local]
+        self.H.zeroEntries()
+        self.H.setValuesCSR(
+            self.rowp[: self.nrows_local + 1], self.cols[:nnz], data[:nnz]
+        )
+        self.H.assemble()
 
-        # Create the serial matrix
-        hess_serial = self.problem.create_matrix()
-        nrows, ncols, nnz, rowp, cols = hess_serial.get_nonzero_structure()
+        # Create KSP solver
+        ksp = PETSc.KSP().create(comm=self.comm)
+        ksp.setOperators(self.H)
+        ksp.setPCSide(PETSc.PC.Side.RIGHT)
+        ksp.setTolerances(rtol=1e-16)
+        ksp.setType("preonly")  # Do not iterate — direct solve only
 
-        self.problem.hessian(x_serial, hess_serial)
-        data_serial = hess_serial.get_data()
-        H_serial = csr_matrix((data_serial, cols, rowp), shape=(nrows, ncols))
+        pc = ksp.getPC()
+        pc.setType("lu")
+        pc.setFactorSolverType("mumps")
 
-        # Get the mapping
-        mapping = self.problem.get_local_to_global_node_numbers().get_array()
+        M = pc.getFactorMatrix()
+        M.setMumpsIcntl(6, 5)  # Reordering strategy
+        M.setMumpsIcntl(7, 2)  # Use scaling
+        M.setMumpsIcntl(13, 1)  # Control
+        M.setMumpsIcntl(4, 1)  # Set verbosity of the output
+        M.setMumpsCntl(1, 0.01)
 
-        H_mpi2 = H_serial[mapping, :][:, mapping]
-
-        # nnz = self.rowp[self.nrows_local]
-        # self.H.setValuesCSR(
-        #     self.rowp[: self.nrows_local + 1], self.cols[:nnz], data[:nnz]
+        # ksp.setMonitor(
+        #     lambda ksp, its, rnorm: print(f"Iter {its}: ||r|| = {rnorm:.3e}")
         # )
-        # self.H.assemble()
-
-        # # Create KSP solver
-        # ksp = PETSc.KSP().create(comm=self.comm)
-        # ksp.setOperators(self.H)
-        # ksp.setType("preonly")  # Do not iterate — direct solve only
-        # ksp.getPC().setType("lu")  # Use LU factorization
-        # ksp.getPC().setFactorSolverType("mumps")  # Use MUMPS backend
-
-        # self.b.getArray()[:] = bx.get_array()
+        # ksp.setUp()
 
         # Solve the system
-        # ksp.solve(self.b, self.x)
-        # print(self.x.getArray())
+        self.b.getArray()[:] = bx.get_array()[: self.nrows_local]
+        ksp.solve(self.b, self.x)
+        px.get_array()[: self.nrows_local] = self.x.getArray()[:]
 
-        # self.x.getArray()[:] = spsolve(H, self.b.getArray())
-
-        # px.get_array()[:] = self.x.getArray()[:]
-
-        # Compute the solution using scipy
-        H_mpi = csr_matrix((data, self.cols, self.rowp), shape=(self.nrows, self.ncols))
-        px.get_array()[:] = spsolve(H_mpi2, bx.get_array())
-
-        print("max_diff = ", np.argmax(np.absolute(H_mpi - H_mpi2).data))
+        # if self.comm.size == 1:
+        #     H = tocsr(self.hess)
+        #     px.get_array()[:] = spsolve(H, bx.get_array())
 
         return
 
@@ -181,7 +177,9 @@ class Optimizer:
 
         # Set the solver for the KKT system
         if solver is None and self.distribute:
-            self.solver = DirectPetscSolver(self.comm, self.problem, self.mpi_problem)
+            self.solver = DirectPetscSolver(
+                self.comm, self.model, self.problem, self.mpi_problem
+            )
         elif solver is None:
             self.solver = DirectScipySolver(self.problem)
         else:
@@ -206,10 +204,16 @@ class Optimizer:
         self.temp = self.optimizer.create_opt_vector()
 
         # Create vectors that store problem-specific information
-        self.grad = self.problem.create_vector()
-        self.diag = self.problem.create_vector()
-        self.px = self.problem.create_vector()
-        self.bx = self.problem.create_vector()
+        if self.distribute:
+            self.grad = self.mpi_problem.create_vector()
+            self.diag = self.mpi_problem.create_vector()
+            self.px = self.mpi_problem.create_vector()
+            self.bx = self.mpi_problem.create_vector()
+        else:
+            self.grad = self.problem.create_vector()
+            self.diag = self.problem.create_vector()
+            self.px = self.problem.create_vector()
+            self.bx = self.problem.create_vector()
 
         return
 
@@ -303,7 +307,10 @@ class Optimizer:
         self.optimizer.initialize_multipliers_and_slacks(self.vars)
 
         # Compute the gradient
-        self.problem.gradient(self.vars.x, self.grad)
+        if self.distribute:
+            self.mpi_problem.gradient(self.vars.x, self.grad)
+        else:
+            self.problem.gradient(self.vars.x, self.grad)
 
         line_iters = 0
         alpha_prev = 0.0
@@ -387,7 +394,10 @@ class Optimizer:
                 self.optimizer.apply_step_update(alpha, alpha, self.update, self.temp)
 
                 # Compute the gradient at the new point
-                self.problem.gradient(self.temp.x, self.grad)
+                if self.distribute:
+                    self.mpi_problem.gradient(self.temp.x, self.grad)
+                else:
+                    self.problem.gradient(self.temp.x, self.grad)
                 res_norm_new = self.optimizer.compute_residual(
                     barrier_param, self.temp, self.grad, self.res
                 )

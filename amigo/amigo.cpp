@@ -215,19 +215,26 @@ PYBIND11_MODULE(amigo, mod) {
       mod, "CSRMat")
       .def("get_nonzero_structure",
            [](amigo::CSRMat<double> &mat) {
-             py::array_t<int> rowp(mat.nrows + 1);
-             std::memcpy(rowp.mutable_data(), mat.rowp,
-                         (mat.nrows + 1) * sizeof(int));
+             int nrows, ncols, nnz;
+             const int *mat_rowp, *mat_cols;
+             mat.get_data(&nrows, &ncols, &nnz, &mat_rowp, &mat_cols, nullptr);
 
-             py::array_t<int> cols(mat.nnz);
-             std::memcpy(cols.mutable_data(), mat.cols, mat.nnz * sizeof(int));
-             return py::make_tuple(mat.nrows, mat.ncols, mat.nnz, rowp, cols);
+             py::array_t<int> rowp(nrows + 1);
+             std::memcpy(rowp.mutable_data(), mat_rowp,
+                         (nrows + 1) * sizeof(int));
+
+             py::array_t<int> cols(nnz);
+             std::memcpy(cols.mutable_data(), mat_cols, nnz * sizeof(int));
+             return py::make_tuple(nrows, ncols, nnz, rowp, cols);
            })
       .def("get_data",
            [](amigo::CSRMat<double> &mat) -> py::array_t<double> {
-             py::array_t<double> data(mat.nnz);
-             std::memcpy(data.mutable_data(), mat.data,
-                         mat.nnz * sizeof(double));
+             int nnz;
+             double *mat_data;
+             mat.get_data(nullptr, nullptr, &nnz, nullptr, nullptr, &mat_data);
+
+             py::array_t<double> data(nnz);
+             std::memcpy(data.mutable_data(), mat_data, nnz * sizeof(double));
              return data;
            })
       .def("extract_submatrix",
@@ -243,6 +250,8 @@ PYBIND11_MODULE(amigo, mod) {
              self.extract_submatrix_values(rows.size(), rows.data(),
                                            cols.size(), cols.data(), mat);
            })
+      .def("get_row_owners", &amigo::CSRMat<double>::get_row_owners)
+      .def("get_column_owners", &amigo::CSRMat<double>::get_column_owners)
       .def("gauss_seidel", &amigo::CSRMat<double>::gauss_seidel)
       .def("mult", &amigo::CSRMat<double>::mult)
       .def("add_diagonal", &amigo::CSRMat<double>::add_diagonal);
@@ -271,7 +280,13 @@ PYBIND11_MODULE(amigo, mod) {
               "Ranges must be of length MPI_Comm_size + 1");
         }
         return std::make_shared<amigo::NodeOwners>(comm, ranges.data());
-      }));
+      }))
+      .def("get_mpi_comm",
+           [](const amigo::NodeOwners &self) {
+             return py::reinterpret_steal<py::object>(
+                 PyMPIComm_New(self.get_mpi_comm()));
+           })
+      .def("get_local_size", &amigo::NodeOwners::get_local_size);
 
   py::class_<amigo::OptimizationProblem<double>,
              std::shared_ptr<amigo::OptimizationProblem<double>>>(

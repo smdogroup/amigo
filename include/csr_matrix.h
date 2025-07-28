@@ -1,6 +1,7 @@
 #ifndef AMIGO_CSR_MATRIX_H
 #define AMIGO_CSR_MATRIX_H
 
+#include "node_owners.h"
 #include "ordering_utils.h"
 #include "vector.h"
 
@@ -48,21 +49,22 @@ class CSRMat {
    * @param nnz Number of non-zeros
    * @param rowp Pointer into the rows of the matrix
    * @param cols Column indices
+   * @param row_owners Distribution of the rows
+   * @param col_owners Distribution of the columns
    * @param sqdef_index Index at which 2x2 negative definite block matrix begins
    */
   template <class ArrayType>
-  static std::shared_ptr<CSRMat<T>> create_from_csr_data(int nrows, int ncols,
-                                                         int nnz,
-                                                         const ArrayType rowp_,
-                                                         const ArrayType cols_,
-                                                         int sqdef_index = -1) {
+  static std::shared_ptr<CSRMat<T>> create_from_csr_data(
+      int nrows, int ncols, int nnz, const ArrayType rowp_,
+      const ArrayType cols_, std::shared_ptr<NodeOwners> row_owners,
+      std::shared_ptr<NodeOwners> col_owners, int sqdef_index = -1) {
     int* rowp = new int[nrows + 1];
     int* cols = new int[nnz];
     std::copy(rowp_, rowp_ + (nrows + 1), rowp);
     std::copy(cols_, cols_ + nnz, cols);
 
     return std::make_shared<CSRMat<T>>(nrows, ncols, nnz, rowp, cols,
-                                       sqdef_index);
+                                       row_owners, col_owners, sqdef_index);
   }
 
   /**
@@ -82,12 +84,15 @@ class CSRMat {
    * @param ncols Number of columns
    * @param nelems Number of elements in the connectivity matrix
    * @param element_nodes Functor returning the number of nodes and node numbers
+   * @param row_owners Distribution of the rows
+   * @param col_owners Distribution of the columns
    * @param sqdef_index Index at which 2x2 negative definite block matrix begins
    */
   template <class Functor>
   static std::shared_ptr<CSRMat<T>> create_from_element_conn(
       int nrows, int ncols, int nelems, const Functor& element_nodes,
-      int sqdef_index = -1) {
+      std::shared_ptr<NodeOwners> row_owners,
+      std::shared_ptr<NodeOwners> col_owners, int sqdef_index = -1) {
     // Create the CSR structure
     bool include_diagonal = true;
     bool sort_columns = true;
@@ -98,7 +103,7 @@ class CSRMat {
 
     int nnz = rowp[nrows];
     return std::make_shared<CSRMat<T>>(nrows, ncols, nnz, rowp, cols,
-                                       sqdef_index);
+                                       row_owners, col_owners, sqdef_index);
   }
 
   /**
@@ -112,14 +117,16 @@ class CSRMat {
    */
   template <class Functor>
   static std::shared_ptr<CSRMat<T>> create_from_output_data(
-      int nrows, int ncols, int nelems, const Functor& elements) {
+      int nrows, int ncols, int nelems, const Functor& elements,
+      std::shared_ptr<NodeOwners> row_owners,
+      std::shared_ptr<NodeOwners> col_owners) {
     int *rowp, *cols;
     OrderingUtils::create_csr_from_output_data(nrows, ncols, nelems, elements,
                                                &rowp, &cols);
     int nnz = rowp[nrows];
     int sqdef_index = -1;
     return std::make_shared<CSRMat<T>>(nrows, ncols, nnz, rowp, cols,
-                                       sqdef_index);
+                                       row_owners, col_owners, sqdef_index);
   }
 
   /**
@@ -134,7 +141,7 @@ class CSRMat {
     std::copy(cols, cols + nnz, dup_cols);
 
     return std::make_shared<CSRMat<T>>(nrows, ncols, nnz, dup_rowp, dup_cols,
-                                       sqdef_index);
+                                       row_owners, col_owners, sqdef_index);
   }
 
   /**
@@ -392,6 +399,16 @@ class CSRMat {
     }
   }
 
+  /**
+   * @brief Get the data from the CSR object
+   *
+   * @param nrows Number of rows
+   * @param ncols Number of columns
+   * @param nnz Number of nonzero entries
+   * @param rowp Pointer into each row
+   * @param cols Column indices
+   * @param data Numerical entries
+   */
   void get_data(int* nrows_, int* ncols_, int* nnz_, const int* rowp_[],
                 const int* cols_[], T* data_[]) {
     if (nrows_) {
@@ -414,28 +431,36 @@ class CSRMat {
     }
   }
 
-  int nrows;  // Number of rows in the matrix
-  int ncols;  // Number of columns in the matrix
-  int nnz;    // Number of non-zeros in the matrix
-  int* diag;  // The diagonal entry
-  int* rowp;  // Pointer into the column array
-  int* cols;  // Column indices
-  T* data;    // Matrix values
+  /**
+   * @brief Get the index of the first sqdef element
+   *
+   */
+  int get_sqdef_index() const { return sqdef_index; }
 
-  // Specific to symmetric quasi-definite matrices. Which index is where
-  // -C is located?
-  // A = [ A   B^{T} ]
-  //     [ B   -C    ]
-  int sqdef_index;  // Index at which C starts. Negative value indicates
-  // that the matrix is not SQD.
+  /**
+   * @brief Get the row owners object
+   *
+   * @return std::shared_ptr<NodeOwners>
+   */
+  std::shared_ptr<NodeOwners> get_row_owners() { return row_owners; }
+
+  /**
+   * @brief Get the column owners object
+   *
+   * @return std::shared_ptr<NodeOwners>
+   */
+  std::shared_ptr<NodeOwners> get_column_owners() { return col_owners; }
 
   CSRMat(int nrows, int ncols, int nnz, int* rowp, int* cols,
-         int sqdef_index = -1)
+         std::shared_ptr<NodeOwners> row_owners,
+         std::shared_ptr<NodeOwners> col_owners, int sqdef_index = -1)
       : nrows(nrows),
         ncols(ncols),
         nnz(nnz),
         rowp(rowp),
         cols(cols),
+        row_owners(row_owners),
+        col_owners(col_owners),
         sqdef_index(sqdef_index) {
     diag = new int[nrows];
     for (int i = 0; i < nrows; i++) {
@@ -456,6 +481,26 @@ class CSRMat {
     data = new T[nnz];
     std::fill(data, data + nnz, 0.0);
   }
+
+ private:
+  int nrows;  // Number of rows in the matrix
+  int ncols;  // Number of columns in the matrix
+  int nnz;    // Number of non-zeros in the matrix
+  int* diag;  // The diagonal entry
+  int* rowp;  // Pointer into the column array
+  int* cols;  // Column indices
+  T* data;    // Matrix values
+
+  // For parallel matrices
+  std::shared_ptr<NodeOwners> row_owners;
+  std::shared_ptr<NodeOwners> col_owners;
+
+  // Specific to symmetric quasi-definite matrices. Which index is where
+  // -C is located?
+  // A = [ A   B^{T} ]
+  //     [ B   -C    ]
+  int sqdef_index;  // Index at which C starts. Negative value indicates
+  // that the matrix is not SQD.
 };
 
 }  // namespace amigo

@@ -308,7 +308,8 @@ class MatrixDistribute {
 
     // Create the CSR data structure
     csr = CSRMat<T>::create_from_csr_data(nrows, col_ranges[mpi_size], nnz,
-                                          assembled_rowp, assembled_cols);
+                                          assembled_rowp, assembled_cols,
+                                          row_owners, col_owners);
 
     delete[] ptr_to_rows;
     delete[] index_to_rows;

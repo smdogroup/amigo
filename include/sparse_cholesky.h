@@ -162,10 +162,11 @@ class SparseCholesky {
  public:
   SparseCholesky(std::shared_ptr<CSRMat<T>> mat) : mat(mat) {
     // Set the values
-    size = mat->nrows;
+    const int *mat_rowp, *mat_cols;
+    mat->get_data(&size, nullptr, nullptr, &mat_rowp, &mat_cols, nullptr);
 
     // Set the first variable which belongs to the SQD matrix
-    sqdef_index = mat->sqdef_index;
+    sqdef_index = mat->get_sqdef_index();
     if (sqdef_index < 0 || sqdef_index > size) {
       sqdef_index = size;
     }
@@ -173,7 +174,7 @@ class SparseCholesky {
     // Perform a symbolic analysis to determine the size of the factorization
     int *parent = new int[size];  // Space for the etree
     int *Lnz = new int[size];     // Nonzeros below the diagonal
-    build_tree(mat->rowp, mat->cols, parent, Lnz);
+    build_tree(mat_rowp, mat_cols, parent, Lnz);
 
     // Find the supernodes in the matrix
     var_to_snode = new int[size];
@@ -210,7 +211,7 @@ class SparseCholesky {
     rows = new int[colp[num_snodes]];
 
     // Now we can build the non-zero pattern
-    build_nonzero_pattern(mat->rowp, mat->cols, parent, Lnz);
+    build_nonzero_pattern(mat_rowp, mat_cols, parent, Lnz);
     delete[] parent;
     delete[] Lnz;
 
@@ -273,7 +274,11 @@ class SparseCholesky {
   */
   int factor() {
     // Set values from the matrix
-    set_values(mat->rowp, mat->cols, mat->data);
+    const int *mat_rowp, *mat_cols;
+    T *mat_data;
+    mat->get_data(&size, nullptr, nullptr, &mat_rowp, &mat_cols, &mat_data);
+
+    set_values(mat_rowp, mat_cols, mat_data);
 
     int rflag = 0;
     int *list = new int[num_snodes];  // List pointer

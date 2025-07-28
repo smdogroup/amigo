@@ -9,7 +9,7 @@ from .amigo import Vector, OptimizationProblem, SparseCholesky, OrderingType
 from .component import Component
 from .model import Model
 from .optimizer import Optimizer
-from .utils import tocsr
+from .utils import tocsr, topetsc
 from .unary_operations import *
 
 

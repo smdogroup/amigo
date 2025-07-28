@@ -580,6 +580,13 @@ class InteriorPointOptimizer {
         }
       }
     }
+
+    T alphas[2], max_alphas[2];
+    alphas[0] = alpha_x_max;
+    alphas[1] = alpha_z_max;
+    MPI_Allreduce(alphas, max_alphas, 2, get_mpi_type<T>(), MPI_MIN, comm);
+    alpha_x_max = max_alphas[0];
+    alpha_z_max = max_alphas[1];
   }
 
   /**

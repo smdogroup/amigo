@@ -359,10 +359,10 @@ class OptimizationProblem {
 
     if (distribute) {
       VectorDistribute::VecDistributeContext<T1>* ctx =
-          var_dist.create_context<T1>();
+          dist_prob->var_dist.template create_context<T1>();
 
-      var_dist.begin_forward(dist_vec, ctx);
-      var_dist.end_forward(dist_vec, ctx);
+      dist_prob->var_dist.begin_forward(dist_vec, ctx);
+      dist_prob->var_dist.end_forward(dist_vec, ctx);
 
       delete ctx;
     }
@@ -400,7 +400,7 @@ class OptimizationProblem {
       }
     }
 
-    int size = dist_vec->get_size();
+    int size = dist_prob->var_owners->get_local_size();
     const T1* array = dist_vec->get_array();
     MPI_Gatherv(array, size, get_mpi_type<T1>(), reordered, counts, disp,
                 get_mpi_type<T1>(), root, comm);
@@ -408,9 +408,10 @@ class OptimizationProblem {
     // Reorder the local vector
     if (mpi_rank == root && dist_node_numbers) {
       const int* new_node_numbers = dist_node_numbers->get_array();
+      int root_size = root_vec->get_size();
       T1* root_array = root_vec->get_array();
 
-      for (int i = 0; i < size; i++) {
+      for (int i = 0; i < root_size; i++) {
         root_array[i] = reordered[new_node_numbers[i]];
       }
     }
@@ -427,16 +428,17 @@ class OptimizationProblem {
    *
    * @tparam T1 The type of the vector
    * @param root_vec The vector on the root processor
-   * @param prob The distributed version of the problem
+   * @param dist_prob The distributed version of the problem
    * @param dist_vec The distributed vector (output from the code)
    * @param root The root processor
    * @param distribute Boolean indicating whether to distribute external values
    */
   template <typename T1>
-  void scatter_data_vector(const std::shared_ptr<Vector<T1>> root_vec,
-                           const std::shared_ptr<OptimizationProblem<T>> prob,
-                           std::shared_ptr<Vector<T1>> dist_vec, int root = 0,
-                           bool distribute = true) {
+  void scatter_data_vector(
+      const std::shared_ptr<Vector<T1>> root_vec,
+      const std::shared_ptr<OptimizationProblem<T>> dist_prob,
+      std::shared_ptr<Vector<T1>> dist_vec, int root = 0,
+      bool distribute = true) {
     int mpi_rank, mpi_size;
     MPI_Comm_rank(comm, &mpi_rank);
     MPI_Comm_size(comm, &mpi_size);
@@ -450,7 +452,7 @@ class OptimizationProblem {
       reordered = new T1[size];
 
       counts = new int[mpi_size];
-      disp = prob->data_owners->get_range();
+      disp = dist_prob->data_owners->get_range();
       for (int i = 0; i < mpi_size; i++) {
         counts[i] = disp[i + 1] - disp[i];
       }
@@ -476,10 +478,10 @@ class OptimizationProblem {
 
     if (distribute) {
       VectorDistribute::VecDistributeContext<T1>* ctx =
-          var_dist.create_context<T1>();
+          dist_prob->data_dist.template create_context<T1>();
 
-      var_dist.begin_forward(dist_vec, ctx);
-      var_dist.end_forward(dist_vec, ctx);
+      dist_prob->data_dist.begin_forward(dist_vec, ctx);
+      dist_prob->data_dist.end_forward(dist_vec, ctx);
 
       delete ctx;
     }

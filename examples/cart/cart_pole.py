@@ -326,7 +326,7 @@ if args.build:
     )
 
 comm = COMM_WORLD
-model.initialize(comm=comm, order_type=am.OrderingType.NESTED_DISSECTION)
+model.initialize(comm=comm)
 
 comm_rank = 0
 distribute = args.distribute

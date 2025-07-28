@@ -5,6 +5,14 @@ import time
 import matplotlib.pylab as plt
 from scipy.sparse import csr_matrix  # For visualization
 
+try:
+    from mpi4py import MPI
+    from petsc4py import PETSc
+
+    COMM_WORLD = MPI.COMM_WORLD
+except:
+    COMM_WORLD = None
+
 
 def eval_shape_funcs(xi, eta):
     N = 0.25 * np.array(
@@ -182,6 +190,13 @@ for i in range(nx):
         conn[ny * i + j, 2] = nodes[i + 1, j + 1]
         conn[ny * i + j, 3] = nodes[i, j + 1]
 
+comm = COMM_WORLD
+comm_rank = 0
+comm_size = 1
+if comm is not None:
+    comm_rank = comm.rank
+    comm_size = comm.size
+
 module_name = "helmholtz"
 model = am.Model(module_name)
 
@@ -218,68 +233,114 @@ elif args.order_type == "natural":
     order_type = am.OrderingType.NESTED_DISSECTION
 
 order_for_block = args.order_for_block
-model.initialize(order_type=order_type, order_for_block=order_for_block)
-prob = model.get_opt_problem()
+model.initialize(order_type=order_type, order_for_block=order_for_block, comm=comm)
+serial_problem = model.get_opt_problem()
 
 end = time.perf_counter()
-print(f"Initialization time:        {end - start:.6f} seconds")
-print(f"Num variables:              {model.num_variables}")
-print(f"Num constraints:            {model.num_constraints}")
+if comm_rank == 0:
+    print(f"Initialization time:        {end - start:.6f} seconds")
+    print(f"Num variables:              {model.num_variables}")
+    print(f"Num constraints:            {model.num_constraints}")
 
 # Set the problem data
-data = prob.get_data_vector()
-data_array = data.get_array()
-data_array[model.get_indices("src.x_coord")] = x_coord
-data_array[model.get_indices("src.y_coord")] = y_coord
+data = model.get_data_vector()
+
+if comm_rank == 0:
+    data["src.x_coord"] = x_coord
+    data["src.y_coord"] = y_coord
+
+if comm_size == 1:
+    problem = serial_problem
+else:
+    mpi_problem = serial_problem.partition_from_root()
+
+    mpi_data = mpi_problem.get_data_vector()
+    serial_problem.scatter_data_vector(
+        data.get_opt_problem_vec(), mpi_problem, mpi_data
+    )
+
+    problem = mpi_problem
 
 start = time.perf_counter()
-mat = prob.create_csr_matrix()
-diag = prob.create_vector()
+mat = problem.create_matrix()
+diag = problem.create_vector()
 end = time.perf_counter()
 print(f"Matrix initialization time: {end - start:.6f} seconds")
 
 # Vectors for solving the problem
-x = prob.create_vector()
-ans = prob.create_vector()
-g = prob.create_vector()
-rhs = prob.create_vector()
+x = problem.create_vector()
+ans = problem.create_vector()
+g = problem.create_vector()
+rhs = problem.create_vector()
 
-prob.gradient(x, ans)
-prob.gradient(x, g)
+problem.gradient(x, ans)
+problem.gradient(x, g)
 
 start = time.perf_counter()
-prob.hessian(x, mat)
+problem.hessian(x, mat)
 end = time.perf_counter()
 print(f"Matrix computation time:    {end - start:.6f} seconds")
 
-start = time.perf_counter()
-chol = am.SparseCholesky(mat)
-flag = chol.factor()
-print("flag = ", flag)
-chol.solve(ans)
+if comm_size == 1:
+    # Perform a cholesky factorization
+    start = time.perf_counter()
+    chol = am.SparseCholesky(mat)
+    flag = chol.factor()
+    print("flag = ", flag)
+    chol.solve(ans)
 
-end = time.perf_counter()
-print(f"Factor and solve time:      {end - start:.6f} seconds")
+    end = time.perf_counter()
+    print(f"Factor and solve time:      {end - start:.6f} seconds")
 
-mat.mult(ans, rhs)
-print(f"Residual norm:              {np.linalg.norm(rhs.get_array() - g.get_array())}")
+    mat.mult(ans, rhs)
+    norm = np.linalg.norm(rhs.get_array() - g.get_array())
+    print(f"Residual norm:              {norm}")
+else:
+    petsc_mat = am.topetsc(mat)
 
-X, Y = np.meshgrid(xpts, ypts)
-vals = ans.get_array()[model.get_indices("src.rho")]
-vals = vals.reshape((nx + 1, ny + 1))
+    # Create KSP solver
+    ksp = PETSc.KSP().create(comm=comm)
+    ksp.setOperators(petsc_mat)
 
-# Plot using contourf
-plt.contourf(X, Y, vals, levels=20, cmap="viridis")
-plt.colorbar(label="Z value")
-plt.xlabel("x")
-plt.ylabel("y")
+    # GMRES with Additive Schwarz
+    ksp.setType("gmres")
+    pc = ksp.getPC()
+    pc.setType("asm")
 
-nrows, ncols, nnz, rowp, cols = mat.get_nonzero_structure()
-data = mat.get_data()
-data[:] = 1.0
-jac = csr_matrix((data, cols, rowp), shape=(nrows, ncols))
+    # Create the solution and right-hand-side
+    petsc_ans = petsc_mat.createVecRight()
+    petsc_rhs = petsc_mat.createVecRight()
 
-plt.figure(figsize=(6, 6))
-plt.spy(jac, markersize=0.2)
-plt.title("Sparsity pattern of matrix A")
+    rhs = petsc_rhs.getArray()
+    rhs[:] = g.get_array()[: rhs.shape[0]]
+    ksp.solve(petsc_rhs, petsc_ans)
+    ans.get_array()[: rhs.shape[0]] = petsc_ans.getArray()[:]
+
+if comm_size == 1:
+    ans_local = ans
+else:
+    ans_local = serial_problem.create_vector()
+    serial_problem.gather_vector(mpi_problem, ans, ans_local)
+
+if comm_rank == 0:
+    X, Y = np.meshgrid(xpts, ypts)
+    vals = ans_local.get_array()[model.get_indices("src.rho")]
+    vals = vals.reshape((nx + 1, ny + 1))
+
+    # Plot using contourf
+    plt.contourf(X, Y, vals, levels=20, cmap="viridis")
+    plt.colorbar(label="Z value")
+    plt.xlabel("x")
+    plt.ylabel("y")
+
+if comm_size == 1:
+    nrows, ncols, nnz, rowp, cols = mat.get_nonzero_structure()
+    data = mat.get_data()
+    data[:] = 1.0
+    jac = csr_matrix((data, cols, rowp), shape=(nrows, ncols))
+
+    plt.figure(figsize=(6, 6))
+    plt.spy(jac, markersize=0.2)
+    plt.title("Sparsity pattern of matrix A")
+
 plt.show()

@@ -10,6 +10,10 @@ use_openmp = "--with-openmp" in sys.argv
 if use_openmp:
     sys.argv.remove("--with-openmp")
 
+use_debug = "--with-debug" in sys.argv
+if use_debug:
+    sys.argv.remove("--with-debug")
+
 
 def get_mpi_flags():
     # Split the output from the mpicxx command
@@ -112,7 +116,8 @@ def get_extensions():
         link_args += ["-fopenmp"]
         define_macros += [("AMIGO_USE_OPENMP", "1")]
 
-    compile_args += ["-g", "-O0"]
+    if use_debug:
+        compile_args += ["-g", "-O0"]
 
     ext_modules = [
         Extension(
