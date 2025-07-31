@@ -80,7 +80,7 @@ def get_extensions():
     # Add METIS if available (optional on Windows)
     metis_include = os.path.join(home, "git", "tacs", "extern", "metis", "include")
     metis_lib = os.path.join(home, "git", "tacs", "extern", "metis", "lib")
-    
+
     if os.path.exists(metis_include) and os.path.exists(metis_lib):
         inc_dirs.append(metis_include)
         lib_dirs.append(metis_lib)
