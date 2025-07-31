@@ -275,6 +275,57 @@ class Optimizer:
         default.update(options)
         return default
 
+    def _compute_least_squares_multipliers(self, x, eps=1e-4):
+        """
+        Compute the least squares multiplier estimates by solving the following system of equations
+
+        [ I  A^{T} ][ px     ] = [ - g ]
+        [ A  -eps  ][ lambda ] = [   0 ]
+        """
+        if self.distribute:
+            is_mult = self.mpi_problem.get_multiplier_indicator()
+        else:
+            is_mult = self.problem.get_multiplier_indicator()
+        is_mult_array = is_mult.get_array()
+
+        # Set the diagonal entries of the matrix
+        self.diag.get_array()[:] = 1.0
+        self.diag.get_array()[is_mult_array == 1] = -eps
+
+        # Zero the values of the constraints for the right-hand-side
+        self.grad.get_array()[is_mult_array == 1] = 0.0
+
+        # Zero the multipliers
+        x.get_array()[is_mult_array == 1] = 0.0
+
+        # Compute the gradient
+        if self.distribute:
+            self.mpi_problem.gradient(x, self.grad)
+        else:
+            self.problem.gradient(x, self.grad)
+
+        # Find the solution values
+        self.solver.solve(x, self.diag, self.grad, self.px)
+
+        # Set the multiplier values
+        x.get_array()[is_mult_array == 1] = -self.px.get_array()[is_mult_array == 1]
+
+        return
+
+    def _add_regularization_terms(self, diag, eps_x=1e-4, eps_c=1e-4):
+        if self.distribute:
+            is_mult = self.mpi_problem.get_multiplier_indicator()
+        else:
+            is_mult = self.problem.get_multiplier_indicator()
+        is_mult_array = is_mult.get_array()
+
+        # Add regularization terms
+        diag_array = diag.get_array()
+        diag_array[is_mult_array == 0] += eps_x
+        diag_array[is_mult_array == 1] -= eps_c
+
+        return
+
     def optimize(self, options={}):
         """
         Optimize the problem with the specified input options
@@ -303,6 +354,9 @@ class Optimizer:
             xview = ModelVector(self.model, x=self.vars.x)
 
         self.optimizer.initialize_multipliers_and_slacks(self.vars)
+
+        # Initialize the multipliers
+        self._compute_least_squares_multipliers(self.vars.x)
 
         # Compute the gradient
         if self.distribute:
@@ -362,6 +416,9 @@ class Optimizer:
             # Add the diagonal contributions to the Hessian matrix
             self.optimizer.compute_diagonal(self.vars, self.diag)
 
+            # Add the regularization
+            # self._add_regularization_terms(self.diag)
+
             # Solve the KKT system
             self.solver.solve(self.vars.x, self.diag, self.bx, self.px)
 
@@ -372,7 +429,11 @@ class Optimizer:
 
             # Check the update
             if options["check_update_step"]:
-                self.optimizer.check_update(self.vars, self.res, self.update, self.hess)
+                if self.distribute:
+                    hess = self.mpi_problem.create_matrix()
+                else:
+                    hess = self.problem.create_matrix()
+                self.optimizer.check_update(self.vars, self.res, self.update, hess)
 
             # Compute the max step in the multipliers
             alpha_x, alpha_z = self.optimizer.compute_max_step(

@@ -297,7 +297,15 @@ class InteriorPointOptimizer {
         rx[i] = -(g[i] - xs[i]);
       } else {
         // This term is nabla -(f - A^{T} * lam - zl + zu)
-        rx[i] = -(g[i] - zl[i] + zu[i]);
+        if (!std::isinf(lb[i]) && !std::isinf(ub[i])) {
+          rx[i] = -(g[i] - zl[i] + zu[i]);
+        } else if (!std::isinf(lb[i])) {
+          rx[i] = -(g[i] - zl[i]);
+        } else if (!std::isinf(ub[i])) {
+          rx[i] = -(g[i] + zu[i]);
+        } else {
+          rx[i] = -g[i];
+        }
       }
 
       // This term is -(-lam - zl + zu)
@@ -686,7 +694,15 @@ class InteriorPointOptimizer {
       if (is_multiplier[i]) {
         t[i] = t[i] - pxs[i] - bx[i];
       } else {
-        t[i] = t[i] - pzl[i] + pzu[i] - bx[i];
+        if (!std::isinf(lb[i]) && !std::isinf(ub[i])) {
+          t[i] = t[i] - pzl[i] + pzu[i] - bx[i];
+        } else if (!std::isinf(lb[i])) {
+          t[i] = t[i] - pzl[i] - bx[i];
+        } else if (!std::isinf(ub[i])) {
+          t[i] = t[i] - pzu[i] - bx[i];
+        } else {
+          t[i] = t[i] - bx[i];
+        }
       }
     }
     std::printf("%-40s %15.6e\n", "||H * px - zl + zu - bx|| ",

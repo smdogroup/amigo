@@ -316,6 +316,8 @@ PYBIND11_MODULE(amigo, mod) {
            &amigo::OptimizationProblem<double>::get_data_vector)
       .def("set_data_vector",
            &amigo::OptimizationProblem<double>::set_data_vector)
+      .def("get_multiplier_indicator",
+           &amigo::OptimizationProblem<double>::get_multiplier_indicator)
       .def(
           "get_local_to_global_node_numbers",
           &amigo::OptimizationProblem<double>::get_local_to_global_node_numbers)

@@ -110,7 +110,7 @@ class Objective(am.Component):
         x2 = self.inputs["x2"]
         dt = self.constants["dt"]
 
-        self.objective["obj"] = dt * (x1 * x1 + x2 * x2) / 2
+        self.objective["obj"] = (x1 * x1 + x2 * x2) / 2
 
         return
 

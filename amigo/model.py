@@ -1001,6 +1001,7 @@ class Model:
         if name in self.comp:
             subtree["name"] = name
             subtree["class"] = self.comp[name].class_name
+            subtree["size"] = self.comp[name].size
 
             data = {}
             for data_name in self.comp[name].get_data_names():
