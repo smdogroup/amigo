@@ -319,7 +319,7 @@ else:
 
     def monitor(ksp, its, rnorm):
         if comm.rank == 0:
-            print("r[%3d]: %12.3e"%(its, rnorm))
+            print("r[%3d]: %12.3e" % (its, rnorm))
 
     # Set the monitor
     ksp.setMonitor(monitor)
