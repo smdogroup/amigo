@@ -1327,12 +1327,9 @@ class Component:
 
         return cpp
 
-    def generate_pybind11(self, mod_ident="mod", wrapper_type="group"):
+    def generate_pybind11(self, mod_ident="mod"):
         # Collect all the group members together...
-        if wrapper_type == "group":
-            group_type = "ComponentGroup"
-        else:
-            group_type = "OutputGroup"
+        group_type = "ComponentGroup"
 
         cls = f"amigo::{group_type}<double"
         for index, args in enumerate(self.args):
@@ -1344,18 +1341,11 @@ class Component:
             cls += f", amigo::{class_name}<double>"
         cls += ">"
 
-        if wrapper_type == "group":
-            module_class_name = f'"{self.name}"'
-        else:
-            module_class_name = f'"{self.name + "__output"}"'
-
+        module_class_name = f'"{self.name}"'
         cpp = f"py::class_<{cls}, amigo::{group_type}Base<double>, std::shared_ptr<{cls}>>"
         cpp += f"({mod_ident}, {module_class_name}).def("
 
         vec_cls = "std::shared_ptr<amigo::Vector<int>>"
-        if wrapper_type == "group":
-            cpp += f"py::init<int, {vec_cls}, {vec_cls}>())"
-        else:
-            cpp += f"py::init<{vec_cls}, {vec_cls}, {vec_cls}>())"
+        cpp += f"py::init<int, {vec_cls}, {vec_cls}, {vec_cls}>())"
 
         return cpp

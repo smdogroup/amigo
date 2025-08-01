@@ -251,36 +251,22 @@ class ComponentGroup:
         return array
 
     def create_group(self, module_name: str):
-        if not self.comp_obj.is_compute_empty():
+        if not self.comp_obj.is_compute_empty() or not self.comp_obj.is_analyze_empty():
             data_array = self.get_indices(self.data)
             vec_array = self.get_indices(self.vars)
+            out_array = self.get_indices(self.outputs)
 
             data_vec = VectorInt(np.prod(data_array.shape))
             data_vec.get_array()[:] = data_array.ravel()
-            vec = VectorInt(np.prod(vec_array.shape))
-            vec.get_array()[:] = vec_array.ravel()
+            var_vec = VectorInt(np.prod(vec_array.shape))
+            var_vec.get_array()[:] = vec_array.ravel()
+            out_vec = VectorInt(np.prod(out_array.shape))
+            out_vec.get_array()[:] = out_array.ravel()
 
             # Create the object
-            return _import_class(module_name, self.class_name)(self.size, data_vec, vec)
-        return None
-
-    def create_output(self, module_name: str):
-        # if not self.comp_obj.is_analyze_empty():
-        #     data_array = self.get_indices(self.data)
-        #     vec_array = self.get_indices(self.vars)
-        #     output_array = self.get_indices(self.outputs)
-
-        #     data_vec = VectorInt(np.prod(data_array.shape))
-        #     data_vec.get_array()[:] = data_array.ravel()
-        #     vec = VectorInt(np.prod(vec_array.shape))
-        #     vec.get_array()[:] = vec_array.ravel()
-        #     output_vec = VectorInt(np.prod(output_array.shape))
-        #     output_vec.get_array()[:] = output_array.ravel()
-
-        #     class_name = self.class_name + "__output"
-
-        #     # Create the object
-        #     return _import_class(module_name, class_name)(data_vec, vec, output_vec)
+            return _import_class(module_name, self.class_name)(
+                self.size, data_vec, var_vec, out_vec
+            )
         return None
 
 
@@ -676,10 +662,6 @@ class Model:
             if obj is not None:
                 objs.append(obj)
 
-            # obj = comp.create_output(self.module_name)
-            # if obj is not None:
-            #     outs.append(obj)
-
         var_ranges = np.zeros(comm_size + 1, dtype=np.int32)
         var_ranges[1:] = self.num_variables
         var_owners = NodeOwners(comm, var_ranges)
@@ -688,11 +670,17 @@ class Model:
         data_ranges[1:] = self.data_size
         data_owners = NodeOwners(comm, data_ranges)
 
+        output_ranges = np.zeros(comm_size + 1, dtype=np.int32)
+        output_ranges[1:] = self.num_outputs
+        output_owners = NodeOwners(comm, output_ranges)
+
         # Set the multipliers
         is_multiplier = VectorInt(self.num_variables)
         is_multiplier.get_array()[:] = 0
         is_multiplier.get_array()[self.constraint_indices] = 1
-        prob = OptimizationProblem(comm, data_owners, var_owners, is_multiplier, objs)
+        prob = OptimizationProblem(
+            comm, data_owners, var_owners, output_owners, is_multiplier, objs
+        )
 
         return prob
 
@@ -852,7 +840,6 @@ class Model:
         py11 += "#include <pybind11/pybind11.h>\n"
         py11 += "#include <pybind11/stl.h>\n"
         py11 += '#include "component_group.h"\n'
-        py11 += '#include "output_group.h"\n'
         py11 += f'#include "{self.module_name}.h"\n'
         py11 += "namespace py = pybind11;\n"
 
@@ -874,18 +861,9 @@ class Model:
                     cpp += self.comp[name].comp_obj.generate_cpp()
 
                 # Generate the wrappers
-                if not compute_empty:
+                if not compute_empty or not analyze_empty:
                     py11 += (
-                        self.comp[name].comp_obj.generate_pybind11(
-                            mod_ident=mod_ident, wrapper_type="group"
-                        )
-                        + ";\n"
-                    )
-                if not analyze_empty:
-                    py11 += (
-                        self.comp[name].comp_obj.generate_pybind11(
-                            mod_ident=mod_ident, wrapper_type="output"
-                        )
+                        self.comp[name].comp_obj.generate_pybind11(mod_ident=mod_ident)
                         + ";\n"
                     )
 

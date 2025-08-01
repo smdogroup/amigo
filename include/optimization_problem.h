@@ -10,7 +10,6 @@
 
 #include "component_group_base.h"
 #include "node_owners.h"
-#include "output_group_base.h"
 
 namespace amigo {
 
@@ -23,23 +22,28 @@ class OptimizationProblem {
    * @param comm The MPI communicator
    * @param data_owners The owners of the data
    * @param var_owners The owners for the variables (inputs/multipliers)
+   * @param output_owners The owners for the outputs
    * @param is_multiplier Integer array indicating if this is a multiper or not
    * @param components The component groups for the model
    */
   OptimizationProblem(
       MPI_Comm comm, std::shared_ptr<NodeOwners> data_owners,
       std::shared_ptr<NodeOwners> var_owners,
+      std::shared_ptr<NodeOwners> output_owners,
       std::shared_ptr<Vector<int>> is_multiplier_,
       const std::vector<std::shared_ptr<ComponentGroupBase<T>>>& components)
       : comm(comm),
         data_owners(data_owners),
         var_owners(var_owners),
+        output_owners(output_owners),
         is_multiplier(is_multiplier_),
         components(components),
         data_dist(data_owners),
-        var_dist(var_owners) {
+        var_dist(var_owners),
+        output_dist(output_owners) {
     data_ctx = data_dist.create_context<T>();
     var_ctx = var_dist.create_context<T>();
+    output_ctx = output_dist.create_context<T>();
 
     data_vec = create_data_vector();
 
@@ -49,22 +53,34 @@ class OptimizationProblem {
           std::make_shared<Vector<int>>(var_owners->get_local_size());
     }
 
-    csr_mat = nullptr;
+    dist_node_numbers = nullptr;
+    dist_data_numbers = nullptr;
+    dist_output_numbers = nullptr;
+
+    mat = nullptr;
     mat_dist = nullptr;
     mat_dist_ctx = nullptr;
 
-    dist_node_numbers = nullptr;
-    dist_data_numbers = nullptr;
+    jac = nullptr;
+    jac_dist = nullptr;
+    jac_dist_ctx = nullptr;
   }
   ~OptimizationProblem() {
     delete data_ctx;
     delete var_ctx;
+    delete output_ctx;
 
     if (mat_dist) {
       delete mat_dist;
     }
     if (mat_dist_ctx) {
       delete mat_dist_ctx;
+    }
+    if (jac_dist) {
+      delete jac_dist;
+    }
+    if (jac_dist_ctx) {
+      delete jac_dist_ctx;
     }
   }
 
@@ -92,15 +108,15 @@ class OptimizationProblem {
                                        var_owners->get_ext_size());
   }
 
-  // /**
-  //  * @brief Create a output vector object for storing output values
-  //  *
-  //  * @return std::shared_ptr<Vector<T>> The output vector object
-  //  */
-  // std::shared_ptr<Vector<T>> create_output_vector() const {
-  //   return std::make_shared<Vector<T>>(output_owners->get_local_size(),
-  //                                      output_owners->get_ext_size());
-  // }
+  /**
+   * @brief Create a output vector object for storing output values
+   *
+   * @return std::shared_ptr<Vector<T>> The output vector object
+   */
+  std::shared_ptr<Vector<T>> create_output_vector() const {
+    return std::make_shared<Vector<T>>(output_owners->get_local_size(),
+                                       output_owners->get_ext_size());
+  }
 
   /**
    * @brief Get the data vector object that is stored internally
@@ -176,6 +192,7 @@ class OptimizationProblem {
     int* partition = nullptr;
     int* var_ranges = new int[mpi_size + 1];
     int* data_ranges = new int[mpi_size + 1];
+    int* output_ranges = new int[mpi_size + 1];
 
     if (mpi_rank == root) {
       // The intervals must be the same for both
@@ -186,6 +203,9 @@ class OptimizationProblem {
       std::vector<int> data_intervals;
       auto element_data = get_element_data(data_intervals);
 
+      std::vector<int> output_intervals;
+      auto element_output = get_element_output(output_intervals);
+
       // Number of data entries
       const int* data_range = data_owners->get_range();
       int ndata = data_range[root + 1] - data_range[root];
@@ -194,12 +214,17 @@ class OptimizationProblem {
       const int* node_range = var_owners->get_range();
       int nnodes = node_range[root + 1] - node_range[root];
 
+      // Number of outputs
+      const int* output_range = output_owners->get_range();
+      int noutputs = output_range[root + 1] - output_range[root];
+
       // Compute the element partition
       OrderingUtils::compute_partition(nnodes, nelems, element_nodes, mpi_size,
                                        &partition);
 
       dist_node_numbers = std::make_shared<Vector<int>>(nnodes);
       dist_data_numbers = std::make_shared<Vector<int>>(ndata);
+      dist_output_numbers = std::make_shared<Vector<int>>(noutputs);
 
       // Set the new node numbers for the element nodes and element dataa
       OrderingUtils::reorder_for_partition(
@@ -209,18 +234,25 @@ class OptimizationProblem {
       OrderingUtils::reorder_for_partition(
           nnodes, nelems, element_nodes, mpi_size, partition,
           dist_node_numbers->get_array(), var_ranges);
+
+      OrderingUtils::reorder_for_partition(
+          noutputs, nelems, element_output, mpi_size, partition,
+          dist_output_numbers->get_array(), output_ranges);
     }
 
     MPI_Bcast(data_ranges, mpi_size + 1, MPI_INT, root, comm);
     MPI_Bcast(var_ranges, mpi_size + 1, MPI_INT, root, comm);
+    MPI_Bcast(output_ranges, mpi_size + 1, MPI_INT, root, comm);
 
     std::vector<int> new_nelems(components.size());
     std::vector<std::shared_ptr<Vector<int>>> new_nodes(components.size());
     std::vector<std::shared_ptr<Vector<int>>> new_data(components.size());
+    std::vector<std::shared_ptr<Vector<int>>> new_outputs(components.size());
 
     // Partition the element and data
     int* part = partition;
     for (size_t i = 0; i < components.size(); i++) {
+      // Create a new vector for the data
       int nelems;
       int ndata_per_elem;
       const int* elem_data;
@@ -242,6 +274,7 @@ class OptimizationProblem {
       new_data[i] = std::make_shared<Vector<int>>(nelems_local * ndata_per_elem,
                                                   0, &elem_data_local);
 
+      // Create the new vector for the variables
       int nnodes_per_elem;
       const int* elem_nodes = nullptr;
       components[i]->get_layout_data(&nelems, &nnodes_per_elem, &elem_nodes);
@@ -259,6 +292,26 @@ class OptimizationProblem {
       new_nelems[i] = nelems_local;
       new_nodes[i] = std::make_shared<Vector<int>>(
           nelems_local * nnodes_per_elem, 0, &elem_nodes_local);
+
+      // Create the new vector for the outputs
+      int outputs_per_elem;
+      const int* elem_outputs = nullptr;
+      components[i]->get_output_layout_data(&nelems, &outputs_per_elem,
+                                            &nnodes_per_elem, &elem_outputs,
+                                            &elem_nodes);
+
+      int* new_output_numbers = nullptr;
+      if (dist_output_numbers) {
+        new_output_numbers = dist_output_numbers->get_array();
+      }
+
+      int* elem_outputs_local = nullptr;
+      OrderingUtils::distribute_elements(
+          comm, nelems, outputs_per_elem, elem_outputs, part,
+          new_output_numbers, &nelems_local, &elem_outputs_local, root);
+
+      new_outputs[i] = std::make_shared<Vector<int>>(
+          nelems_local * outputs_per_elem, 0, &elem_outputs_local);
 
       // Increment the pointer into the partition
       part += nelems;
@@ -279,14 +332,24 @@ class OptimizationProblem {
     std::shared_ptr<NodeOwners> new_var_owners = std::make_shared<NodeOwners>(
         comm, var_ranges, ext_nodes.size(), ext_nodes.data());
 
+    // Reorder the outputs with a local ordering
+    std::vector<int> ext_output_nodes;
+    reorder_from_global_to_local(output_ranges[mpi_rank],
+                                 output_ranges[mpi_rank + 1], new_outputs,
+                                 ext_output_nodes);
+    std::shared_ptr<NodeOwners> new_output_owners =
+        std::make_shared<NodeOwners>(comm, output_ranges,
+                                     ext_output_nodes.size(),
+                                     ext_output_nodes.data());
+
     // Allocate space to store the new components
     std::vector<std::shared_ptr<ComponentGroupBase<T>>> new_comps(
         components.size());
 
     // Make the new component with the new ordering
     for (size_t i = 0; i < components.size(); i++) {
-      new_comps[i] =
-          components[i]->clone(new_nelems[i], new_data[i], new_nodes[i]);
+      new_comps[i] = components[i]->clone(new_nelems[i], new_data[i],
+                                          new_nodes[i], new_outputs[i]);
     }
 
     // Free memory here
@@ -296,7 +359,8 @@ class OptimizationProblem {
 
     std::shared_ptr<OptimizationProblem<T>> opt =
         std::make_shared<OptimizationProblem<T>>(
-            comm, new_data_owners, new_var_owners, nullptr, new_comps);
+            comm, new_data_owners, new_var_owners, new_output_owners, nullptr,
+            new_comps);
 
     bool distribute = false;
     scatter_vector(is_multiplier, opt, opt->is_multiplier, root, distribute);
@@ -559,17 +623,17 @@ class OptimizationProblem {
    * @param mat The full Hessian matrix
    */
   void hessian(const std::shared_ptr<Vector<T>> x,
-               std::shared_ptr<CSRMat<T>> mat) {
+               std::shared_ptr<CSRMat<T>> matrix) {
     var_dist.begin_forward(x, var_ctx);
     var_dist.end_forward(x, var_ctx);
 
-    mat->zero();
+    matrix->zero();
     for (size_t i = 0; i < components.size(); i++) {
-      components[i]->add_hessian(*data_vec, *x, *var_owners, *mat);
+      components[i]->add_hessian(*data_vec, *x, *var_owners, *matrix);
     }
 
-    mat_dist->begin_assembly(mat, mat_dist_ctx);
-    mat_dist->end_assembly(mat, mat_dist_ctx);
+    mat_dist->begin_assembly(matrix, mat_dist_ctx);
+    mat_dist->end_assembly(matrix, mat_dist_ctx);
   }
 
   /**
@@ -578,8 +642,8 @@ class OptimizationProblem {
    * @return std::shared_ptr<CSRMat<T>>
    */
   std::shared_ptr<CSRMat<T>> create_matrix() {
-    if (csr_mat) {
-      return csr_mat->duplicate();
+    if (mat) {
+      return mat->duplicate();
     } else {
       std::vector<int> intervals;
       auto element_nodes = get_element_nodes(intervals);
@@ -602,81 +666,129 @@ class OptimizationProblem {
       // Distribute the pattern across matrices
       mat_dist =
           new MatrixDistribute(comm, var_owners, var_owners, num_variables,
-                               num_variables, rowp, cols, csr_mat);
+                               num_variables, rowp, cols, mat);
       mat_dist_ctx = mat_dist->create_context<T>();
 
       delete[] rowp;
       delete[] cols;
 
-      return csr_mat;
+      return mat;
     }
   }
 
-  // void analyze(const std::shared_ptr<Vector<T>> x,
-  //              std::shared_ptr<Vector<T>> outputs) const {
-  //   outputs->zero();
-  //   for (size_t i = 0; i < output_components.size(); i++) {
-  //     output_components[i]->add_outputs(*data_vec, *x, *outputs);
-  //   }
-  // }
+  /**
+   * @brief Compute the output as a function of the inputs
+   *
+   * @param x The design variable vector
+   * @param outputs The vector of outputs
+   */
+  void analyze(const std::shared_ptr<Vector<T>> x,
+               std::shared_ptr<Vector<T>> outputs) {
+    var_dist.begin_forward(x, var_ctx);
+    var_dist.end_forward(x, var_ctx);
 
-  // void analyze_jacobian(const std::shared_ptr<Vector<T>> x,
-  //                       std::shared_ptr<CSRMat<T>> jac) const {
-  //   jac->zero();
-  //   for (size_t i = 0; i < output_components.size(); i++) {
-  //     output_components[i]->add_jacobian(*data_vec, *x, *jac);
-  //   }
-  // }
+    outputs->zero();
+    for (size_t i = 0; i < components.size(); i++) {
+      components[i]->add_output(*data_vec, *x, *outputs);
+    }
 
-  // std::shared_ptr<CSRMat<T>> create_output_csr_matrix() const {
-  //   std::vector<int> intervals(output_components.size() + 1);
-  //   intervals[0] = 0;
-  //   for (size_t i = 0; i < output_components.size(); i++) {
-  //     int length, noutputs, ninputs;
-  //     const int *outputs, *inputs;
-  //     output_components[i]->get_layout_data(&length, &noutputs, &ninputs,
-  //                                           &outputs, &inputs);
-  //     intervals[i + 1] = intervals[i] + length;
-  //   }
+    output_dist.begin_reverse_add(outputs, output_ctx);
+    output_dist.end_reverse_add(outputs, output_ctx);
+  }
 
-  //   auto element = [&](int element, int* nrow, int* ncol, const int** rows,
-  //                      const int** cols) {
-  //     // upper_bound finds the first index i such that intervals[i] >
-  //     // element
-  //     auto it = std::upper_bound(intervals.begin(), intervals.end(),
-  //     element);
+  /**
+   * @brief Compute the Jacobian matrix
+   *
+   * @param x The design variable vector
+   * @param jacobian The Jacobian matrix
+   */
+  void analyze_jacobian(const std::shared_ptr<Vector<T>> x,
+                        std::shared_ptr<CSRMat<T>> jacobian) {
+    var_dist.begin_forward(x, var_ctx);
+    var_dist.end_forward(x, var_ctx);
 
-  //     // Decrement to get the interval where element fits: intervals[idx]
-  //     // <= element < intervals[idx+1]
-  //     int idx = static_cast<int>(it - intervals.begin()) - 1;
+    jacobian->zero();
+    for (size_t i = 0; i < components.size(); i++) {
+      components[i]->add_output_jacobian(*data_vec, *x, *jacobian);
+    }
 
-  //     int length;
-  //     const int *out, *in;
-  //     output_components[idx]->get_layout_data(&length, nrow, ncol, &out,
-  //     &in);
+    jac_dist->begin_assembly(jacobian, jac_dist_ctx);
+    jac_dist->end_assembly(jacobian, jac_dist_ctx);
+  }
 
-  //     int elem = element - intervals[idx];
-  //     *rows = &out[(*nrow) * elem];
-  //     *cols = &in[(*ncol) * elem];
-  //   };
+  /**
+   * @brief Create an instance of the Jacobian matrix
+   *
+   * @return std::shared_ptr<CSRMat<T>>
+   */
+  std::shared_ptr<CSRMat<T>> create_output_matrix() {
+    if (jac) {
+      return jac->duplicate();
+    } else {
+      std::vector<int> intervals(components.size() + 1);
+      intervals[0] = 0;
+      for (size_t i = 0; i < components.size(); i++) {
+        int num_elems, outputs_per_elem, inputs_per_elem;
+        const int *outputs, *inputs;
+        components[i]->get_output_layout_data(
+            &num_elems, &outputs_per_elem, &inputs_per_elem, &outputs, &inputs);
+        intervals[i + 1] = intervals[i] + num_elems;
+      }
 
-  //   int num_outputs =
-  //       output_owners->get_local_size() + output_owners->get_ext_size();
+      auto element_output = [&](int element, int* nrow, int* ncol,
+                                const int** rows, const int** cols) {
+        // upper_bound finds the first index i such that intervals[i] >
+        // element
+        auto it = std::upper_bound(intervals.begin(), intervals.end(), element);
 
-  //   int num_variables =
-  //       var_owners->get_local_size() + var_owners->get_ext_size();
+        // Decrement to get the interval where element fits: intervals[idx]
+        // <= element < intervals[idx+1]
+        int idx = static_cast<int>(it - intervals.begin()) - 1;
 
-  //   return CSRMat<T>::create_from_output_data(
-  //       num_outputs, num_variables, intervals[components.size()], element);
-  // }
+        int num_elems;
+        const int *outputs, *inputs;
+        components[idx]->get_output_layout_data(&num_elems, nrow, ncol,
+                                                &outputs, &inputs);
+
+        int elem = element - intervals[idx];
+        *rows = &outputs[(*nrow) * elem];
+        *cols = &inputs[(*ncol) * elem];
+      };
+
+      int num_outputs =
+          output_owners->get_local_size() + output_owners->get_ext_size();
+
+      int num_variables =
+          var_owners->get_local_size() + var_owners->get_ext_size();
+
+      // Generate the non-zero pattern
+      int *rowp, *cols;
+      OrderingUtils::create_csr_from_output_data(num_outputs, num_variables,
+                                                 intervals[components.size()],
+                                                 element_output, &rowp, &cols);
+
+      // Distribute the pattern across matrices
+      jac_dist =
+          new MatrixDistribute(comm, output_owners, var_owners, num_outputs,
+                               num_variables, rowp, cols, jac);
+      jac_dist_ctx = jac_dist->create_context<T>();
+
+      delete[] rowp;
+      delete[] cols;
+
+      return mat;
+    }
+  }
 
  private:
   /**
-   * @brief Create a functor that returns the number of nodes and node numbers,
-   * given an element index
+   * @brief Create a functor that returns the number of nodes and node
+   * numbers, given an element index
    *
-   * @param intervals Data structure that stores the intervals for the elements
-   * @return The functor returning number of nodes per element and element nodes
+   * @param intervals Data structure that stores the intervals for the
+   * elements
+   * @return The functor returning number of nodes per element and element
+   * nodes
    */
   auto get_element_nodes(std::vector<int>& intervals) const {
     intervals.resize(components.size() + 1);
@@ -717,7 +829,8 @@ class OptimizationProblem {
    * @brief Create a functor that returns the number of nodes and node numbers
    * for the data, given an element index
    *
-   * @param intervals Data structure that stores the intervals for the elements
+   * @param intervals Data structure that stores the intervals for the
+   * elements
    * @return The functor returning the data per element and data indices
    */
   auto get_element_data(std::vector<int>& intervals) const {
@@ -753,6 +866,51 @@ class OptimizationProblem {
     };
 
     return element_nodes;
+  }
+
+  /**
+   * @brief Create a functor that returns the number of outputs and output
+   * numbers given an element index
+   *
+   * @param intervals Data structure that stores the intervals for the
+   * elements
+   * @return The functor returning the outputs per element and output indices
+   */
+  auto get_element_output(std::vector<int>& intervals) const {
+    intervals.resize(components.size() + 1);
+    intervals[0] = 0;
+    for (size_t i = 0; i < components.size(); i++) {
+      int num_elems, ouputs_per_elem, nodes_per_elem;
+      const int *outputs, *inputs;
+      components[i]->get_output_layout_data(&num_elems, &ouputs_per_elem,
+                                            &nodes_per_elem, &outputs, &inputs);
+      intervals[i + 1] = intervals[i] + num_elems;
+    }
+
+    auto element_outputs = [&](int element, const int** ptr) {
+      // upper_bound finds the first index i such that intervals[i] >
+      // element
+      auto it = std::upper_bound(intervals.begin(), intervals.end(), element);
+
+      // Decrement to get the interval where element fits: intervals[idx]
+      // <= element < intervals[idx+1]
+      int idx = static_cast<int>(it - intervals.begin()) - 1;
+
+      int num_elems, ouputs_per_elem, nodes_per_elem;
+      const int *outputs, *inputs;
+      components[idx]->get_output_layout_data(
+          &num_elems, &ouputs_per_elem, &nodes_per_elem, &outputs, &inputs);
+
+      int elem = element - intervals[idx];
+      if (ouputs_per_elem > 0) {
+        *ptr = &outputs[ouputs_per_elem * elem];
+      } else {
+        *ptr = nullptr;
+      }
+      return ouputs_per_elem;
+    };
+
+    return element_outputs;
   }
 
   /**
@@ -832,16 +990,13 @@ class OptimizationProblem {
   // Node owner data for the data and variables
   std::shared_ptr<NodeOwners> data_owners;
   std::shared_ptr<NodeOwners> var_owners;
+  std::shared_ptr<NodeOwners> output_owners;
 
   // Array indicating which variables are multipliers
   std::shared_ptr<Vector<int>> is_multiplier;
 
   // Component groups for the optimization problem
   std::vector<std::shared_ptr<ComponentGroupBase<T>>> components;
-
-  // Component output groups for the analysis
-  // std::shared_ptr<NodeOwners> output_owners;
-  // std::vector<std::shared_ptr<OutputGroupBase<T>>> output_components;
 
   // Variable information
   VectorDistribute data_dist;
@@ -850,8 +1005,8 @@ class OptimizationProblem {
   VectorDistribute::VecDistributeContext<T>* var_ctx;
 
   // Output information
-  // VectorDistribute output_dist;
-  // VectorDistribute::VecDistributeContext<T>* output_ctx;
+  VectorDistribute output_dist;
+  VectorDistribute::VecDistributeContext<T>* output_ctx;
 
   // The shared data vector
   std::shared_ptr<Vector<T>> data_vec;
@@ -859,11 +1014,17 @@ class OptimizationProblem {
   // Node numbers created by
   std::shared_ptr<Vector<int>> dist_node_numbers;
   std::shared_ptr<Vector<int>> dist_data_numbers;
+  std::shared_ptr<Vector<int>> dist_output_numbers;
 
   // Information about the Hessian matrix
-  std::shared_ptr<CSRMat<T>> csr_mat;
+  std::shared_ptr<CSRMat<T>> mat;
   MatrixDistribute* mat_dist;
   MatrixDistribute::MatDistributeContext<T>* mat_dist_ctx;
+
+  // Information about the output Jacobian
+  std::shared_ptr<CSRMat<T>> jac;
+  MatrixDistribute* jac_dist;
+  MatrixDistribute::MatDistributeContext<T>* jac_dist_ctx;
 };
 
 }  // namespace amigo

@@ -15,8 +15,10 @@ template <typename T, int ncomp, class Input, int ndata, class Data,
           class... Components>
 class SerialGroupBackend {
  public:
+  template <int noutputs>
   SerialGroupBackend(IndexLayout<ndata> &data_layout,
-                     IndexLayout<ncomp> &layout) {}
+                     IndexLayout<ncomp> &layout,
+                     IndexLayout<noutputs> &outputs) {}
 
   T lagrangian_kernel(const IndexLayout<ndata> &data_layout,
                       const IndexLayout<ncomp> &layout,
@@ -150,13 +152,113 @@ class SerialGroupBackend {
   }
 };
 
+template <typename T, int ncomp, int ndata, int noutputs, class... Components>
+class SerialOutputBackend {
+ public:
+  SerialOutputBackend() {}
+
+  void add_output_kernel(const IndexLayout<ndata> &data_layout,
+                         const IndexLayout<ncomp> &layout,
+                         const IndexLayout<noutputs> &output_layout,
+                         const Vector<T> &data_vec, const Vector<T> &vec,
+                         Vector<T> &out) const {
+    add_output_kernel<Components...>(data_layout, layout, output_layout,
+                                     data_vec, vec, out);
+  }
+
+  template <class Component, class... Remain>
+  void add_output_kernel(const IndexLayout<ndata> &data_layout,
+                         const IndexLayout<ncomp> &layout,
+                         const IndexLayout<noutputs> &output_layout,
+                         const Vector<T> &data_vec, const Vector<T> &vec,
+                         Vector<T> &out) const {
+    if constexpr (Component::noutputs > 0) {
+      typename Component::template Data<T> data;
+      typename Component::template Input<T> input;
+      typename Component::template Output<T> output;
+      int length = layout.get_length();
+
+      for (int i = 0; i < length; i++) {
+        data_layout.get_values(i, data_vec, data);
+        layout.get_values(i, vec, input);
+        Component::analyze(data, input, output);
+        output_layout.add_values(i, output, out);
+      }
+    }
+
+    if constexpr (sizeof...(Remain) > 0) {
+      add_output_kernel<Remain...>(data_layout, layout, output_layout, data_vec,
+                                   vec, out);
+    }
+  }
+
+  void add_jacobian_kernel(const IndexLayout<ndata> &data_layout,
+                           const IndexLayout<ncomp> &layout,
+                           const IndexLayout<noutputs> &output_layout,
+                           const Vector<T> &data_vec, const Vector<T> &vec,
+                           CSRMat<T> &jac) const {
+    add_jacobian_kernel<Components...>(data_layout, layout, output_layout,
+                                       data_vec, vec, jac);
+  }
+
+  template <class Component, class... Remain>
+  void add_jacobian_kernel(const IndexLayout<ndata> &data_layout,
+                           const IndexLayout<ncomp> &layout,
+                           const IndexLayout<noutputs> &output_layout,
+                           const Vector<T> &data_vec, const Vector<T> &vec,
+                           CSRMat<T> &jac) const {
+    if constexpr (Component::noutputs > 0) {
+      typename Component::template Data<A2D::ADScalar<T, 1>> data;
+      typename Component::template Input<A2D::ADScalar<T, 1>> input;
+      typename Component::template Output<A2D::ADScalar<T, 1>> output;
+      int length = layout.get_length();
+
+      for (int i = 0; i < length; i++) {
+        data_layout.get_values(i, data_vec, data);
+
+        T jac_elem[noutputs * ncomp];
+        for (int j = 0; j < ncomp; j++) {
+          layout.get_values(i, vec, input);
+          input[j].deriv[0] = 1.0;
+          Component::analyze(data, input, output);
+
+          for (int k = 0; k < noutputs; k++) {
+            jac_elem[ncomp * k + i] = output[k].deriv[0];
+          }
+        }
+
+        int input_index[ncomp];
+        layout.get_indices(i, input_index);
+
+        int output_index[noutputs];
+        output_layout.get_indices(i, output_index);
+
+        for (int j = 0; j < noutputs; j++) {
+          jac.add_row(output_index[j], ncomp, input_index,
+                      &jac_elem[ncomp * j]);
+        }
+      }
+    }
+
+    if constexpr (sizeof...(Remain) > 0) {
+      add_jacobian_kernel<Remain...>(data_layout, layout, output_layout,
+                                     data_vec, vec, jac);
+    }
+  }
+};
+
+template <typename T, int ncomp, int ndata, int noutput, class... Components>
+using DefaultOutputBackend =
+    SerialOutputBackend<T, ncomp, ndata, noutput, Components...>;
+
 #ifdef AMIGO_USE_OPENMP
 
 template <typename T, int ncomp, class Input, int ndata, class Data,
           class... Components>
 class OmpGroupBackend {
  public:
-  OmpGroupBackend(IndexLayout<ndata> &data_layout, IndexLayout<ncomp> &layout)
+  OmpGroupBackend(IndexLayout<ndata> &data_layout, IndexLayout<ncomp> &layout,
+                  IndexLayout<noutputs> &output_layout)
       : num_colors(0), elem_per_color(nullptr) {
     int length, ncomps;
     const int *array;
@@ -171,6 +273,7 @@ class OmpGroupBackend {
     // Re-order the data and the variable layouts
     data_layout.reorder(elem_by_color);
     layout.reorder(elem_by_color);
+    output_layout.reorder(elem_by_color);
 
     elem_per_color = new int[num_colors];
     for (int i = 0; i < num_colors; i++) {
@@ -407,58 +510,85 @@ class ComponentGroup : public ComponentGroupBase<T> {
 
   static constexpr int ncomp = __get_collection_ncomp<Components...>::value;
   static constexpr int ndata = __get_collection_ndata<Components...>::value;
+  static constexpr int noutputs =
+      __get_collection_noutputs<Components...>::value;
 
   // Use whatever class is defined as the default backend
   using Backend =
       DefaultGroupBackend<T, ncomp, Input, ndata, Data, Components...>;
 
+  using OutputBackend =
+      DefaultOutputBackend<T, ncomp, ndata, noutputs, Components...>;
+
   ComponentGroup(int num_elements, std::shared_ptr<Vector<int>> data_indices,
-                 std::shared_ptr<Vector<int>> indices)
+                 std::shared_ptr<Vector<int>> indices,
+                 std::shared_ptr<Vector<int>> output_indices)
       : data_layout(num_elements, data_indices),
         layout(num_elements, indices),
-        backend(data_layout, layout) {}
+        output_layout(num_elements, output_indices),
+        backend(data_layout, layout, output_layout) {}
 
   std::shared_ptr<ComponentGroupBase<T>> clone(
       int num_elements, std::shared_ptr<Vector<int>> data_idx,
-      std::shared_ptr<Vector<int>> idx) const {
-    return std::make_shared<ComponentGroup<T, Components...>>(num_elements,
-                                                              data_idx, idx);
+      std::shared_ptr<Vector<int>> layout_idx,
+      std::shared_ptr<Vector<int>> output_idx) const {
+    return std::make_shared<ComponentGroup<T, Components...>>(
+        num_elements, data_idx, layout_idx, output_idx);
   }
 
+  // Group compute functions
   T lagrangian(const Vector<T> &data_vec, const Vector<T> &vec) const {
     return backend.lagrangian_kernel(data_layout, layout, data_vec, vec);
   }
-
   void add_gradient(const Vector<T> &data_vec, const Vector<T> &vec,
                     Vector<T> &res) const {
     backend.add_gradient_kernel(data_layout, layout, data_vec, vec, res);
   }
-
   void add_hessian_product(const Vector<T> &data_vec, const Vector<T> &vec,
                            const Vector<T> &dir, Vector<T> &res) const {
     backend.add_hessian_product_kernel(data_layout, layout, data_vec, vec, dir,
                                        res);
   }
-
   void add_hessian(const Vector<T> &data_vec, const Vector<T> &vec,
                    const NodeOwners &owners, CSRMat<T> &jac) const {
     backend.add_hessian_kernel(data_layout, layout, data_vec, vec, owners, jac);
   }
 
+  // Group output functions
+  void add_output(const Vector<T> &data_vec, const Vector<T> &vec,
+                  Vector<T> &output) const {
+    output_backend.add_output_kernel(data_layout, layout, output_layout,
+                                     data_vec, vec, output);
+  }
+  void add_output_jacobian(const Vector<T> &data_vec, const Vector<T> &vec,
+                           CSRMat<T> &jac) const {
+    output_backend.add_jacobian_kernel(data_layout, layout, output_layout,
+                                       data_vec, vec, jac);
+  }
+
+  // Get the ordering information
   void get_data_layout_data(int *num_elements, int *nodes_per_elem,
                             const int **array) const {
     data_layout.get_data(num_elements, nodes_per_elem, array);
   }
-
   void get_layout_data(int *num_elements, int *nodes_per_elem,
                        const int **array) const {
     layout.get_data(num_elements, nodes_per_elem, array);
+  }
+  void get_output_layout_data(int *num_elements, int *outputs_per_elem,
+                              int *nodes_per_elem, const int **outputs,
+                              const int **inputs) const {
+    output_layout.get_data(num_elements, outputs_per_elem, outputs);
+    layout.get_data(num_elements, nodes_per_elem, inputs);
   }
 
  private:
   IndexLayout<ndata> data_layout;
   IndexLayout<ncomp> layout;
+  IndexLayout<noutputs> output_layout;
+
   Backend backend;
+  OutputBackend output_backend;
 };
 
 }  // namespace amigo
