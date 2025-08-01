@@ -46,6 +46,10 @@ def get_extensions():
     from pybind11.setup_helpers import Pybind11Extension, build_ext
     import pybind11
 
+    link_args = []
+    compile_args = []
+    define_macros = []
+
     inc_dirs, lib_dirs, libs = get_mpi_flags()
     inc_dirs.append(mpi4py.get_include())
 
@@ -105,9 +109,6 @@ def get_extensions():
         vars = sysconfig.get_config_vars()
         vars["LDSHARED"] = vars["LDSHARED"].replace("-bundle", "-dynamiclib")
 
-    link_args = []
-    compile_args = []
-    define_macros = []
     if sys.platform == "win32":
         compile_args += ["/std:c++17", "/permissive-"]
         openblas_root = r"C:\libs\openblas"

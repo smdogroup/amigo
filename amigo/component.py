@@ -850,7 +850,7 @@ class Component:
 
     def set_args(self, args):
         """
-        Set arguments for the compute and analyze functions
+        Set arguments for the compute and compute_output functions
         """
         if not isinstance(args, list) or not all(
             isinstance(item, dict) for item in args
@@ -903,7 +903,7 @@ class Component:
 
     def add_output(self, name, **kwargs):
         """
-        Add an output quantity of interest computed by analyze. These must be scalar
+        Add an output quantity of interest computed by compute_output. These must be scalar
         """
         self.outputs.add(name, shape=None, **kwargs)
         return
@@ -911,7 +911,7 @@ class Component:
     def compute(self, **kwargs):
         pass
 
-    def analyze(self, **kwargs):
+    def compute_output(self, **kwargs):
         pass
 
     def _is_overridden(self, method_name):
@@ -927,7 +927,7 @@ class Component:
         return instance_method is not base_method
 
     def is_empty(self):
-        if self.is_compute_empty() and self.is_analyze_empty():
+        if self.is_compute_empty() and self.is_output_empty():
             return True
         return False
 
@@ -936,8 +936,8 @@ class Component:
             return True
         return False
 
-    def is_analyze_empty(self):
-        if not self._is_overridden("analyze"):
+    def is_output_empty(self):
+        if not self._is_overridden("compute_output"):
             return True
         return False
 
@@ -1126,14 +1126,14 @@ class Component:
                     stack_name=stack_name,
                 )
 
-            # Clear the variables for the analyze function
+            # Clear the variables for the compute_output function
             self.clear()
 
             # Perform the computation to get the constraints as a function of the inputs
             if len(args) > 0:
-                self.analyze(**args)
+                self.compute_output(**args)
             else:
-                self.analyze()
+                self.compute_output()
 
             # Add the output statement
             if len(self.outputs) > 0:
@@ -1153,13 +1153,13 @@ class Component:
                 )
                 cpp += "  " + "static constexpr int noutputs = 0;\n"
 
-            # Is analyze actually empty
+            # Is compute_output actually empty
             truth = "false"
-            if self.is_analyze_empty():
+            if self.is_output_empty():
                 truth = "true"
-            cpp += "  " + f"static constexpr bool is_analyze_empty = {truth};\n"
+            cpp += "  " + f"static constexpr bool is_output_empty = {truth};\n"
 
-            cpp += self._generate_analyze_cpp()
+            cpp += self._generate_output_cpp()
 
             cpp += "};\n"
 
@@ -1271,7 +1271,7 @@ class Component:
 
         return cpp
 
-    def _generate_analyze_cpp(
+    def _generate_output_cpp(
         self,
         template_name="R__",
         data_name="data__",
@@ -1283,7 +1283,7 @@ class Component:
         cpp += "  " + f"template <typename {template_name}>\n"
         pre = "  " + "AMIGO_HOST_DEVICE static"
         cpp += (
-            f"{pre} void analyze(Data<{template_name}>& {data_name}, Input<{template_name}>& {input_name}, "
+            f"{pre} void compute_output(Data<{template_name}>& {data_name}, Input<{template_name}>& {input_name}, "
             + f"Output<{template_name}>& {output_name})"
             + " {\n"
         )
@@ -1327,12 +1327,9 @@ class Component:
 
         return cpp
 
-    def generate_pybind11(self, mod_ident="mod", wrapper_type="group"):
+    def generate_pybind11(self, mod_ident="mod"):
         # Collect all the group members together...
-        if wrapper_type == "group":
-            group_type = "ComponentGroup"
-        else:
-            group_type = "OutputGroup"
+        group_type = "ComponentGroup"
 
         cls = f"amigo::{group_type}<double"
         for index, args in enumerate(self.args):
@@ -1344,18 +1341,11 @@ class Component:
             cls += f", amigo::{class_name}<double>"
         cls += ">"
 
-        if wrapper_type == "group":
-            module_class_name = f'"{self.name}"'
-        else:
-            module_class_name = f'"{self.name + "__output"}"'
-
+        module_class_name = f'"{self.name}"'
         cpp = f"py::class_<{cls}, amigo::{group_type}Base<double>, std::shared_ptr<{cls}>>"
         cpp += f"({mod_ident}, {module_class_name}).def("
 
         vec_cls = "std::shared_ptr<amigo::Vector<int>>"
-        if wrapper_type == "group":
-            cpp += f"py::init<int, {vec_cls}, {vec_cls}>())"
-        else:
-            cpp += f"py::init<{vec_cls}, {vec_cls}, {vec_cls}>())"
+        cpp += f"py::init<int, {vec_cls}, {vec_cls}, {vec_cls}>())"
 
         return cpp

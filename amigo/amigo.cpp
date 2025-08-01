@@ -262,9 +262,6 @@ PYBIND11_MODULE(amigo, mod) {
   py::class_<amigo::ComponentGroupBase<double>,
              std::shared_ptr<amigo::ComponentGroupBase<double>>>(
       mod, "ComponentGroupBase");
-  py::class_<amigo::OutputGroupBase<double>,
-             std::shared_ptr<amigo::OutputGroupBase<double>>>(
-      mod, "OutputGroupBase");
 
   py::class_<amigo::NodeOwners, std::shared_ptr<amigo::NodeOwners>>(
       mod, "NodeOwners")
@@ -294,6 +291,7 @@ PYBIND11_MODULE(amigo, mod) {
       .def(py::init([](py::object pyobj,
                        std::shared_ptr<amigo::NodeOwners> data_owners,
                        std::shared_ptr<amigo::NodeOwners> var_owners,
+                       std::shared_ptr<amigo::NodeOwners> output_owners,
                        std::shared_ptr<amigo::Vector<int>> is_multiplier,
                        const std::vector<std::shared_ptr<
                            amigo::ComponentGroupBase<double>>> &components) {
@@ -302,7 +300,8 @@ PYBIND11_MODULE(amigo, mod) {
           comm = *PyMPIComm_Get(pyobj.ptr());
         }
         return std::make_shared<amigo::OptimizationProblem<double>>(
-            comm, data_owners, var_owners, is_multiplier, components);
+            comm, data_owners, var_owners, output_owners, is_multiplier,
+            components);
       }))
       .def("get_num_variables",
            &amigo::OptimizationProblem<double>::get_num_variables)
@@ -339,14 +338,19 @@ PYBIND11_MODULE(amigo, mod) {
       .def("scatter_data_vector",
            &amigo::OptimizationProblem<double>::scatter_data_vector<double>,
            py::arg("root_vec"), py::arg("dist_problem"), py::arg("dist_vec"),
-           py::arg("root") = 0, py::arg("distribute") = true);
-  // .def("create_output_vector",
-  //      &amigo::OptimizationProblem<double>::create_output_vector)
-  // .def("analyze", &amigo::OptimizationProblem<double>::analyze)
-  // .def("create_output_csr_matrix",
-  //      &amigo::OptimizationProblem<double>::create_output_csr_matrix)
-  // .def("analyze_jacobian",
-  //      &amigo::OptimizationProblem<double>::analyze_jacobian);
+           py::arg("root") = 0, py::arg("distribute") = true)
+      .def("create_output_vector",
+           &amigo::OptimizationProblem<double>::create_output_vector)
+      .def("compute_output",
+           &amigo::OptimizationProblem<double>::compute_output)
+      .def("create_input_jacobian",
+           &amigo::OptimizationProblem<double>::create_input_jacobian)
+      .def("create_data_jacobian",
+           &amigo::OptimizationProblem<double>::create_data_jacobian)
+      .def("input_jacobian",
+           &amigo::OptimizationProblem<double>::input_jacobian)
+      .def("data_jacobian",
+           &amigo::OptimizationProblem<double>::input_jacobian);
 
   py::class_<amigo::AliasTracker<int>>(mod, "AliasTracker")
       .def(py::init<int>(), py::arg("size"))
