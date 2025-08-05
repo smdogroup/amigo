@@ -44,6 +44,13 @@ class OptVector {
     }
   }
 
+  void zero() {
+    x->zero();
+    xs->zero();
+    zl->zero();
+    zu->zero();
+  }
+
   void copy(const std::shared_ptr<OptVector<T>> src) {
     x->copy(*src->x);
     xs->copy(*src->xs);
@@ -187,6 +194,7 @@ class InteriorPointOptimizer {
   /**
    * @brief Initialize the multipliers and slack variables in the problem
    *
+   * @param vars All of the optimization variables
    */
   void initialize_multipliers_and_slacks(
       std::shared_ptr<OptVector<T>> vars) const {
@@ -486,7 +494,7 @@ class InteriorPointOptimizer {
    * [ 0 | -C^{-1} ]
    *
    * @param vars The values of the optimization variables
-   * @param diag The CSR Matrix for the Hessian
+   * @param diag The vector containing the diagonal components of the matrix
    */
   void compute_diagonal(const std::shared_ptr<OptVector<T>> vars,
                         std::shared_ptr<Vector<T>> diagonal) const {

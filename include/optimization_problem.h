@@ -49,8 +49,8 @@ class OptimizationProblem {
 
     // Set the default array (no multipliers) if none is provided
     if (!is_multiplier) {
-      is_multiplier =
-          std::make_shared<Vector<int>>(var_owners->get_local_size());
+      is_multiplier = std::make_shared<Vector<int>>(
+          var_owners->get_local_size(), var_owners->get_ext_size());
     }
 
     dist_node_numbers = nullptr;
@@ -371,7 +371,7 @@ class OptimizationProblem {
             comm, new_data_owners, new_var_owners, new_output_owners, nullptr,
             new_comps);
 
-    bool distribute = false;
+    bool distribute = true;
     scatter_vector(is_multiplier, opt, opt->is_multiplier, root, distribute);
 
     return opt;
@@ -632,13 +632,32 @@ class OptimizationProblem {
    * @param mat The full Hessian matrix
    */
   void hessian(const std::shared_ptr<Vector<T>> x,
-               std::shared_ptr<CSRMat<T>> matrix) {
+               std::shared_ptr<CSRMat<T>> matrix,
+               bool zero_design_contrib = false) {
     var_dist.begin_forward(x, var_ctx);
     var_dist.end_forward(x, var_ctx);
 
     matrix->zero();
     for (size_t i = 0; i < components.size(); i++) {
       components[i]->add_hessian(*data_vec, *x, *var_owners, *matrix);
+    }
+
+    if (zero_design_contrib) {
+      int nrows, ncols, nnz;
+      const int *rowp, *cols;
+      T* A;
+      matrix->get_data(&nrows, &ncols, &nnz, &rowp, &cols, &A);
+
+      // Zero the diagonal entries
+      const int* is_mult = is_multiplier->get_array();
+      for (int i = 0; i < nrows; i++) {
+        for (int jp = rowp[i]; jp < rowp[i + 1]; jp++) {
+          int j = cols[jp];
+          if (!is_mult[i] && !is_mult[j]) {
+            A[jp] = 0.0;
+          }
+        }
+      }
     }
 
     mat_dist->begin_assembly(matrix, mat_dist_ctx);

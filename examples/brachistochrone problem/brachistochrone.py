@@ -65,7 +65,7 @@ class ParticleDynamics(am.Component):
         # Position derivatives equal velocities
         # Compute the declared variable values
         sint = self.vars["sint"] = am.sin(theta)
-        cost = self.vars["cost"] = am.sin(theta)
+        cost = self.vars["cost"] = am.cos(theta)
         res[0] = qdot[0] - q[2] * sint
         res[1] = qdot[1] + q[2] * cost
 
@@ -115,6 +115,43 @@ class FinalConditions(am.Component):
         self.constraints["res"] = [q[0] - 10.0, q[1] - 5.0]  # Target: (x=10, y=5)
 
 
+def plot_result(x):
+    t = np.linspace(0, x["obj.tf"], num_time_steps + 1)
+    xvals = x["dynamics.q[:, 0]"]
+    yvals = x["dynamics.q[:, 1]"]
+    vvals = x["dynamics.q[:, 2]"]
+    theta = x["dynamics.theta"]
+
+    with plt.style.context(niceplots.get_style()):
+        fig, axes = plt.subplots(2, 2, figsize=(10, 8))
+
+        # State variables
+        axes[0, 0].plot(xvals, yvals)
+        axes[0, 0].set_ylabel("x Position (m)")
+        axes[0, 0].set_ylabel("y Position (m)")
+        axes[0, 0].grid(True)
+
+        axes[0, 1].plot(t, yvals)
+        axes[0, 1].plot(t, xvals)
+        axes[0, 1].set_ylabel("Position (m)")
+        axes[0, 1].set_xlabel("Time (s)")
+        axes[0, 1].grid(True)
+
+        axes[1, 0].plot(t, vvals)
+        axes[1, 0].set_ylabel("Velocity (m/s)")
+        axes[1, 0].set_xlabel("Time (s)")
+        axes[1, 0].grid(True)
+
+        axes[1, 1].plot(t, theta)
+        axes[1, 1].set_ylabel("Theta (rad)")
+        axes[1, 1].set_xlabel("Time (s)")
+        axes[1, 1].grid(True)
+
+        plt.tight_layout()
+        plt.savefig("brachistochrone.png", dpi=300, bbox_inches="tight")
+        plt.show()
+
+
 def create_brachistochrone_model(module_name="brachistochrone"):
     dynamics = ParticleDynamics()
     trap = TrapezoidRule()
@@ -148,7 +185,7 @@ def create_brachistochrone_model(module_name="brachistochrone"):
     model.link(f"dynamics.q[{num_time_steps}, :]", "fc.q[0, :]")
 
     # Broadcast the scalar final time from the objective component to every trapezoid instance
-    model.link("obj.tf[0]", "trap.tf[:]")
+    model.link("obj.tf[0]", "trap.tf")
 
     return model
 
@@ -193,10 +230,8 @@ model.initialize(order_type=am.OrderingType.NESTED_DISSECTION)
 with open("brachistochon_model.json", "w") as fp:
     json.dump(model.get_serializable_data(), fp, indent=2)
 
-
 print(f"Num variables:              {model.num_variables}")
 print(f"Num constraints:            {model.num_constraints}")
-
 
 prob = model.get_opt_problem()
 
@@ -210,9 +245,12 @@ x["dynamics.q[:, 0]"] = np.linspace(0.0, 10.0, N)  # x
 x["dynamics.q[:, 1]"] = np.linspace(10.0, 5.0, N)  # y
 x["dynamics.q[:, 2]"] = np.linspace(0.0, 9.9, N)  # v
 
+# Set the variable values
+x["dynamics.qdot"] = np.outer(np.linspace(0.0, 1.0, N), [1, 1, 1])
+
 # Initial guess for the control (angle):
-tetai = np.radians(5.0)
-tetaf = np.radians(100.5)
+tetai = 0.1
+tetaf = 0.1 * np.pi
 x["dynamics.theta"] = np.linspace(tetai, tetaf, N)  # teta in radians
 
 # Initial guess for final time (seconds)
@@ -226,28 +264,40 @@ upper = model.create_vector()
 lower["obj.tf"] = 0.5
 upper["obj.tf"] = 100
 
-# # Position x and y bounds
-# # x
-# lower["dynamics.q[:, 0]"] = 0.0
-# upper["dynamics.q[:, 0]"] = 10.0
+# Position x and y bounds
+# Bounds on x
+lower["dynamics.q[:, 0]"] = -1.0
+upper["dynamics.q[:, 0]"] = 20.0
 
-# # y
-# lower["dynamics.q[:, 1]"] = 0.0
-# upper["dynamics.q[:, 1]"] = 10.0
+# Bounds on y
+lower["dynamics.q[:, 1]"] = -1.0
+upper["dynamics.q[:, 1]"] = 20.0
 
-# lower["dynamics.q[:, 2]"] = 0.0
-# upper["dynamics.q[:, 2]"] = 50.0
+# Bounds on the velocity
+lower["dynamics.q[:, 2]"] = -1.0
+upper["dynamics.q[:, 2]"] = 50.0
 
+# Bounds on the time derivatives
+lower["dynamics.qdot"] = -100
+upper["dynamics.qdot"] = 100
 
 # Bounds on the control angle:
-lower["dynamics.theta"] = np.radians(0.01)
-upper["dynamics.theta"] = np.radians(179.9)
+lower["dynamics.theta"] = 0.0
+upper["dynamics.theta"] = np.pi
 
 opt = am.Optimizer(model, x, lower=lower, upper=upper)
-data = opt.optimize({"max_iterations": 100})
+data = opt.optimize(
+    {
+        "max_iterations": 100,
+        "initial_barrier_param": 10.0,
+        "max_line_search_iterations": 10,
+    }
+)
 
 with open("brachistochrone_opt_data.json", "w") as fp:
     json.dump(data, fp, indent=2)
 
 # Simple print-out of the optimized final time
 print(f"Optimized final time: {x['obj.tf'][0]:.6f} s")
+
+plot_result(x)

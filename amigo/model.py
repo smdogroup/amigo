@@ -191,6 +191,9 @@ class ComponentGroup:
     def get_data_names(self):
         return self.comp_obj.get_data_names()
 
+    def get_output_names(self):
+        return self.comp_obj.get_output_names()
+
     def get_var(self, varname: str):
         return self.vars[varname]
 

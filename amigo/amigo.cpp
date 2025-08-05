@@ -326,7 +326,9 @@ PYBIND11_MODULE(amigo, mod) {
       .def("lagrangian", &amigo::OptimizationProblem<double>::lagrangian)
       .def("gradient", &amigo::OptimizationProblem<double>::gradient)
       .def("create_matrix", &amigo::OptimizationProblem<double>::create_matrix)
-      .def("hessian", &amigo::OptimizationProblem<double>::hessian)
+      .def("hessian", &amigo::OptimizationProblem<double>::hessian,
+           py::arg("x"), py::arg("hess"),
+           py::arg("zero_design_contrib") = false)
       .def("scatter_vector",
            &amigo::OptimizationProblem<double>::scatter_vector<double>,
            py::arg("root_vec"), py::arg("dist_problem"), py::arg("dist_vec"),
@@ -377,6 +379,7 @@ PYBIND11_MODULE(amigo, mod) {
       .def_readwrite("xs", &amigo::OptVector<double>::xs)
       .def_readwrite("zl", &amigo::OptVector<double>::zl)
       .def_readwrite("zu", &amigo::OptVector<double>::zu)
+      .def("zero", &amigo::OptVector<double>::zero)
       .def("copy", &amigo::OptVector<double>::copy);
 
   py::class_<amigo::InteriorPointOptimizer<double>,
