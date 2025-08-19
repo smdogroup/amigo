@@ -1,6 +1,7 @@
 import amigo as am
 import numpy as np
 import sys
+from scipy.interpolate import BSpline
 import matplotlib.pylab as plt
 import niceplots
 import argparse
@@ -43,6 +44,157 @@ class TrapezoidRule(am.Component):
 
         dt = tf / num_time_steps  # Variable time step based on final time
         self.constraints["res"] = q2 - q1 - 0.5 * dt * (q1dot + q2dot)
+
+        return
+
+
+class BSplineSource(am.Component):
+    def __init__(self, n: int = 10):
+        """
+        Source component for the x values
+
+        Args:
+            n (int) : Number of interpolating points
+        """
+        super().__init__()
+        self.n = n
+
+        self.add_input("x", shape=n)
+
+        return
+
+
+class BSplineInterpolant(am.Component):
+    def __init__(self, k: int = 4, n: int = 10):
+        """
+        Bspline interpolation component
+
+        Args:
+            k (int) : Order of the bspline polynomial (degree + 1)
+            n (int) : Number of interpolating points
+        """
+        super().__init__()
+
+        # Set the order of the bspline
+        self.k = k
+
+        # Set the number of inputs
+        self.n = n
+
+        # Set the size of the input data
+        self.add_data("N", shape=self.k)
+
+        # Set the input values to be interpolated
+        self.add_input("x", shape=self.k)
+
+        # Set the output values
+        self.add_input("alpha")
+
+        # Set the coupling constraint
+        self.add_constraint("res")
+
+        return
+
+    def compute(self):
+        N = self.data["N"]
+        x = self.inputs["x"]
+        alpha = self.inputs["alpha"]
+
+        value = 0.0
+        for i in range(self.k):
+            value = value + N[i] * x[i]
+        self.constraints["res"] = alpha - value
+
+        return
+
+    def compute_knots(self):
+        """
+        Compute the knot points
+        """
+
+        # Set the knot locations
+        t = np.zeros(self.n + self.k)
+        t[: self.k] = 0.0
+        t[-self.k : :] = 1.0
+        t[self.k - 1 : -self.k + 1] = np.linspace(0, 1, self.n - self.k + 2)
+
+        return t
+
+    def compute_basis(self, x):
+        t = self.compute_knots()
+
+        # Special case for right endpoint
+        x_clamped = x.copy()
+        x_clamped[x_clamped == t[-1]] = np.nextafter(t[-1], -np.inf)
+
+        # Find span index i such that t[i] <= x < t[i+1]
+        span = np.searchsorted(t, x_clamped, side="right") - 1
+        span = np.clip(span, self.k - 1, self.n - 1)
+
+        N = np.zeros((x.size, self.k), dtype=float)
+
+        # Evaluate using the Cox–de Boor recursion for each point
+        for j in range(x.size):
+            i = span[j]
+            # zeroth-degree basis
+            N_j = np.zeros(self.k)
+            N_j[0] = 1.0
+
+            for d in range(1, self.k):
+                saved = 0.0
+                for r in range(d):
+                    left = t[i - d + 1 + r]
+                    right = t[i + 1 + r]
+                    denom = right - left
+                    temp = 0.0 if denom == 0.0 else N_j[r] / denom
+                    N_j[r] = saved + (right - x_clamped[j]) * temp
+                    saved = (x_clamped[j] - left) * temp
+                N_j[d] = saved
+            N[j, :] = N_j
+
+        # Handle x == t[-1]
+        last_mask = x == t[-1]
+        if np.any(last_mask):
+            N[last_mask, :] = 0.0
+            N[last_mask, -1] = 1.0
+
+        return N
+
+    def set_data(self, name, npts, data):
+        # Set the locations for where to evaluate the bspline basis
+        x = np.linspace(0, 1, npts)
+        data[f"{name}.N"] = self.compute_basis(x)
+
+        return
+
+    def add_links(self, name, npts, model, src_name):
+        """
+        Set the links for the interpolation to work properly
+        """
+
+        # Set the locations for where to evaluate the bspline basis points
+        x = np.linspace(0, 1, npts)
+
+        # Set the knot locations
+        t = self.compute_knots()
+
+        index = self.k - 1
+        for i in range(npts):
+            while index < self.n and x[i] > t[index + 1]:
+                index += 1
+
+            for j in range(self.k):
+                src = f"{src_name}[0, {index - self.k + 1 + j}]"
+                target = f"{name}.x[{i}, {j}]"
+                model.link(src, target)
+
+        # Build via canonical coefficients
+        N = []
+        for i in range(self.n):
+            c = np.zeros(self.n)
+            c[i] = 1.0
+            Bi = BSpline(t, c, self.k - 1, extrapolate=False)
+            N.append(Bi(x))
 
         return
 
@@ -153,7 +305,7 @@ class Objective(am.Component):
 
     def compute(self):
         tf = self.inputs["tf"]
-        self.objective["obj"] = tf  # Minimize final time
+        self.objective["obj"] = tf**2  # Minimize final time
 
         return
 
@@ -193,46 +345,6 @@ class FinalConditions(am.Component):
             q[1] - gam_f,
             q[2] - hf,
         ]
-
-
-def create_time_to_climb_model(module_name="time_to_climb"):
-    # Create component instances
-    ac = AircraftDynamics()
-    trap = TrapezoidRule()
-    obj = Objective()
-    ic = InitialConditions()
-    fc = FinalConditions()
-
-    model = am.Model(module_name)
-
-    # Add components to the model
-    model.add_component("ac", num_time_steps + 1, ac)
-    model.add_component("trap", 5 * num_time_steps, trap)  # 5 states
-    model.add_component("obj", 1, obj)  # Only 1 objective instance for final time
-    model.add_component("ic", 1, ic)
-    model.add_component("fc", 1, fc)
-
-    # Link the trapezoidal rule for each state
-    for i in range(5):
-        start = i * num_time_steps
-        end = (i + 1) * num_time_steps
-
-        # Link state variables
-        model.link(f"ac.q[:{num_time_steps}, {i}]", f"trap.q1[{start}:{end}]")
-        model.link(f"ac.q[1:, {i}]", f"trap.q2[{start}:{end}]")
-
-        # Link state derivatives
-        model.link(f"ac.qdot[:-1, {i}]", f"trap.q1dot[{start}:{end}]")
-        model.link(f"ac.qdot[1:, {i}]", f"trap.q2dot[{start}:{end}]")
-
-    # Link final time from objective to all trapezoidal rule components
-    model.link("obj.tf[0]", f"trap.tf[:]")
-
-    # Link boundary conditions
-    model.link("ac.q[0, :]", "ic.q[0, :]")
-    model.link(f"ac.q[{num_time_steps}, :]", "fc.q[0, :]")  # Temporarily remove
-
-    return model
 
 
 def plot_results(t, q, alpha):
@@ -292,7 +404,52 @@ parser.add_argument(
 args = parser.parse_args()
 
 # Create the model
-model = create_time_to_climb_model()
+# Create component instances
+ac = AircraftDynamics()
+trap = TrapezoidRule()
+src = BSplineSource(n=10)
+bspline = BSplineInterpolant(k=4, n=10)
+obj = Objective()
+ic = InitialConditions()
+fc = FinalConditions()
+
+module_name = "time_to_climb"
+model = am.Model(module_name)
+
+# Add components to the model
+model.add_component("ac", num_time_steps + 1, ac)
+model.add_component("trap", 5 * num_time_steps, trap)  # 5 states
+model.add_component("src", 1, src)
+model.add_component("bspline", num_time_steps + 1, bspline)
+model.add_component("obj", 1, obj)  # Only 1 objective instance for final time
+model.add_component("ic", 1, ic)
+model.add_component("fc", 1, fc)
+
+# Link the trapezoidal rule for each state
+for i in range(5):
+    start = i * num_time_steps
+    end = (i + 1) * num_time_steps
+
+    # Link state variables
+    model.link(f"ac.q[:{num_time_steps}, {i}]", f"trap.q1[{start}:{end}]")
+    model.link(f"ac.q[1:, {i}]", f"trap.q2[{start}:{end}]")
+
+    # Link state derivatives
+    model.link(f"ac.qdot[:-1, {i}]", f"trap.q1dot[{start}:{end}]")
+    model.link(f"ac.qdot[1:, {i}]", f"trap.q2dot[{start}:{end}]")
+
+# Link the alpha values
+model.link("ac.alpha", "bspline.alpha")
+
+# Link final time from objective to all trapezoidal rule components
+model.link("obj.tf[0]", f"trap.tf[:]")
+
+# Link boundary conditions
+model.link("ac.q[0, :]", "ic.q[0, :]")
+model.link(f"ac.q[{num_time_steps}, :]", "fc.q[0, :]")
+
+# Add the bspline links
+bspline.add_links("bspline", num_time_steps + 1, model, "src.x")
 
 # Build the module if requested
 if args.build:
@@ -311,6 +468,9 @@ if args.build:
 # Initialize the model
 model.initialize(order_type=am.OrderingType.NESTED_DISSECTION)
 
+data = model.get_data_vector()
+bspline.set_data("bspline", num_time_steps + 1, data)
+
 print(f"Num variables:              {model.num_variables}")
 print(f"Num constraints:            {model.num_constraints}")
 
@@ -319,47 +479,71 @@ x = model.create_vector()
 x[:] = 0.0
 
 # Set initial guess for final time
-tf_guess = 300.0
+tf_guess = 200.0
 x["obj.tf"] = tf_guess
 
 # Set initial guess for states (reasonable trajectory)
 t_guess = np.linspace(0, tf_guess, num_time_steps + 1)
 x["ac.q[:, 0]"] = 136.0 + (340.0 - 136.0) * t_guess / tf_guess  # velocity
 x["ac.q[:, 1]"] = 5.0 * np.sin(np.pi * t_guess / tf_guess)  # flight path angle
-x["ac.q[:, 2]"] = 100.0 + (20000.0 - 100.0) * t_guess / tf_guess  # altitude
-x["ac.q[:, 3]"] = 5000.0 * t_guess  # range
+x["ac.q[:, 2]"] = 1000.0 + (20000.0 - 100.0) * t_guess / tf_guess  # altitude
+x["ac.q[:, 3]"] = 300.0 * t_guess  # range
 x["ac.q[:, 4]"] = 19030.0 - 200.0 * t_guess / tf_guess  # mass decrease
 
 # Set initial guess for control (constant small angle)
-x["ac.alpha"] = 1.0  # degrees
-alpha_guess = 3.0 * np.sin(np.pi * t_guess / tf_guess)
+x["ac.alpha"] = 1.0  # + 2.0 * t_guess / tf_guess
+# 3.0 * np.sin(np.pi * t_guess / tf_guess)
 
 # Set up bounds
 lower = model.create_vector()
 upper = model.create_vector()
 
 # Final time bounds
-lower["obj.tf"] = 100.0
-upper["obj.tf"] = 1000.0
+lower["obj.tf"] = 1.0
+upper["obj.tf"] = float("inf")
 
 # Control bounds (matching original -5 to 5 degrees)
-lower["ac.alpha"] = -5.0
-upper["ac.alpha"] = 5.0
+lower["ac.alpha"] = -float("inf")
+upper["ac.alpha"] = float("inf")
+
+lower["ac.q"] = -float("inf")
+upper["ac.q"] = float("inf")
+
+lower["ac.qdot"] = -float("inf")
+upper["ac.qdot"] = float("inf")
 
 # State bounds
-lower["ac.q[:, 0]"] = 50.0  # minimum velocity
-upper["ac.q[:, 0]"] = 500.0  # maximum velocity
-lower["ac.q[:, 1]"] = -85.0  # flight path angle
-upper["ac.q[:, 1]"] = 85.0
-lower["ac.q[:, 2]"] = 0.0  # altitude
-upper["ac.q[:, 2]"] = 25000.0
-lower["ac.q[:, 3]"] = 0.0  # range
-lower["ac.q[:, 4]"] = 10000.0  # minimum mass
-upper["ac.q[:, 4]"] = 20000.0  # maximum mass
+# lower["ac.q[:, 0]"] = 50.0  # minimum velocity
+# upper["ac.q[:, 0]"] = 500.0  # maximum velocity
+lower["ac.q[:, 1]"] = -25.0  # flight path angle
+upper["ac.q[:, 1]"] = 25.0
+# lower["ac.q[:, 2]"] = 0.0  # altitude
+# upper["ac.q[:, 2]"] = 25000.0
+# lower["ac.q[:, 3]"] = 0.0  # range
+# upper["ac.q[:, 3]"] = 2e6  # range
+# lower["ac.q[:, 4]"] = 10000.0  # minimum mass
+# upper["ac.q[:, 4]"] = 20000.0  # maximum mass
+
+# Set the anlge of attack between an lower and an upper bound
+lower["src.x"] = -5.0
+upper["src.x"] = 5.0
 
 # Optimize
 opt = am.Optimizer(model, x, lower=lower, upper=upper)
-data = opt.optimize({"max_iterations": 100, "rtol": 1e-6})
+data = opt.optimize(
+    {
+        "initial_barrier_param": 10.0,
+        "monotone_barrier_fraction": 0.25,
+        "max_iterations": 250,
+        "rtol": 1e-6,
+        "max_line_search_iterations": 4,
+        "max_iterations": 250,
+        # "check_update_step": True,
+    }
+)
+
+# print(x["ac.alpha"])
+# print(x["ac.q[:, 2]"])
 
 # Save optimization data
 with open("time_to_climb_opt_data.json", "w") as fp:

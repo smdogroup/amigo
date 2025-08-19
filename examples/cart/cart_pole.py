@@ -366,13 +366,25 @@ if comm_rank == 0:
     x["cart.q[:, 3]"] = 1.0
 
     # Apply lower and upper bound constraints
+    lower["cart.q"] = -float("inf")
+    lower["cart.qdot"] = -float("inf")
     lower["cart.x"] = -50
+
+    upper["cart.q"] = float("inf")
+    upper["cart.qdot"] = float("inf")
     upper["cart.x"] = 50
 
 # Set up the optimizer
 opt = am.Optimizer(model, x, lower=lower, upper=upper, comm=comm, distribute=distribute)
 
-data = opt.optimize({"max_iterations": 100, "record_components": ["cart.x[-1]"]})
+data = opt.optimize(
+    {
+        "max_iterations": 100,
+        "record_components": ["cart.x[-1]"],
+        "max_line_search_iterations": 10,
+        # "check_update_step": True,
+    }
+)
 with open("cart_opt_data.json", "w") as fp:
     json.dump(data, fp, indent=2)
 

@@ -18,50 +18,123 @@ namespace amigo {
 template <typename T>
 class OptVector {
  public:
-  OptVector(std::shared_ptr<OptimizationProblem<T>> problem) {
-    x = problem->create_vector();
-    xs = problem->create_vector();
-    zl = problem->create_vector();
-    zu = problem->create_vector();
+  OptVector(int num_variables, int num_equalities, int num_inequalities,
+            std::shared_ptr<Vector<T>> x)
+      : num_variables(num_variables),
+        num_equalities(num_equalities),
+        num_inequalities(num_inequalities),
+        x(x) {
+    size = 2 * num_variables + 9 * num_inequalities;
+    array = new T[size];
+    std::fill(array, array + size, 0.0);
   }
-
-  OptVector(std::shared_ptr<Vector<T>> x,
-            std::shared_ptr<OptimizationProblem<T>> problem)
-      : x(x) {
-    xs = problem->create_vector();
-    zl = problem->create_vector();
-    zu = problem->create_vector();
-
-    // Set the design variable values in xs as well
-    Vector<T>& x_ = *x;
-    Vector<T>& xs_ = *xs;
-    int size = problem->get_num_variables();
-    const Vector<int>& is_multiplier = *problem->get_multiplier_indicator();
-    for (int i = 0; i < size; i++) {
-      if (!is_multiplier[i]) {
-        xs_[i] = x_[i];
-      }
-    }
-  }
+  ~OptVector() { delete[] array; }
 
   void zero() {
     x->zero();
-    xs->zero();
-    zl->zero();
-    zu->zero();
+    std::fill(array, array + size, 0.0);
   }
-
-  void copy(const std::shared_ptr<OptVector<T>> src) {
+  void copy(std::shared_ptr<OptVector<T>> src) {
     x->copy(*src->x);
-    xs->copy(*src->xs);
-    zl->copy(*src->zl);
-    zu->copy(*src->zu);
+    std::copy(src->array, src->array + size, array);
   }
 
-  std::shared_ptr<Vector<T>> x;   // The primal-dual variables
-  std::shared_ptr<Vector<T>> xs;  // Primal-slack variables
-  std::shared_ptr<Vector<T>> zl;  // Multipliers for the lower bounds
-  std::shared_ptr<Vector<T>> zu;  // Multipliers for the upper bounds
+  void get_bound_duals(T **zl, T **zu) {
+    if (zl) {
+      *zl = &array[0];
+    }
+    if (zu) {
+      *zu = &array[num_variables];
+    }
+  }
+  void get_bound_duals(const T **zl, const T **zu) const {
+    if (zl) {
+      *zl = &array[0];
+    }
+    if (zu) {
+      *zu = &array[num_variables];
+    }
+  }
+  void get_slacks(T **s, T **sl, T **tl, T **su, T **tu) {
+    const int offset = 2 * num_variables;
+    if (s) {
+      *s = &array[offset];
+    }
+    if (sl) {
+      *sl = &array[offset + num_inequalities];
+    }
+    if (tl) {
+      *tl = &array[offset + 2 * num_inequalities];
+    }
+    if (su) {
+      *su = &array[offset + 3 * num_inequalities];
+    }
+    if (tu) {
+      *tu = &array[offset + 4 * num_inequalities];
+    }
+  }
+  void get_slacks(const T **s, const T **sl, const T **tl, const T **su,
+                  const T **tu) const {
+    const int offset = 2 * num_variables;
+    if (s) {
+      *s = &array[offset];
+    }
+    if (sl) {
+      *sl = &array[offset + num_inequalities];
+    }
+    if (tl) {
+      *tl = &array[offset + 2 * num_inequalities];
+    }
+    if (su) {
+      *su = &array[offset + 3 * num_inequalities];
+    }
+    if (tu) {
+      *tu = &array[offset + 4 * num_inequalities];
+    }
+  }
+  void get_slack_duals(T **zsl, T **ztl, T **zsu, T **ztu) {
+    const int offset = 2 * num_variables + 5 * num_inequalities;
+    if (zsl) {
+      *zsl = &array[offset];
+    }
+    if (ztl) {
+      *ztl = &array[offset + num_inequalities];
+    }
+    if (zsu) {
+      *zsu = &array[offset + 2 * num_inequalities];
+    }
+    if (ztu) {
+      *ztu = &array[offset + 3 * num_inequalities];
+    }
+  }
+  void get_slack_duals(const T **zsl, const T **ztl, const T **zsu,
+                       const T **ztu) const {
+    const int offset = 2 * num_variables + 5 * num_inequalities;
+    if (zsl) {
+      *zsl = &array[offset];
+    }
+    if (ztl) {
+      *ztl = &array[offset + num_inequalities];
+    }
+    if (zsu) {
+      *zsu = &array[offset + 2 * num_inequalities];
+    }
+    if (ztu) {
+      *ztu = &array[offset + 3 * num_inequalities];
+    }
+  }
+
+  std::shared_ptr<Vector<T>> get_solution() { return x; }
+  const std::shared_ptr<Vector<T>> get_solution() const { return x; }
+
+ private:
+  int num_variables;
+  int num_equalities;
+  int num_inequalities;
+  std::shared_ptr<Vector<T>> x;
+
+  int size;
+  T *array;
 };
 
 /**
@@ -71,92 +144,22 @@ class OptVector {
  * The problem is
  *
  * min f(x)
- * st. c(x) - s = 0
- * st. lbx <= x <= ubx
- * st. lbc <= s <= ubc
+ * st. lbx <= x < ubx
+ * st. h(x) - lbh = 0
+ * st. lbc <= c(x) <= ubc
  *
- * The primal-dual residual is computed from the KKT conditions. The residual
- * contains both primal and dual components intermixed.
+ * In Amigo, the design variables and multipliers are mixed in the solution
+ * vector. The gradient provided is
  *
- * [ grad(x) + A^{T} * lam ] - zlx + zux = 0
- * [                  c(x) ] - s         = 0
- *                      -lam - zlc + zuc = 0
- *        (xs - lb) * zl - barrier_param = 0
- *        (ub - xs) * zu - barrier_param = 0
+ * grad = [ g(x) + Ah^{T} * lamh + A^{T} * lam ]
+ *        [                               h(x) ]
+ *        [                               c(x) ]
  *
- * Here xlam represents the full primal-dual vector, zl and zu are the lower and
- * upper bounds for the design variables and slacks.
+ * The update to the solution of the linear system:
  *
- * The terms inside the square brackets are computed directly by the
- * optimization problem. The remaining terms are handled by the code in the
- * optimizer class.
- *
- * Linearizing the residual about the primal-dual point gives
- *
- * [ H  |  A^T ][ px   ] - pzlx + pzux = [ bx ]
- * [ A  |    0 ][ plam ] - ps          = [ bc ]
- *                 -plam - pzlc + pzuc = blam
- *          (xs - lb) * pzl + pxs * zl = bzl
- *          (ub - xs) * pzu - pxs * zu = bzu
- *
- * This system of equations can be simplified by solving for the updates pzl and
- * pzu in terms of pxs
- *
- * pzl = - (xs - lb)^{-1} * zl * pxs + (xs - lb)^{-1} * bzl
- * pzu =   (ub - xs)^{-1} * zu * pxs + (ub - xs)^{-1} * bzu
- *
- * Now, substituting these expressions into the equation for plam gives:
- *
- * - plam + C * ps = blam + (s - lbc)^{-1} * bzlc - (ubc - s)^{-1} * bzuc
- *
- * Where C is defined as
- *
- * C = ((s - lbc)^{-1} * zlc + (ubc - s)^{-1} * zuc)
- *
- * This can be re-arranged to find
- *
- * ps = C^{-1} * (plam + b2)
- *
- * where b2 = (blam + (s - lbc)^{-1} * bzlc - (ubc - s)^{-1} * bzuc)
- *
- * Subsituting this into the second equation gives
- *
- * A * px - C^{-1} * plam - C^{-1} * b2 = bc
- *
- * This can be expressed as
- *
- * A * px - C^{-1} * plam = rc
- *
- * where rc is:
- *
- * rc = bc + C^{-1} * b2
- *
- * or, expanding terms
- *
- * rc = bc + C^{-1} * (blam + (s - lbc)^{-1} * bzlc - (ubc - s)^{-1} * bzuc)
- *
- * Finding pzlx and pzux from pzl and pzu gives
- *
- * pzlx = - (x - lbx)^{-1} * zlx * px + (x - lbx)^{-1} * bzlx
- * pzux =   (ubx - x)^{-1} * zux * px + (ubx - x)^{-1} * bzux
- *
- * Substituting these into the first expression gives
- *
- * (H + D) * px + A^{T} * plam - (x - lbx)^{-1} * bzlx +
- *       (ubx - x)^{-1} * bzux = bx
- *
- * Simplifying gives
- *
- * (H + D) * px + A^{T} * plam = rx
- *
- * Where rx is
- *
- * rx = bx + (x - lbx)^{-1} * bzlx - (ubx - x)^{-1} * bzux
- *
- * Requiring the solution of the linear system:
- *
- * [(H + D) |   A^{T} ][ px   ] = [ rx ]
- * [A       | -C^{-1} ][ plam ] = [ rc ]
+ * [ (H + D) |  Ah^{T} |  A^{T}  ][ px    ] = [ rx ]
+ * [ Ah      |  0      |  0      ][ plamh ] = [ rh ]
+ * [ A       |  0      | -C^{-1} ][ plam  ] = [ rc ]
  *
  * @tparam T Numerical type for the computations
  */
@@ -168,7 +171,64 @@ class InteriorPointOptimizer {
                          std::shared_ptr<Vector<T>> upper)
       : problem(problem), lower(lower), upper(upper) {
     comm = problem->get_mpi_comm();
-    num_variables = problem->get_num_variables();
+
+    // Keep track of the different variable types
+    num_variables = 0;
+    num_equalities = 0;
+    num_inequalities = 0;
+
+    // Get the total number of variables (primal + dual)
+    int size = problem->get_num_variables();
+    const Vector<int> &is_multiplier = *problem->get_multiplier_indicator();
+
+    // Find how many types of variables
+    const Vector<T> &lb = *lower;
+    const Vector<T> &ub = *upper;
+    for (int i = 0; i < size; i++) {
+      if (is_multiplier[i]) {
+        if (!std::isinf(lb[i]) && !std::isinf(ub[i]) && lb[i] == ub[i]) {
+          num_equalities++;
+        } else {
+          num_inequalities++;
+        }
+      } else {
+        num_variables++;
+      }
+    }
+
+    // Allocate vectors
+    lbx.resize(num_variables);
+    ubx.resize(num_variables);
+    design_variable_indices.resize(num_variables);
+
+    lbh.resize(num_equalities);
+    equality_indices.resize(num_equalities);
+
+    lbc.resize(num_inequalities);
+    ubc.resize(num_inequalities);
+    inequality_indices.resize(num_inequalities);
+
+    // Set the variable indices and bounds
+    int num_vars = 0, num_eq = 0, num_ineq = 0;
+    for (int i = 0; i < size; i++) {
+      if (is_multiplier[i]) {
+        if (!std::isinf(lb[i]) && !std::isinf(ub[i]) && lb[i] == ub[i]) {
+          lbh[num_eq] = lb[i];
+          equality_indices[num_eq] = i;
+          num_eq++;
+        } else {
+          lbc[num_ineq] = lb[i];
+          ubc[num_ineq] = ub[i];
+          inequality_indices[num_ineq] = i;
+          num_ineq++;
+        }
+      } else {
+        lbx[num_vars] = lb[i];
+        ubx[num_vars] = ub[i];
+        design_variable_indices[num_vars] = i;
+        num_vars++;
+      }
+    }
   }
 
   /**
@@ -177,7 +237,9 @@ class InteriorPointOptimizer {
    * @return std::shared_ptr<OptVector<T>>
    */
   std::shared_ptr<OptVector<T>> create_opt_vector() const {
-    return std::make_shared<OptVector<T>>(problem);
+    return std::make_shared<OptVector<T>>(num_variables, num_equalities,
+                                          num_inequalities,
+                                          problem->create_vector());
   }
 
   /**
@@ -188,7 +250,8 @@ class InteriorPointOptimizer {
    */
   std::shared_ptr<OptVector<T>> create_opt_vector(
       std::shared_ptr<Vector<T>> x) const {
-    return std::make_shared<OptVector<T>>(x, problem);
+    return std::make_shared<OptVector<T>>(num_variables, num_equalities,
+                                          num_inequalities, x);
   }
 
   /**
@@ -197,67 +260,62 @@ class InteriorPointOptimizer {
    * @param vars All of the optimization variables
    */
   void initialize_multipliers_and_slacks(
+      T barrier_param, const std::shared_ptr<Vector<T>> grad,
       std::shared_ptr<OptVector<T>> vars) const {
-    // Get the multiplier indicator array
-    const Vector<int>& is_multiplier = *problem->get_multiplier_indicator();
+    // Get the dual values for the bound constraints
+    T *zl, *zu;
+    vars->get_bound_duals(&zl, &zu);
 
-    // Extract the optimization state vectors to make things easier
-    Vector<T>& x = *vars->x;    // Primal and dual variables
-    Vector<T>& xs = *vars->xs;  // Primal and slack variables
-    Vector<T>& zl = *vars->zl;
-    Vector<T>& zu = *vars->zu;
+    // Get the slack variable values
+    T *s, *sl, *tl, *su, *tu;
+    vars->get_slacks(&s, &sl, &tl, &su, &tu);
 
-    const Vector<T>& lb = *lower;
-    const Vector<T>& ub = *upper;
+    // Get the dual values for the slacks
+    T *zsl, *ztl, *zsu, *ztu;
+    vars->get_slack_duals(&zsl, &ztl, &zsu, &ztu);
 
+    // Get the solution vector
+    const Vector<T> &xlam = *vars->get_solution();
+
+    // Set a pointer to the vector
+    const Vector<T> &g = *grad;
+
+    T mu_sqrt = std::sqrt(barrier_param);
+
+    // Initialize the lower and upper bound dual variables
     for (int i = 0; i < num_variables; i++) {
-      if (is_multiplier[i]) {
-        // Set the multipliers to 1.0
-        x[i] = 1.0;
+      int index = design_variable_indices[i];
 
-        // Set the slack variables to either the mid-point, or inside the
-        // feasible region
-        if (!std::isinf(lb[i]) && !std::isinf(ub[i])) {
-          xs[i] = 0.5 * (lb[i] + ub[i]);
-        } else if (!std::isinf(lb[i])) {
-          if (xs[i] <= lb[i]) {
-            xs[i] = lb[i] + 1.0;
-          }
-        } else if (!std::isinf(ub[i])) {
-          if (xs[i] >= ub[i]) {
-            xs[i] = ub[i] - 1.0;
-          }
-        }
-      } else {
-        if (lb[i] <= x[i] && x[i] <= ub[i]) {
-          xs[i] = x[i];
-        } else {
-          if (!std::isinf(lb[i]) && !std::isinf(ub[i])) {
-            xs[i] = x[i] = 0.5 * (lb[i] + ub[i]);
-          }
-        }
+      T x = xlam[index];
+
+      zl[i] = zu[i] = 0.0;
+      if (!std::isinf(lbx[i])) {
+        zl[i] = barrier_param / (x - lbx[i]);
       }
-
-      // Set the lower and upper multipliers to 1.0
-      zl[i] = 1.0;
-      zu[i] = 1.0;
+      if (!std::isinf(ubx[i])) {
+        zu[i] = barrier_param / (ubx[i] - x);
+      }
     }
-  }
 
-  /**
-   * @brief Make sure that the design variables are consistent between x and xs
-   *
-   * @param vars The variable vector
-   */
-  void make_vars_consistent(std::shared_ptr<OptVector<T>> vars) const {
-    // Set the design variable values in xs as well
-    Vector<T>& x = *vars->x;
-    Vector<T>& xs = *vars->xs;
-    const Vector<int>& is_multiplier = *problem->get_multiplier_indicator();
+    // Initialize the slack variables
+    for (int i = 0; i < num_inequalities; i++) {
+      int index = inequality_indices[i];
+      s[i] = -g[index];
 
-    for (int i = 0; i < num_variables; i++) {
-      if (!is_multiplier[i]) {
-        xs[i] = x[i];
+      sl[i] = tl[i] = zsl[i] = ztl[i] = 0.0;
+      su[i] = tu[i] = zsu[i] = ztu[i] = 0.0;
+
+      if (!std::isinf(lbc[i])) {
+        sl[i] = mu_sqrt;
+        tl[i] = mu_sqrt;
+        zsl[i] = mu_sqrt;
+        ztl[i] = mu_sqrt;
+      }
+      if (!std::isinf(ubc[i])) {
+        su[i] = mu_sqrt;
+        tu[i] = mu_sqrt;
+        zsu[i] = mu_sqrt;
+        ztu[i] = mu_sqrt;
       }
     }
   }
@@ -266,87 +324,123 @@ class InteriorPointOptimizer {
    * @brief Compute the negative of the primal-dual residuals based on the value
    * of the gradient and the optimizer state variables
    *
-   * res.x = -( [ nabla f + A^{T} * lam ] - zlx + zux )
-   *          ( [                  c(x) ] - s         )
-   *
-   * res.xs = -(-lam - zlc + zuc)
-   * res.zl = -((xs - lb) * zl - barrier_param)
-   * res.zu = -((ub - sx) * zu - barrier_param)
-   *
    * @param barrier_param The barrier parameter for the residual
+   * @param gamma The penalty parameter
    * @param vars The optimization variables
    * @param grad The gradient computed from the problem
    * @param res The full KKT residual
    */
-  T compute_residual(T barrier_param, const std::shared_ptr<OptVector<T>> vars,
+  T compute_residual(T barrier_param, T gamma,
+                     const std::shared_ptr<OptVector<T>> vars,
                      const std::shared_ptr<Vector<T>> grad,
-                     std::shared_ptr<OptVector<T>> res) const {
-    const Vector<int>& is_multiplier = *problem->get_multiplier_indicator();
+                     std::shared_ptr<Vector<T>> res) const {
+    // Get the dual values for the bound constraints
+    const T *zl, *zu;
+    vars->get_bound_duals(&zl, &zu);
 
-    // Extract the vectors to make things easier
-    const Vector<T>& x = *vars->x;    // Primal and dual variables
-    const Vector<T>& xs = *vars->xs;  // Primal and slack variables
-    const Vector<T>& zl = *vars->zl;
-    const Vector<T>& zu = *vars->zu;
-    const Vector<T>& lb = *lower;
-    const Vector<T>& ub = *upper;
-    const Vector<T>& g = *grad;
+    // Get the slack variable values
+    const T *s, *sl, *tl, *su, *tu;
+    vars->get_slacks(&s, &sl, &tl, &su, &tu);
 
-    // Set references to the residuals
-    Vector<T>& rx = *res->x;
-    Vector<T>& rxs = *res->xs;
-    Vector<T>& rzl = *res->zl;
-    Vector<T>& rzu = *res->zu;
+    // Get the dual values for the slacks
+    const T *zsl, *ztl, *zsu, *ztu;
+    vars->get_slack_duals(&zsl, &ztl, &zsu, &ztu);
 
-    // Compute the residual of the full KKT system
+    // Get the solution vector - design variables and multipliers
+    const Vector<T> &xlam = *vars->get_solution();
+
+    // Set the gradient vector
+    const Vector<T> &g = *grad;
+    Vector<T> &r = *res;
+
+    // Zero the residual
+    res->zero();
+
+    // Compute the residual for the variables
     for (int i = 0; i < num_variables; i++) {
-      if (is_multiplier[i]) {
-        // This term is -(c(x) - s)
-        rx[i] = -(g[i] - xs[i]);
-      } else {
-        // This term is nabla -(f - A^{T} * lam - zl + zu)
-        if (!std::isinf(lb[i]) && !std::isinf(ub[i])) {
-          rx[i] = -(g[i] - zl[i] + zu[i]);
-        } else if (!std::isinf(lb[i])) {
-          rx[i] = -(g[i] - zl[i]);
-        } else if (!std::isinf(ub[i])) {
-          rx[i] = -(g[i] + zu[i]);
-        } else {
-          rx[i] = -g[i];
-        }
+      // Get the gradient component corresponding to this variable
+      int index = design_variable_indices[i];
+
+      // Extract the design variable value
+      T x = xlam[index];
+
+      // Compute the right-hand-side
+      T bx = -(g[index] - zl[i] + zu[i]);
+      if (!std::isinf(lbx[i])) {
+        T bzl = -((x - lbx[i]) * zl[i] - barrier_param);
+        bx += bzl / (x - lbx[i]);
+      }
+      if (!std::isinf(ubx[i])) {
+        T bzu = -((ubx[i] - x) * zu[i] - barrier_param);
+        bx -= bzu / (ubx[i] - x);
       }
 
-      // This term is -(-lam - zl + zu)
-      rxs[i] = 0.0;
-      if (is_multiplier[i]) {
-        if (lb[i] < ub[i]) {
-          rxs[i] = x[i];
-          if (!std::isinf(lb[i])) {
-            rxs[i] += zl[i];
-          }
-          if (!std::isinf(ub[i])) {
-            rxs[i] -= zu[i];
-          }
-        }
+      // Set the right-hand-side
+      r[index] = bx;
+    }
+
+    // Compute the contributions from the equality constraints
+    for (int i = 0; i < num_equalities; i++) {
+      int index = equality_indices[i];
+
+      // Set the right-hand-side for the equalities
+      r[index] = -g[index];
+    }
+
+    // Compute the contributions from the inequality constraints
+    for (int i = 0; i < num_inequalities; i++) {
+      int index = inequality_indices[i];
+
+      // Extract the multiplier from the solution vector
+      T lam = xlam[index];
+
+      // Set the right-hand-side values
+      T bc = -(g[index] - s[i]);
+      T blam = -(-lam - zsl[i] + zsu[i]);
+
+      // Build the components of C and compute its inverse
+      T C = 0.0;
+      T d = blam;
+      if (!std::isinf(lbc[i])) {
+        // Compute the right-hand-sides for the lower bound
+        T blaml = -(gamma - zsl[i] - ztl[i]);
+        T bsl = -(s[i] - lbc[i] - sl[i] + tl[i]);
+        T bzsl = -(sl[i] * zsl[i] - barrier_param);
+        T bztl = -(tl[i] * ztl[i] - barrier_param);
+
+        T inv_zsl = 1.0 / zsl[i];
+        T inv_ztl = 1.0 / ztl[i];
+        T Fl = inv_zsl * sl[i] + inv_ztl * tl[i];
+        T dl = bsl + inv_zsl * bzsl - inv_ztl * (bztl + tl[i] * blaml);
+
+        T inv_Fl = 1.0 / Fl;
+        d += inv_Fl * dl;
+        C += inv_Fl;
       }
 
-      // These terms are:
-      // rzl = -((xs - lb) * zl - barrier_param)
-      // rzu = -((ub - xs) * zu - barrier_param)
-      rzl[i] = 0.0;
-      rzu[i] = 0.0;
-      if (lb[i] < ub[i]) {
-        if (!std::isinf(lb[i])) {
-          rzl[i] = barrier_param - (xs[i] - lb[i]) * zl[i];
-        }
-        if (!std::isinf(ub[i])) {
-          rzu[i] = barrier_param - (ub[i] - xs[i]) * zu[i];
-        }
+      if (!std::isinf(ubc[i])) {
+        T blamu = -(gamma - zsu[i] - ztu[i]);
+        T bsu = -(ubc[i] - s[i] - su[i] + tu[i]);
+        T bzsu = -(su[i] * zsu[i] - barrier_param);
+        T bztu = -(tu[i] * ztu[i] - barrier_param);
+
+        T inv_zsu = 1.0 / zsu[i];
+        T inv_ztu = 1.0 / ztu[i];
+        T Fu = inv_zsu * su[i] + inv_ztu * tu[i];
+        T du = bsu + inv_zsu * bzsu - inv_ztu * (bztu + tu[i] * blamu);
+
+        T inv_Fu = 1.0 / Fu;
+        d -= inv_Fu * du;
+        C += inv_Fu;
       }
+
+      bc += d / C;
+
+      r[index] = bc;
     }
 
     // Compute the residual norm
-    T local_norm = rx.dot(rx) + rxs.dot(rxs) + rzl.dot(rzl) + rzu.dot(rzu);
+    T local_norm = res->dot(*res);
     T norm;
     MPI_Allreduce(&local_norm, &norm, 1, get_mpi_type<T>(), MPI_SUM, comm);
 
@@ -354,133 +448,124 @@ class InteriorPointOptimizer {
   }
 
   /**
-   * @brief Compute the reduced residual from the full primal-dual residual
-   *
-   * reduced = [ bx + (x - lbx)^{-1} * bzlx - (ubx - x)^{-1} * bzux ]
-   *           [ bc + C^{-1} * (blam + (s - lbc)^{-1} * bzlc
-   *                - (ubc - s)^{-1} * bzuc) ]
-   *
-   * @param vars The values of the optimization variables
-   * @param res The full residual vector
-   * @param reduced The reduced residual vector
-   */
-  void compute_reduced_residual(const std::shared_ptr<OptVector<T>> vars,
-                                const std::shared_ptr<OptVector<T>> res,
-                                std::shared_ptr<Vector<T>> reduced) const {
-    const Vector<int>& is_multiplier = *problem->get_multiplier_indicator();
-
-    // Extract the optimization state vectors to make things easier
-    const Vector<T>& xs = *vars->xs;  // Primal and slack variables
-    const Vector<T>& zl = *vars->zl;
-    const Vector<T>& zu = *vars->zu;
-    const Vector<T>& lb = *lower;
-    const Vector<T>& ub = *upper;
-
-    // Set references to the input residuals
-    const Vector<T>& bx = *res->x;
-    const Vector<T>& bxs = *res->xs;
-    const Vector<T>& bzl = *res->zl;
-    const Vector<T>& bzu = *res->zu;
-
-    // Set references for the reduced residuals
-    Vector<T>& rx = *reduced;
-
-    for (int i = 0; i < num_variables; i++) {
-      rx[i] = bx[i];
-
-      T contrib = 0.0;
-      if (lb[i] < ub[i]) {
-        if (!std::isinf(lb[i])) {
-          contrib += bzl[i] / (xs[i] - lb[i]);
-        }
-        if (!std::isinf(ub[i])) {
-          contrib -= bzu[i] / (ub[i] - xs[i]);
-        }
-      }
-
-      if (is_multiplier[i]) {
-        T Cinv = compute_Cinv(lb[i], ub[i], zl[i], zu[i], xs[i]);
-        rx[i] += Cinv * (bxs[i] + contrib);
-      } else {
-        rx[i] += contrib;
-      }
-    }
-  }
-
-  /**
    * @brief Compute the update for the full set of primal-dual variables
    *
+   * @param barrier_param The barrier parameter for the residual
+   * @param gamma The penalty parameter
    * @param vars The values of the optimization variables
-   * @param res The full space residual
    * @param reduced_update The update to the reduced design variables
    * @param update The full update of the optimization variables
    */
-  void compute_update_from_reduced(
-      const std::shared_ptr<OptVector<T>> vars,
-      const std::shared_ptr<OptVector<T>> res,
-      const std::shared_ptr<Vector<T>> reduced_update,
-      std::shared_ptr<OptVector<T>> update) const {
-    // Get the multiplier indicator array
-    const Vector<int>& is_multiplier = *problem->get_multiplier_indicator();
+  void compute_update(T barrier_param, T gamma,
+                      const std::shared_ptr<OptVector<T>> vars,
+                      const std::shared_ptr<Vector<T>> reduced_update,
+                      std::shared_ptr<OptVector<T>> update) const {
+    // Get the dual values for the bound constraints
+    const T *zl, *zu;
+    T *pzl, *pzu;
+    vars->get_bound_duals(&zl, &zu);
+    update->get_bound_duals(&pzl, &pzu);
 
-    // Extract the optimization state vectors to make things easier
-    const Vector<T>& xs = *vars->xs;  // Primal and slack variables
-    const Vector<T>& zl = *vars->zl;
-    const Vector<T>& zu = *vars->zu;
-    const Vector<T>& lb = *lower;
-    const Vector<T>& ub = *upper;
+    // Get the slack variable values
+    const T *s, *sl, *tl, *su, *tu;
+    T *ps, *psl, *ptl, *psu, *ptu;
+    vars->get_slacks(&s, &sl, &tl, &su, &tu);
+    update->get_slacks(&ps, &psl, &ptl, &psu, &ptu);
 
-    // Set references to the input residuals
-    const Vector<T>& bxs = *res->xs;
-    const Vector<T>& bzl = *res->zl;
-    const Vector<T>& bzu = *res->zu;
+    // Get the dual values for the slacks
+    const T *zsl, *ztl, *zsu, *ztu;
+    T *pzsl, *pztl, *pzsu, *pztu;
+    vars->get_slack_duals(&zsl, &ztl, &zsu, &ztu);
+    update->get_slack_duals(&pzsl, &pztl, &pzsu, &pztu);
 
-    // Set references for the full update
-    Vector<T>& px = *update->x;
-    Vector<T>& pxs = *update->xs;
-    Vector<T>& pzl = *update->zl;
-    Vector<T>& pzu = *update->zu;
+    // Get the solution update
+    const Vector<T> &xlam = *vars->get_solution();
+    Vector<T> &pxlam = *update->get_solution();
 
     // Copy the update for the design variables and dual variables
-    px.copy(*reduced_update);
+    pxlam.copy(*reduced_update);
 
-    // Set the values into the full update
     for (int i = 0; i < num_variables; i++) {
-      pxs[i] = 0.0;
-      if (is_multiplier[i]) {
-        // This is a multipler, compute the update for the corresponding slack
-        // variable
-        T Cinv = compute_Cinv(lb[i], ub[i], zl[i], zu[i], xs[i]);
+      // Get the gradient component corresponding to this variable
+      int index = design_variable_indices[i];
 
-        // contrib = (s - lc)^{-1} * bzl - (uc - s)^{-1} * bzu
-        T contrib = 0.0;
-        if (lb[i] < ub[i]) {
-          if (!std::isinf(lb[i])) {
-            contrib += bzl[i] / (xs[i] - lb[i]);
-          }
-          if (!std::isinf(ub[i])) {
-            contrib -= bzu[i] / (ub[i] - xs[i]);
-          }
-        }
+      // Extract the design variable
+      T x = xlam[index];
+      T px = pxlam[index];
 
-        // Compute the update for the slacks, multipliers and bounds
-        // ps = C^{-1} * (plam + blam + contrib))
-        pxs[i] = Cinv * (px[i] + bxs[i] + contrib);
-      } else {
-        pxs[i] = px[i];
+      // Compute the update step
+      if (!std::isinf(lbx[i])) {
+        T bzl = -((x - lbx[i]) * zl[i] - barrier_param);
+        pzl[i] = (bzl - zl[i] * px) / (x - lbx[i]);
+      }
+      if (!std::isinf(ubx[i])) {
+        T bzu = -((ubx[i] - x) * zu[i] - barrier_param);
+        pzu[i] = (bzu + zu[i] * px) / (ubx[i] - x);
+      }
+    }
+
+    for (int i = 0; i < num_inequalities; i++) {
+      int index = inequality_indices[i];
+
+      // Extract the multiplier from the solution vector
+      T lam = xlam[index];
+      T plam = pxlam[index];
+
+      // Compute all the contributions to the update
+      T blam = -(-lam - zsl[i] + zsu[i]);
+
+      // Build the components of C and compute its inverse
+      T C = 0.0;
+      T d = blam;
+      T Fl, dl, blaml, bsl, bzsl, bztl;
+      T Fu, du, blamu, bsu, bzsu, bztu;
+
+      if (!std::isinf(lbc[i])) {
+        // Compute the right-hand-sides for the lower bound
+        blaml = -(gamma - zsl[i] - ztl[i]);
+        bsl = -(s[i] - lbc[i] - sl[i] + tl[i]);
+        bzsl = -(sl[i] * zsl[i] - barrier_param);
+        bztl = -(tl[i] * ztl[i] - barrier_param);
+
+        T inv_zsl = 1.0 / zsl[i];
+        T inv_ztl = 1.0 / ztl[i];
+        Fl = inv_zsl * sl[i] + inv_ztl * tl[i];
+        dl = bsl + inv_zsl * bzsl - inv_ztl * (bztl + tl[i] * blaml);
+
+        T inv_Fl = 1.0 / Fl;
+        d += inv_Fl * dl;
+        C += inv_Fl;
       }
 
-      pzl[i] = 0.0;
-      pzu[i] = 0.0;
+      if (!std::isinf(ubc[i])) {
+        blamu = -(gamma - zsu[i] - ztu[i]);
+        bsu = -(ubc[i] - s[i] - su[i] + tu[i]);
+        bzsu = -(su[i] * zsu[i] - barrier_param);
+        bztu = -(tu[i] * ztu[i] - barrier_param);
 
-      // Compute the update for the design variable bounds
-      if (lb[i] < ub[i]) {
-        if (!std::isinf(lb[i])) {
-          pzl[i] = (bzl[i] - zl[i] * pxs[i]) / (xs[i] - lb[i]);
-        }
-        if (!std::isinf(ub[i])) {
-          pzu[i] = (bzu[i] + zu[i] * pxs[i]) / (ub[i] - xs[i]);
-        }
+        T inv_zsu = 1.0 / zsu[i];
+        T inv_ztu = 1.0 / ztu[i];
+        Fu = inv_zsu * su[i] + inv_ztu * tu[i];
+        du = bsu + inv_zsu * bzsu - inv_ztu * (bztu + tu[i] * blamu);
+
+        T inv_Fu = 1.0 / Fu;
+        d -= inv_Fu * du;
+        C += inv_Fu;
+      }
+
+      ps[i] = (plam + d) / C;
+
+      if (!std::isinf(lbc[i])) {
+        pzsl[i] = (-ps[i] + dl) / Fl;
+        pztl[i] = -blaml - pzsl[i];
+        psl[i] = (bzsl - sl[i] * pzsl[i]) / zsl[i];
+        ptl[i] = (bztl - tl[i] * pztl[i]) / ztl[i];
+      }
+      if (!std::isinf(ubc[i])) {
+        pzsu[i] = (ps[i] + du) / Fu;
+        pztu[i] = -blamu - pzsu[i];
+        psu[i] = (bzsu - su[i] * pzsu[i]) / zsu[i];
+        ptu[i] = (bztu - tu[i] * pztu[i]) / ztu[i];
       }
     }
   }
@@ -498,35 +583,58 @@ class InteriorPointOptimizer {
    */
   void compute_diagonal(const std::shared_ptr<OptVector<T>> vars,
                         std::shared_ptr<Vector<T>> diagonal) const {
-    const Vector<int>& is_multiplier = *problem->get_multiplier_indicator();
+    // Get the dual values for the bound constraints
+    const T *zl, *zu;
+    vars->get_bound_duals(&zl, &zu);
 
-    const Vector<T>& xs = *vars->xs;  // Primal and slack variables
-    const Vector<T>& zl = *vars->zl;
-    const Vector<T>& zu = *vars->zu;
-    const Vector<T>& lb = *lower;
-    const Vector<T>& ub = *upper;
+    // Get the slack variable values
+    const T *sl, *tl, *su, *tu;
+    vars->get_slacks(nullptr, &sl, &tl, &su, &tu);
 
-    Vector<T>& diag = *diagonal;
+    // Get the dual values for the slacks
+    const T *zsl, *ztl, *zsu, *ztu;
+    vars->get_slack_duals(&zsl, &ztl, &zsu, &ztu);
+
+    // Get the solution vector - design variables and multipliers
+    const Vector<T> &xlam = *vars->get_solution();
+
+    // Zero the residual
+    diagonal->zero();
+    Vector<T> &diag = *diagonal;
 
     for (int i = 0; i < num_variables; i++) {
-      diag[i] = 0.0;
-      if (lb[i] < ub[i]) {
-        // If the lower bound isn't infinite, add its value
-        if (!std::isinf(lb[i])) {
-          diag[i] += zl[i] / (xs[i] - lb[i]);
-        }
+      // Get the gradient component corresponding to this variable
+      int index = design_variable_indices[i];
 
-        // If the upper bound isn't infinite, add its value
-        if (!std::isinf(ub[i])) {
-          diag[i] += zu[i] / (ub[i] - xs[i]);
-        }
+      T x = xlam[index];
+
+      // If the lower bound isn't infinite, add its value
+      if (!std::isinf(lbx[i])) {
+        diag[index] += zl[i] / (x - lbx[i]);
       }
 
-      if (is_multiplier[i]) {
-        // Set the values of -C^{-1}
-        if (diag[i] != 0.0) {
-          diag[i] = -1.0 / diag[i];
-        }
+      // If the upper bound isn't infinite, add its value
+      if (!std::isinf(ubx[i])) {
+        diag[index] += zu[i] / (ubx[i] - x);
+      }
+    }
+
+    for (int i = 0; i < num_inequalities; i++) {
+      int index = inequality_indices[i];
+
+      // Build the components of C and compute its inverse
+      T C = 0.0;
+      if (!std::isinf(lbc[i])) {
+        T Fl = sl[i] / zsl[i] + tl[i] / ztl[i];
+        C += 1.0 / Fl;
+      }
+      if (!std::isinf(ubc[i])) {
+        T Fu = su[i] / zsu[i] + tu[i] / ztu[i];
+        C += 1.0 / Fu;
+      }
+
+      if (C != 0.0) {
+        diag[index] = -1.0 / C;
       }
     }
   }
@@ -538,60 +646,135 @@ class InteriorPointOptimizer {
    * @param vars The optimization state variables
    * @param update The update to the optimization state variables
    * @param alpha_x_max The step in the primal variables
+   * @param x_index The index of the variable that is limiting the step
    * @param alpha_z_max The step in the dual variables
+   * @param z_index The index of the multiplier limiting the step
    */
   void compute_max_step(const T tau, const std::shared_ptr<OptVector<T>> vars,
                         const std::shared_ptr<OptVector<T>> update,
-                        T& alpha_x_max, T& alpha_z_max) const {
-    // Extract the optimization state vectors to make things easier
-    const Vector<T>& xs = *vars->xs;  // Primal and slack variables
-    const Vector<T>& zl = *vars->zl;
-    const Vector<T>& zu = *vars->zu;
-    const Vector<T>& lb = *lower;
-    const Vector<T>& ub = *upper;
+                        T &alpha_x_max, int &x_index, T &alpha_z_max,
+                        int &z_index) const {
+    // Get the dual values for the bound constraints
+    T *zl, *zu;
+    const T *pzl, *pzu;
+    vars->get_bound_duals(&zl, &zu);
+    update->get_bound_duals(&pzl, &pzu);
 
-    // Set references for the full update
-    Vector<T>& pxs = *update->xs;
-    Vector<T>& pzl = *update->zl;
-    Vector<T>& pzu = *update->zu;
+    // Get the slack variable values
+    T *sl, *tl, *su, *tu;
+    const T *psl, *ptl, *psu, *ptu;
+    vars->get_slacks(nullptr, &sl, &tl, &su, &tu);
+    update->get_slacks(nullptr, &psl, &ptl, &psu, &ptu);
+
+    // Get the dual values for the slacks
+    T *zsl, *ztl, *zsu, *ztu;
+    const T *pzsl, *pztl, *pzsu, *pztu;
+    vars->get_slack_duals(&zsl, &ztl, &zsu, &ztu);
+    update->get_slack_duals(&pzsl, &pztl, &pzsu, &pztu);
+
+    // Get the solution update
+    const Vector<T> &xlam = *vars->get_solution();
+    const Vector<T> &pxlam = *update->get_solution();
 
     // Set the max step for the design variables and multipliers
     alpha_x_max = 1.0;
+    x_index = -1;
     alpha_z_max = 1.0;
+    z_index = -1;
 
     // Check for steps lengths for the design variables and slacks
     for (int i = 0; i < num_variables; i++) {
-      if (lb[i] < ub[i]) {
-        if (!std::isinf(lb[i]) && pxs[i] < 0.0) {
-          T numer = xs[i] - lb[i];
-          T alpha = -tau * numer / pxs[i];
-          if (alpha < alpha_x_max) {
-            alpha_x_max = alpha;
-          }
+      // Get the gradient component corresponding to this variable
+      int index = design_variable_indices[i];
+      T x = xlam[index];
+      T px = pxlam[index];
+
+      if (!std::isinf(lbx[i]) && px < 0.0) {
+        T numer = x - lbx[i];
+        T alpha = -tau * numer / px;
+        if (alpha < alpha_x_max) {
+          alpha_x_max = alpha;
+          x_index = index;
         }
-        if (!std::isinf(ub[i]) && pxs[i] > 0.0) {
-          T numer = ub[i] - xs[i];
-          T alpha = tau * numer / pxs[i];
-          if (alpha < alpha_x_max) {
-            alpha_x_max = alpha;
-          }
+      }
+      if (!std::isinf(ubx[i]) && px > 0.0) {
+        T numer = ubx[i] - x;
+        T alpha = tau * numer / px;
+        if (alpha < alpha_x_max) {
+          alpha_x_max = alpha;
+          x_index = index;
         }
       }
     }
 
     // Check step lengths for the multipliers
-    for (int i = 0; i < num_variables; i++) {
-      if (lb[i] < ub[i]) {
-        if (!std::isinf(lb[i]) && pzl[i] < 0.0) {
-          T alpha = -tau * zl[i] / pzl[i];
-          if (alpha < alpha_z_max) {
-            alpha_z_max = alpha;
+    for (int i = 0; i < num_inequalities; i++) {
+      int index = inequality_indices[i];
+
+      if (!std::isinf(lbc[i])) {
+        // Slack variables
+        if (psl[i] < 0.0) {
+          T alpha = -tau * sl[i] / psl[i];
+          if (alpha < alpha_x_max) {
+            alpha_x_max = alpha;
+            x_index = index;
           }
         }
-        if (!std::isinf(ub[i]) && pzu[i] < 0.0) {
-          T alpha = -tau * zu[i] / pzu[i];
+        if (ptl[i] < 0.0) {
+          T alpha = -tau * tl[i] / ptl[i];
+          if (alpha < alpha_x_max) {
+            alpha_x_max = alpha;
+            x_index = index;
+          }
+        }
+
+        // Dual variables
+        if (pzsl[i] < 0.0) {
+          T alpha = -tau * zsl[i] / pzsl[i];
           if (alpha < alpha_z_max) {
             alpha_z_max = alpha;
+            z_index = index;
+          }
+        }
+        if (pztl[i] < 0.0) {
+          T alpha = -tau * ztl[i] / pztl[i];
+          if (alpha < alpha_z_max) {
+            alpha_z_max = alpha;
+            z_index = index;
+          }
+        }
+      }
+
+      if (!std::isinf(ubc[i])) {
+        // Slack variables
+        if (psu[i] < 0.0) {
+          T alpha = -tau * su[i] / psu[i];
+          if (alpha < alpha_x_max) {
+            alpha_x_max = alpha;
+            x_index = index;
+          }
+        }
+        if (ptu[i] < 0.0) {
+          T alpha = -tau * tu[i] / ptu[i];
+          if (alpha < alpha_x_max) {
+            alpha_x_max = alpha;
+            x_index = index;
+          }
+        }
+
+        // Dual variables
+        if (pzsu[i] < 0.0) {
+          T alpha = -tau * zsu[i] / pzsu[i];
+          if (alpha < alpha_z_max) {
+            alpha_z_max = alpha;
+            z_index = index;
+          }
+        }
+        if (pztu[i] < 0.0) {
+          T alpha = -tau * ztu[i] / pztu[i];
+          if (alpha < alpha_z_max) {
+            alpha_z_max = alpha;
+            z_index = index;
           }
         }
       }
@@ -616,39 +799,184 @@ class InteriorPointOptimizer {
   void apply_step_update(const T alpha_x, const T alpha_z,
                          const std::shared_ptr<OptVector<T>> update,
                          std::shared_ptr<OptVector<T>> vars) const {
-    // Get the multiplier indicator array
-    const Vector<int>& is_multiplier = *problem->get_multiplier_indicator();
+    // Get the dual values for the bound constraints
+    T *zl, *zu;
+    const T *pzl, *pzu;
+    vars->get_bound_duals(&zl, &zu);
+    update->get_bound_duals(&pzl, &pzu);
 
-    // Extract the optimization state vectors to make things easier
-    Vector<T>& x = *vars->x;    // Primal and dual variables
-    Vector<T>& xs = *vars->xs;  // Primal and slack variables
-    Vector<T>& zl = *vars->zl;
-    Vector<T>& zu = *vars->zu;
+    // Get the slack variable values
+    T *s, *sl, *tl, *su, *tu;
+    const T *ps, *psl, *ptl, *psu, *ptu;
+    vars->get_slacks(&s, &sl, &tl, &su, &tu);
+    update->get_slacks(&ps, &psl, &ptl, &psu, &ptu);
 
-    // Set references for the full update
-    const Vector<T>& px = *update->x;
-    const Vector<T>& pxs = *update->xs;
-    const Vector<T>& pzl = *update->zl;
-    const Vector<T>& pzu = *update->zu;
+    // Get the dual values for the slacks
+    T *zsl, *ztl, *zsu, *ztu;
+    const T *pzsl, *pztl, *pzsu, *pztu;
+    vars->get_slack_duals(&zsl, &ztl, &zsu, &ztu);
+    update->get_slack_duals(&pzsl, &pztl, &pzsu, &pztu);
+
+    // Get the solution update
+    Vector<T> &xlam = *vars->get_solution();
+    const Vector<T> &pxlam = *update->get_solution();
 
     for (int i = 0; i < num_variables; i++) {
-      if (is_multiplier[i]) {
-        // Apply the update to the multipliers
-        x[i] += alpha_z * px[i];
+      // Get the gradient component corresponding to this variable
+      int index = design_variable_indices[i];
+      xlam[index] += alpha_x * pxlam[index];
 
-        // Apply the update to the slack variables
-        xs[i] += alpha_x * pxs[i];
-      } else {
-        // Apply the update to the design variables
-        x[i] += alpha_x * px[i];
+      // Update the dual variables
+      if (!std::isinf(lbx[i])) {
+        zl[i] += alpha_z * pzl[i];
+      }
+      if (!std::isinf(ubx[i])) {
+        zu[i] += alpha_z * pzu[i];
+      }
+    }
 
-        // Copy the design variable to the (x, s) vector
-        xs[i] = x[i];
+    // Update the multipliers
+    for (int i = 0; i < num_equalities; i++) {
+      int index = equality_indices[i];
+      xlam[index] += alpha_x * pxlam[index];
+    }
+
+    // Update the slack variables and remaining dual variables
+    for (int i = 0; i < num_inequalities; i++) {
+      int index = inequality_indices[i];
+      xlam[index] += alpha_x * pxlam[index];
+
+      s[i] += alpha_x * ps[i];
+      if (!std::isinf(lbc[i])) {
+        sl[i] += alpha_x * psl[i];
+        tl[i] += alpha_x * ptl[i];
+        zsl[i] += alpha_z * pzsl[i];
+        ztl[i] += alpha_z * pztl[i];
+      }
+      if (!std::isinf(ubc[i])) {
+        su[i] += alpha_x * psu[i];
+        tu[i] += alpha_x * ptu[i];
+        zsu[i] += alpha_z * pzsu[i];
+        ztu[i] += alpha_z * pztu[i];
+      }
+    }
+  }
+
+  /**
+   * @brief Compute the complementarity value for all inequalities
+   *
+   * @param vars The optimization variables
+   * @return T The return complementarity value
+   */
+  T compute_complementarity(const std::shared_ptr<OptVector<T>> vars) {
+    // Get the dual values for the bound constraints
+    const T *zl, *zu;
+    vars->get_bound_duals(&zl, &zu);
+
+    // Get the slack variable values
+    const T *sl, *tl, *su, *tu;
+    vars->get_slacks(nullptr, &sl, &tl, &su, &tu);
+
+    // Get the dual values for the slacks
+    const T *zsl, *ztl, *zsu, *ztu;
+    vars->get_slack_duals(&zsl, &ztl, &zsu, &ztu);
+
+    Vector<T> &xlam = *vars->get_solution();
+
+    T partial_sum[2] = {0.0, 0.0};
+    for (int i = 0; i < num_variables; i++) {
+      // Extract the design variable value
+      int index = design_variable_indices[i];
+      T x = xlam[index];
+
+      if (!std::isinf(lbx[i])) {
+        partial_sum[0] += (x - lbx[i]) * zl[i];
+        partial_sum[1] += 1.0;
+      }
+      if (!std::isinf(ubx[i])) {
+        partial_sum[0] += (ubx[i] - x) * zu[i];
+        partial_sum[1] += 1.0;
+      }
+    }
+
+    for (int i = 0; i < num_inequalities; i++) {
+      if (!std::isinf(lbc[i])) {
+        partial_sum[0] += sl[i] * zsl[i] + tl[i] * ztl[i];
+        partial_sum[1] += 2.0;
       }
 
-      // Update the bound multipliers (x and s)
-      zl[i] += alpha_z * pzl[i];
-      zu[i] += alpha_z * pzu[i];
+      if (!std::isinf(ubc[i])) {
+        partial_sum[0] += su[i] * zsu[i] + tu[i] * ztu[i];
+        partial_sum[1] += 2.0;
+      }
+    }
+
+    // Compute the complementarity value across all processors
+    T sum[2];
+    MPI_Allreduce(partial_sum, sum, 2, get_mpi_type<T>(), MPI_SUM, comm);
+
+    if (sum[1] == 0.0) {
+      return 0.0;
+    }
+
+    return sum[0] / sum[1];
+  }
+
+  /**
+   * @brief Compute the variable values for the new starting point
+   *
+   * @param beta_min The minimum value of the multiplier or slack variable
+   * @param vars The values of the variables at the initialization point
+   * @param update The affine update computed with barrier_param = 0.0
+   * @param temp The resulting variable values after the update
+   */
+  void compute_affine_start_point(T beta_min,
+                                  const std::shared_ptr<OptVector<T>> vars,
+                                  const std::shared_ptr<OptVector<T>> update,
+                                  std::shared_ptr<OptVector<T>> temp) {
+    // Get the dual values for the bound constraints
+    const T *zl, *zu;
+    const T *pzl, *pzu;
+    T *nzl, *nzu;
+    vars->get_bound_duals(&zl, &zu);
+    update->get_bound_duals(&pzl, &pzu);
+    temp->get_bound_duals(&nzl, &nzu);
+
+    // Get the slack variable values
+    const T *sl, *tl, *su, *tu;
+    const T *psl, *ptl, *psu, *ptu;
+    T *nsl, *ntl, *nsu, *ntu;
+    vars->get_slacks(nullptr, &sl, &tl, &su, &tu);
+    update->get_slacks(nullptr, &psl, &ptl, &psu, &ptu);
+    temp->get_slacks(nullptr, &nsl, &ntl, &nsu, &ntu);
+
+    // Get the dual values for the slacks
+    const T *zsl, *ztl, *zsu, *ztu;
+    const T *pzsl, *pztl, *pzsu, *pztu;
+    T *nzsl, *nztl, *nzsu, *nztu;
+    vars->get_slack_duals(&zsl, &ztl, &zsu, &ztu);
+    update->get_slack_duals(&pzsl, &pztl, &pzsu, &pztu);
+    temp->get_slack_duals(&nzsl, &nztl, &nzsu, &nztu);
+
+    for (int i = 0; i < num_variables; i++) {
+      nzl[i] = std::max(beta_min, std::fabs(zl[i] + pzl[i]));
+      nzu[i] = std::max(beta_min, std::fabs(zu[i] + pzu[i]));
+    }
+
+    for (int i = 0; i < num_inequalities; i++) {
+      if (!std::isinf(lbc[i])) {
+        nsl[i] = std::max(beta_min, std::fabs(sl[i] + psl[i]));
+        ntl[i] = std::max(beta_min, std::fabs(tl[i] + ptl[i]));
+        nzsl[i] = std::max(beta_min, std::fabs(zsl[i] + pzsl[i]));
+        nztl[i] = std::max(beta_min, std::fabs(ztl[i] + pztl[i]));
+      }
+
+      if (!std::isinf(ubc[i])) {
+        nsu[i] = std::max(beta_min, std::fabs(su[i] + psu[i]));
+        ntu[i] = std::max(beta_min, std::fabs(tu[i] + ptu[i]));
+        nzsu[i] = std::max(beta_min, std::fabs(zsu[i] + pzsu[i]));
+        nztu[i] = std::max(beta_min, std::fabs(ztu[i] + pztu[i]));
+      }
     }
   }
 
@@ -661,133 +989,206 @@ class InteriorPointOptimizer {
    * @param update The update to the full system
    * @param hessian The Hessian matrix - must be recomputed
    */
-  void check_update(const std::shared_ptr<OptVector<T>> vars,
-                    const std::shared_ptr<OptVector<T>> res,
+  void check_update(T barrier_param, T gamma,
+                    const std::shared_ptr<Vector<T>> grad,
+                    const std::shared_ptr<OptVector<T>> vars,
                     const std::shared_ptr<OptVector<T>> update,
                     const std::shared_ptr<CSRMat<T>> hessian) {
     // Recompute the Hessian so it doesn't have the diagonal terms
-    problem->hessian(vars->x, hessian);
+    problem->hessian(vars->get_solution(), hessian);
 
-    // Get the multiplier indicator array
-    const Vector<int>& is_multiplier = *problem->get_multiplier_indicator();
+    // Get the dual values for the bound constraints
+    const T *zl, *zu;
+    const T *pzl, *pzu;
+    vars->get_bound_duals(&zl, &zu);
+    update->get_bound_duals(&pzl, &pzu);
 
-    // Extract the optimization state vectors to make things easier
-    const Vector<T>& xs = *vars->xs;  // Primal and slack variables
-    const Vector<T>& zl = *vars->zl;
-    const Vector<T>& zu = *vars->zu;
-    const Vector<T>& lb = *lower;
-    const Vector<T>& ub = *upper;
+    // Get the slack variable values
+    const T *s, *sl, *tl, *su, *tu;
+    const T *ps, *psl, *ptl, *psu, *ptu;
+    vars->get_slacks(&s, &sl, &tl, &su, &tu);
+    update->get_slacks(&ps, &psl, &ptl, &psu, &ptu);
 
-    // Set references for the full update
-    const Vector<T>& px = *update->x;
-    const Vector<T>& pxs = *update->xs;
-    const Vector<T>& pzl = *update->zl;
-    const Vector<T>& pzu = *update->zu;
+    // Get the dual values for the slacks
+    const T *zsl, *ztl, *zsu, *ztu;
+    const T *pzsl, *pztl, *pzsu, *pztu;
+    vars->get_slack_duals(&zsl, &ztl, &zsu, &ztu);
+    update->get_slack_duals(&pzsl, &pztl, &pzsu, &pztu);
 
-    // Set references for the right-hand-side
-    const Vector<T>& bx = *res->x;
-    const Vector<T>& bxs = *res->xs;
-    const Vector<T>& bzl = *res->zl;
-    const Vector<T>& bzu = *res->zu;
+    // Get the solution update
+    const Vector<T> &xlam = *vars->get_solution();
+    const Vector<T> &pxlam = *update->get_solution();
+
+    // Set the gradient vector
+    const Vector<T> &g = *grad;
 
     std::shared_ptr<Vector<T>> tmp = problem->create_vector();
-    Vector<T>& t = *tmp;
+    Vector<T> &t = *tmp;
+
+    std::printf("KKT step check\n");
 
     // Form the residuals from the different expressions
     // [ H  |  A^T ][ px   ] - pzlx + pzux = [ bx ]
     // [ A  |    0 ][ plam ] - ps          = [ bc ]
 
-    hessian->mult(update->x, tmp);
+    hessian->mult(update->get_solution(), tmp);
     for (int i = 0; i < num_variables; i++) {
-      if (is_multiplier[i]) {
-        t[i] = t[i] - pxs[i] - bx[i];
-      } else {
-        if (!std::isinf(lb[i]) && !std::isinf(ub[i])) {
-          t[i] = t[i] - pzl[i] + pzu[i] - bx[i];
-        } else if (!std::isinf(lb[i])) {
-          t[i] = t[i] - pzl[i] - bx[i];
-        } else if (!std::isinf(ub[i])) {
-          t[i] = t[i] - pzu[i] - bx[i];
-        } else {
-          t[i] = t[i] - bx[i];
-        }
+      int index = design_variable_indices[i];
+
+      // Compute the residual
+      T rx = (g[index] - zl[i] + zu[i]);
+      t[index] = t[index] - pzl[i] + pzu[i] + rx;
+    }
+    for (int i = 0; i < num_equalities; i++) {
+      int index = equality_indices[i];
+      T rh = g[index];
+      t[index] = t[index] + rh;
+    }
+    for (int i = 0; i < num_inequalities; i++) {
+      int index = inequality_indices[i];
+      T rc = g[index] - s[i];
+      t[index] = t[index] - ps[i] + rc;
+    }
+    std::printf("%-40s %15.6e\n", "||H * px - pzl + pzu + rx|| ",
+                std::sqrt(tmp->dot(*tmp)));
+
+    // (xs - lb) * pzl + pxs * zl + rzl
+    t.zero();
+    for (int i = 0; i < num_variables; i++) {
+      int index = design_variable_indices[i];
+      if (!std::isinf(lbx[i])) {
+        T rzl = (xlam[index] - lbx[i]) * zl[i] - barrier_param;
+        t[i] = (xlam[index] - lbx[i]) * pzl[i] + pxlam[index] * zl[i] + rzl;
       }
     }
-    std::printf("%-40s %15.6e\n", "||H * px - zl + zu - bx|| ",
+    std::printf("%-40s %15.6e\n", "||(x - lbx) * pzl + px * zl + rzl|| ",
+                std::sqrt(tmp->dot(*tmp)));
+
+    // (ub - xs) * pzu - pxs * zu = bzu
+    t.zero();
+    for (int i = 0; i < num_variables; i++) {
+      int index = design_variable_indices[i];
+      if (!std::isinf(ubx[i])) {
+        T rzu = (ubx[i] - xlam[index]) * zu[i] - barrier_param;
+        t[i] = (ubx[i] - xlam[index]) * pzu[i] - zu[i] * pxlam[index] + rzu;
+      }
+    }
+    std::printf("%-40s %15.6e\n", "||(ubx - x) * pzu - px * zu + rzu|| ",
                 std::sqrt(tmp->dot(*tmp)));
 
     // -plam - pzlc + pzuc = blam
-    for (int i = 0; i < num_variables; i++) {
-      t[i] = -bxs[i];
-      if (is_multiplier[i]) {
-        if (lb[i] < ub[i]) {
-          t[i] += px[i];
-          if (!std::isinf(lb[i])) {
-            t[i] += pzl[i];
-          }
-          if (!std::isinf(ub[i])) {
-            t[i] -= pzu[i];
-          }
-        }
-      }
+    t.zero();
+    for (int i = 0; i < num_inequalities; i++) {
+      int index = inequality_indices[i];
+
+      T lam = xlam[index];
+      T plam = pxlam[index];
+      T rlam = (-lam - zsl[i] + zsu[i]);
+      t[index] = (-plam - pzsl[i] + pzsu[i]) + rlam;
     }
     std::printf("%-40s %15.6e\n", "||-plam - pzlc + pzuc - blam|| ",
                 std::sqrt(tmp->dot(*tmp)));
 
-    // (xs - lb) * pzl + pxs * zl = bzl
-    for (int i = 0; i < num_variables; i++) {
-      if (lb[i] < ub[i]) {
-        if (!std::isinf(lb[i])) {
-          t[i] = (xs[i] - lb[i]) * pzl[i] + pxs[i] * zl[i] - bzl[i];
-        } else {
-          t[i] = 0.0;
-        }
-      } else {
-        t[i] = 0.0;
+    // Test equations for the lower bounds
+    // rsl = s - lc - sl + tl
+    t.zero();
+    for (int i = 0; i < num_inequalities; i++) {
+      int index = inequality_indices[i];
+      if (!std::isinf(lbc[i])) {
+        T rsl = s[i] - lbc[i] - sl[i] + tl[i];
+        t[index] = ps[i] - psl[i] + ptl[i] + rsl;
       }
     }
-    std::printf("%-40s %15.6e\n", "||(xs - lb) * pzl + pxs * zl - bzl|| ",
+    std::printf("%-40s %15.6e\n", "||ps - psl + ptl + rsl|| ",
                 std::sqrt(tmp->dot(*tmp)));
 
-    // (ub - xs) * pzu - pxs * zu = bzu
-    tmp->zero();
-    for (int i = 0; i < num_variables; i++) {
-      if (lb[i] < ub[i]) {
-        if (!std::isinf(ub[i])) {
-          t[i] = (ub[i] - xs[i]) * pzu[i] - pxs[i] * zu[i] - bzu[i];
-        } else {
-          t[i] = 0.0;
-        }
-      } else {
-        t[i] = 0.0;
+    // rlaml = gamma - zsl - ztl
+    t.zero();
+    for (int i = 0; i < num_inequalities; i++) {
+      int index = inequality_indices[i];
+      if (!std::isinf(lbc[i])) {
+        T rlaml = gamma - zsl[i] - ztl[i];
+        t[index] = -pzsl[i] - pztl[i] + rlaml;
       }
     }
-    std::printf("%-40s %15.6e\n", "||(ub - xs) * pzu + pxs * zu - bzu|| ",
+    std::printf("%-40s %15.6e\n", "||-pzsl - pztl + rlaml|| ",
+                std::sqrt(tmp->dot(*tmp)));
+
+    // rzsl = Sl * zsl - barrier_param
+    t.zero();
+    for (int i = 0; i < num_inequalities; i++) {
+      int index = inequality_indices[i];
+      if (!std::isinf(lbc[i])) {
+        T rzsl = sl[i] * zsl[i] - barrier_param;
+        t[index] = sl[i] * pzsl[i] + zsl[i] * psl[i] + rzsl;
+      }
+    }
+    std::printf("%-40s %15.6e\n", "||sl * pzsl + zsl * psl + rzsl|| ",
+                std::sqrt(tmp->dot(*tmp)));
+
+    // rzsl = Tl * ztl - barrier_param
+    t.zero();
+    for (int i = 0; i < num_inequalities; i++) {
+      int index = inequality_indices[i];
+      if (!std::isinf(lbc[i])) {
+        T rztl = tl[i] * ztl[i] - barrier_param;
+        t[index] = tl[i] * pztl[i] + ztl[i] * ptl[i] + rztl;
+      }
+    }
+    std::printf("%-40s %15.6e\n", "||tl * pztl + ztl * ptl + rztl|| ",
+                std::sqrt(tmp->dot(*tmp)));
+
+    // Test equations for the upper bounds
+    // rsu = ubc - s - su + tu
+    t.zero();
+    for (int i = 0; i < num_inequalities; i++) {
+      int index = inequality_indices[i];
+      if (!std::isinf(ubc[i])) {
+        T rsu = ubc[i] - s[i] - su[i] + tu[i];
+        t[index] = -ps[i] - psu[i] + ptu[i] + rsu;
+      }
+    }
+    std::printf("%-40s %15.6e\n", "||-ps - psu + ptu + rsu|| ",
+                std::sqrt(tmp->dot(*tmp)));
+
+    // rlamu = gamma - zsu - ztu
+    t.zero();
+    for (int i = 0; i < num_inequalities; i++) {
+      int index = inequality_indices[i];
+      if (!std::isinf(ubc[i])) {
+        T rlamu = gamma - zsu[i] - ztu[i];
+        t[index] = -pzsu[i] - pztu[i] + rlamu;
+      }
+    }
+    std::printf("%-40s %15.6e\n", "||-pzsu - pztu + rlamu|| ",
+                std::sqrt(tmp->dot(*tmp)));
+
+    // rzsu = Su * zsu - barrier_param
+    t.zero();
+    for (int i = 0; i < num_inequalities; i++) {
+      int index = inequality_indices[i];
+      if (!std::isinf(ubc[i])) {
+        T rzsu = su[i] * zsu[i] - barrier_param;
+        t[index] = su[i] * pzsu[i] + zsu[i] * psu[i] + rzsu;
+      }
+    }
+    std::printf("%-40s %15.6e\n", "||su * pzsu + zsu * psu + rzsu|| ",
+                std::sqrt(tmp->dot(*tmp)));
+
+    // rzsu = Tu * ztu - barrier_param
+    t.zero();
+    for (int i = 0; i < num_inequalities; i++) {
+      int index = inequality_indices[i];
+      if (!std::isinf(ubc[i])) {
+        T rztu = tu[i] * ztu[i] - barrier_param;
+        t[index] = tu[i] * pztu[i] + ztu[i] * ptu[i] + rztu;
+      }
+    }
+    std::printf("%-40s %15.6e\n", "||tu * pztu + ztu * ptu + rztu|| ",
                 std::sqrt(tmp->dot(*tmp)));
   }
 
  private:
-  T compute_Cinv(const T lb, const T ub, const T zl, const T zu,
-                 const T xs) const {
-    T C = 0.0;
-    if (lb < ub) {
-      // If the lower bound isn't infinite, add its value
-      if (!std::isinf(lb)) {
-        C += zl / (xs - lb);
-      }
-
-      // If the upper bound isn't infinite, add its value
-      if (!std::isinf(ub)) {
-        C += zu / (ub - xs);
-      }
-    }
-
-    if (C != 0.0) {
-      return 1.0 / C;
-    }
-    return 0.0;
-  }
-
   // The optimization problem
   std::shared_ptr<OptimizationProblem<T>> problem;
 
@@ -797,8 +1198,20 @@ class InteriorPointOptimizer {
   // The MPI communicator
   MPI_Comm comm;
 
-  // The number of primal and dual variables
-  int num_variables;
+  int num_variables;     // Number of design variables
+  int num_equalities;    // The number of equalities
+  int num_inequalities;  // The number of inequalities
+
+  // Information about the location of the design variables and
+  // multipliers/constraints within the solution vector
+  std::vector<int> design_variable_indices;
+  std::vector<int> equality_indices;
+  std::vector<int> inequality_indices;
+
+  // Store local copies of the lower/upper bounds
+  std::vector<T> lbx, ubx;  // Design variables
+  std::vector<T> lbc, ubc;  // Inequality bounds
+  std::vector<T> lbh;       // Equality constraints
 };
 
 }  // namespace amigo

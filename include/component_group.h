@@ -33,9 +33,9 @@ class SerialGroupBackend {
     Data data;
     Input input;
     T value = 0.0;
-    int length = layout.get_num_elements();
+    int num_elems = layout.get_num_elements();
 
-    for (int i = 0; i < length; i++) {
+    for (int i = 0; i < num_elems; i++) {
       data_layout.get_values(i, data_vec, data);
       layout.get_values(i, vec, input);
       value += Component::lagrange(data, input);
@@ -176,9 +176,9 @@ class SerialOutputBackend {
       typename Component::template Data<T> data;
       typename Component::template Input<T> input;
       typename Component::template Output<T> output;
-      int length = layout.get_num_elements();
+      int num_elems = layout.get_num_elements();
 
-      for (int i = 0; i < length; i++) {
+      for (int i = 0; i < num_elems; i++) {
         data_layout.get_values(i, data_vec, data);
         layout.get_values(i, vec, input);
         Component::compute_output(data, input, output);
@@ -211,9 +211,9 @@ class SerialOutputBackend {
       typename Component::template Data<A2D::ADScalar<T, 1>> data;
       typename Component::template Input<A2D::ADScalar<T, 1>> input;
       typename Component::template Output<A2D::ADScalar<T, 1>> output;
-      int length = layout.get_num_elements();
+      int num_elems = layout.get_num_elements();
 
-      for (int i = 0; i < length; i++) {
+      for (int i = 0; i < num_elems; i++) {
         data_layout.get_values(i, data_vec, data);
 
         T jac_elem[noutputs * ncomp];
@@ -265,9 +265,9 @@ class SerialOutputBackend {
       typename Component::template Data<A2D::ADScalar<T, 1>> data;
       typename Component::template Input<A2D::ADScalar<T, 1>> input;
       typename Component::template Output<A2D::ADScalar<T, 1>> output;
-      int length = layout.get_num_elements();
+      int num_elems = layout.get_num_elements();
 
-      for (int i = 0; i < length; i++) {
+      for (int i = 0; i < num_elems; i++) {
         layout.get_values(i, vec, input);
 
         T jac_elem[noutputs * ndata];
@@ -313,14 +313,14 @@ class OmpGroupBackend {
   OmpGroupBackend(IndexLayout<ndata> &data_layout, IndexLayout<ncomp> &layout,
                   IndexLayout<noutputs> &output_layout)
       : num_colors(0), elem_per_color(nullptr) {
-    int length, ncomps;
+    int num_elems, ncomps;
     const int *array;
-    layout.get_data(&length, &ncomps, &array);
+    layout.get_data(&num_elems, &ncomps, &array);
 
     // Create a coloring for the layout
     int *elem_by_color_ptr;
     int *elem_by_color;
-    OrderingUtils::color_elements(length, ncomp, array, &num_colors,
+    OrderingUtils::color_elements(num_elems, ncomp, array, &num_colors,
                                   &elem_by_color_ptr, &elem_by_color);
 
     // Re-order the data and the variable layouts
@@ -349,10 +349,10 @@ class OmpGroupBackend {
                       const IndexLayout<ncomp> &layout,
                       const Vector<T> &data_vec, const Vector<T> &vec) const {
     T value = 0.0;
-    int length = layout.get_num_elements();
+    int num_elems = layout.get_num_elements();
 
 #pragma omp parallel for reduction(+ : value)
-    for (int i = 0; i < length; i++) {
+    for (int i = 0; i < num_elems; i++) {
       Data data;
       Input input;
       data_layout.get_values(i, data_vec, data);

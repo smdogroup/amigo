@@ -375,10 +375,8 @@ PYBIND11_MODULE(amigo, mod) {
 
   py::class_<amigo::OptVector<double>,
              std::shared_ptr<amigo::OptVector<double>>>(mod, "OptVector")
-      .def_readwrite("x", &amigo::OptVector<double>::x)
-      .def_readwrite("xs", &amigo::OptVector<double>::xs)
-      .def_readwrite("zl", &amigo::OptVector<double>::zl)
-      .def_readwrite("zu", &amigo::OptVector<double>::zu)
+      .def("get_solution",
+           py::overload_cast<>(&amigo::OptVector<double>::get_solution))
       .def("zero", &amigo::OptVector<double>::zero)
       .def("copy", &amigo::OptVector<double>::copy);
 
@@ -402,14 +400,10 @@ PYBIND11_MODULE(amigo, mod) {
       .def("initialize_multipliers_and_slacks",
            &amigo::InteriorPointOptimizer<
                double>::initialize_multipliers_and_slacks)
-      .def("make_vars_consistent",
-           &amigo::InteriorPointOptimizer<double>::make_vars_consistent)
       .def("compute_residual",
            &amigo::InteriorPointOptimizer<double>::compute_residual)
-      .def("compute_reduced_residual",
-           &amigo::InteriorPointOptimizer<double>::compute_reduced_residual)
-      .def("compute_update_from_reduced",
-           &amigo::InteriorPointOptimizer<double>::compute_update_from_reduced)
+      .def("compute_update",
+           &amigo::InteriorPointOptimizer<double>::compute_update)
       .def("compute_diagonal",
            &amigo::InteriorPointOptimizer<double>::compute_diagonal)
       .def("compute_max_step",
@@ -418,11 +412,17 @@ PYBIND11_MODULE(amigo, mod) {
               const std::shared_ptr<amigo::OptVector<double>> vars,
               const std::shared_ptr<amigo::OptVector<double>> update) {
              double alpha_x, alpha_z;
-             self.compute_max_step(tau, vars, update, alpha_x, alpha_z);
-             return py::make_tuple(alpha_x, alpha_z);
+             int x_index, z_index;
+             self.compute_max_step(tau, vars, update, alpha_x, x_index, alpha_z,
+                                   z_index);
+             return py::make_tuple(alpha_x, x_index, alpha_z, z_index);
            })
       .def("apply_step_update",
            &amigo::InteriorPointOptimizer<double>::apply_step_update)
+      .def("compute_complementarity",
+           &amigo::InteriorPointOptimizer<double>::compute_complementarity)
+      .def("compute_affine_start_point",
+           &amigo::InteriorPointOptimizer<double>::compute_affine_start_point)
       .def("check_update",
            &amigo::InteriorPointOptimizer<double>::check_update);
 }
