@@ -689,20 +689,38 @@ class InteriorPointOptimizer {
       T x = xlam[index];
       T px = pxlam[index];
 
-      if (!std::isinf(lbx[i]) && px < 0.0) {
-        T numer = x - lbx[i];
-        T alpha = -tau * numer / px;
-        if (alpha < alpha_x_max) {
-          alpha_x_max = alpha;
-          x_index = index;
+      if (!std::isinf(lbx[i])) {
+        if (px < 0.0) {
+          T numer = x - lbx[i];
+          T alpha = -tau * numer / px;
+          if (alpha < alpha_x_max) {
+            alpha_x_max = alpha;
+            x_index = index;
+          }
+        }
+        if (pzl[i] < 0.0) {
+          T alpha = -tau * zl[i] / pzl[i];
+          if (alpha < alpha_z_max) {
+            alpha_z_max = alpha;
+            z_index = index;
+          }
         }
       }
-      if (!std::isinf(ubx[i]) && px > 0.0) {
-        T numer = ubx[i] - x;
-        T alpha = tau * numer / px;
-        if (alpha < alpha_x_max) {
-          alpha_x_max = alpha;
-          x_index = index;
+      if (!std::isinf(ubx[i])) {
+        if (px > 0.0) {
+          T numer = ubx[i] - x;
+          T alpha = tau * numer / px;
+          if (alpha < alpha_x_max) {
+            alpha_x_max = alpha;
+            x_index = index;
+          }
+        }
+        if (pzu[i] < 0.0) {
+          T alpha = -tau * zu[i] / pzu[i];
+          if (alpha < alpha_z_max) {
+            alpha_z_max = alpha;
+            z_index = index;
+          }
         }
       }
     }
