@@ -30,6 +30,7 @@ class DirectScipySolver:
 
         # Compute the Hessian
         self.problem.hessian(x, self.hess, zero_design_contrib=zero_design_contrib)
+        H0 = tocsr(self.hess)
         self.hess.add_diagonal(diag)
 
         data = self.hess.get_data()
@@ -542,14 +543,12 @@ class Optimizer:
                     hess,
                 )
 
-            # px_array = self.update.get_solution().get_array()
-            # print(px_array[x_index_prev])
-
             # Compute the max step in the multipliers
             alpha_x, x_index, alpha_z, z_index = self.optimizer.compute_max_step(
                 tau, self.vars, self.update
             )
 
+            # Set the line search step length for the primal and dual variables to be equal to one another
             alpha_x = alpha_z = min(alpha_x, alpha_z)
 
             # Compute the step length
@@ -557,16 +556,13 @@ class Optimizer:
             alpha = 1.0
             line_iters = 1
             for j in range(max_line_iters):
-                # Copy the variable values
-                xt = self.temp.get_solution()
-                self.temp.copy(self.vars)
-
                 # Apply the update to get the new variable values at candidate step length alpha
                 self.optimizer.apply_step_update(
-                    alpha * alpha_x, alpha * alpha_z, self.update, self.temp
+                    alpha * alpha_x, alpha * alpha_z, self.vars, self.update, self.temp
                 )
 
                 # Compute the gradient at the new point
+                xt = self.temp.get_solution()
                 if self.distribute:
                     self.mpi_problem.gradient(xt, self.grad)
                 else:

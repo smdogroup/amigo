@@ -280,7 +280,7 @@ class InteriorPointOptimizer {
     // Set a pointer to the vector
     const Vector<T> &g = *grad;
 
-    T mu_sqrt = std::sqrt(barrier_param);
+    T mu_sqrt = barrier_param;  // std::sqrt(barrier_param);
 
     // Initialize the lower and upper bound dual variables
     for (int i = 0; i < num_variables; i++) {
@@ -290,10 +290,10 @@ class InteriorPointOptimizer {
 
       zl[i] = zu[i] = 0.0;
       if (!std::isinf(lbx[i])) {
-        zl[i] = barrier_param / (x - lbx[i]);
+        zl[i] = barrier_param;  //  // barrier_param / (x - lbx[i]);
       }
       if (!std::isinf(ubx[i])) {
-        zu[i] = barrier_param / (ubx[i] - x);
+        zu[i] = barrier_param;  // barrier_param / (ubx[i] - x);
       }
     }
 
@@ -517,8 +517,8 @@ class InteriorPointOptimizer {
       // Build the components of C and compute its inverse
       T C = 0.0;
       T d = blam;
-      T Fl, dl, blaml, bsl, bzsl, bztl;
-      T Fu, du, blamu, bsu, bzsu, bztu;
+      T Fl = 0.0, dl = 0.0, blaml = 0.0, bsl = 0.0, bzsl = 0.0, bztl = 0.0;
+      T Fu = 0.0, du = 0.0, blamu = 0.0, bsu = 0.0, bzsu = 0.0, bztu = 0.0;
 
       if (!std::isinf(lbc[i])) {
         // Compute the right-hand-sides for the lower bound
@@ -811,71 +811,70 @@ class InteriorPointOptimizer {
    *
    * @param alpha_x Step length for the primal variables
    * @param alpha_z Step length for the dual variables
-   * @param update Update to the state variables
    * @param vars Input/output variables that are updated
+   * @param update Update to the state variables
+   * @param temp The resulting variable values after the update
    */
   void apply_step_update(const T alpha_x, const T alpha_z,
+                         const std::shared_ptr<OptVector<T>> vars,
                          const std::shared_ptr<OptVector<T>> update,
-                         std::shared_ptr<OptVector<T>> vars) const {
+                         std::shared_ptr<OptVector<T>> temp) const {
     // Get the dual values for the bound constraints
-    T *zl, *zu;
+    const T *zl, *zu;
     const T *pzl, *pzu;
+    T *nzl, *nzu;
     vars->get_bound_duals(&zl, &zu);
     update->get_bound_duals(&pzl, &pzu);
+    temp->get_bound_duals(&nzl, &nzu);
 
     // Get the slack variable values
-    T *s, *sl, *tl, *su, *tu;
+    const T *s, *sl, *tl, *su, *tu;
     const T *ps, *psl, *ptl, *psu, *ptu;
+    T *ns, *nsl, *ntl, *nsu, *ntu;
     vars->get_slacks(&s, &sl, &tl, &su, &tu);
     update->get_slacks(&ps, &psl, &ptl, &psu, &ptu);
+    temp->get_slacks(&ns, &nsl, &ntl, &nsu, &ntu);
 
     // Get the dual values for the slacks
-    T *zsl, *ztl, *zsu, *ztu;
+    const T *zsl, *ztl, *zsu, *ztu;
     const T *pzsl, *pztl, *pzsu, *pztu;
+    T *nzsl, *nztl, *nzsu, *nztu;
     vars->get_slack_duals(&zsl, &ztl, &zsu, &ztu);
     update->get_slack_duals(&pzsl, &pztl, &pzsu, &pztu);
+    temp->get_slack_duals(&nzsl, &nztl, &nzsu, &nztu);
 
     // Get the solution update
-    Vector<T> &xlam = *vars->get_solution();
+    const Vector<T> &xlam = *vars->get_solution();
     const Vector<T> &pxlam = *update->get_solution();
+    Vector<T> &nxlam = *temp->get_solution();
+
+    nxlam.copy(xlam);
+    nxlam.axpy(alpha_x, pxlam);
 
     for (int i = 0; i < num_variables; i++) {
-      // Get the gradient component corresponding to this variable
-      int index = design_variable_indices[i];
-      xlam[index] += alpha_x * pxlam[index];
-
       // Update the dual variables
       if (!std::isinf(lbx[i])) {
-        zl[i] += alpha_z * pzl[i];
+        nzl[i] = zl[i] + alpha_z * pzl[i];
       }
       if (!std::isinf(ubx[i])) {
-        zu[i] += alpha_z * pzu[i];
+        nzu[i] = zu[i] + alpha_z * pzu[i];
       }
-    }
-
-    // Update the multipliers
-    for (int i = 0; i < num_equalities; i++) {
-      int index = equality_indices[i];
-      xlam[index] += alpha_x * pxlam[index];
     }
 
     // Update the slack variables and remaining dual variables
     for (int i = 0; i < num_inequalities; i++) {
-      int index = inequality_indices[i];
-      xlam[index] += alpha_x * pxlam[index];
-
-      s[i] += alpha_x * ps[i];
+      ns[i] = s[i] + alpha_x * ps[i];
       if (!std::isinf(lbc[i])) {
-        sl[i] += alpha_x * psl[i];
-        tl[i] += alpha_x * ptl[i];
-        zsl[i] += alpha_z * pzsl[i];
-        ztl[i] += alpha_z * pztl[i];
+        nsl[i] = sl[i] + alpha_x * psl[i];
+        ntl[i] = tl[i] + alpha_x * ptl[i];
+        nzsl[i] = zsl[i] + alpha_z * pzsl[i];
+        nztl[i] = ztl[i] + alpha_z * pztl[i];
       }
       if (!std::isinf(ubc[i])) {
-        su[i] += alpha_x * psu[i];
-        tu[i] += alpha_x * ptu[i];
-        zsu[i] += alpha_z * pzsu[i];
-        ztu[i] += alpha_z * pztu[i];
+        nsu[i] = su[i] + alpha_x * psu[i];
+        ntu[i] = tu[i] + alpha_x * ptu[i];
+        nzsu[i] = zsu[i] + alpha_z * pzsu[i];
+        nztu[i] = ztu[i] + alpha_z * pztu[i];
       }
     }
   }
