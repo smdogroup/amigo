@@ -39,6 +39,21 @@ class DirectScipySolver:
 
         return
 
+    def compute_eigenvalues(self, x, diag=None, k=20, sigma=0.0, which="LM"):
+        """
+        Compute the eigenvalues and eigenvectors
+        """
+        self.problem.hessian(x, self.hess, zero_design_contrib=False)
+        if diag is not None:
+            self.hess.add_diagonal(diag)
+
+        data = self.hess.get_data()
+        H = csr_matrix((data, self.cols, self.rowp), shape=(self.nrows, self.ncols))
+
+        eigs, vecs = eigsh(H, k=k, sigma=sigma, which=which)
+
+        return eigs, vecs
+
 
 class DirectPetscSolver:
     def __init__(self, comm, mpi_problem):
@@ -216,28 +231,6 @@ class Optimizer:
 
         return
 
-    # def write_state_vars(self, vars):
-
-    #     lb = self.lower.get_array()
-    #     ub = self.upper.get_array()
-
-    #     x = vars.x.get_array()
-    #     xs = vars.xs.get_array()
-    #     zl = vars.zl.get_array()
-    #     zu = vars.zu.get_array()
-
-    #     num_vars = len(x)
-    #     for i in range(num_vars):
-    #         if i % 50 == 0:
-    #             line = f"{'idx':>4s} {'x':>10s} {'xs':>10s} "
-    #             line += f"{'zl':>10s} {'zu':>10s} {'lb':>10s} {'ub':>10s}"
-    #             print(line)
-
-    #         line = f"{i:4d} {x[i]:10.3e} {xs[i]:10.3e} "
-    #         line += f"{zl[i]:10.3e} {zu[i]:10.3e} "
-    #         line += f"{lb[i]:10.3e} {ub[i]:10.3e}"
-    #         print(line)
-
     def write_log(self, iteration, iter_data):
         # Write out to the log information about this line
         if iteration % 10 == 0:
@@ -272,12 +265,15 @@ class Optimizer:
             "backtracting_factor": 0.5,
             "record_components": [],
             "gamma_peanlty": 1e3,
+            "equal_primal_dual_step": False,
+            "init_least_squares_multipliers": True,
+            "init_affine_step_multipliers": False,
         }
 
         default.update(options)
         return default
 
-    def _compute_least_squares_multipliers(self, x, grad):
+    def _compute_least_squares_multipliers(self):
         """
         Compute the least squares multiplier estimates by solving the system of equations
 
@@ -307,6 +303,7 @@ class Optimizer:
         res_array[is_mult_array != 0] = 0.0
 
         # Find the solution values
+        x = self.vars.get_solution()
         self.solver.solve(x, self.diag, self.res, self.px, zero_design_contrib=True)
 
         # Update the multiplier values
@@ -360,7 +357,7 @@ class Optimizer:
 
         return barrier
 
-    def _add_regularization_terms(self, diag, eps_x=1e-4, eps_c=1e-4):
+    def _add_regularization_terms(self, diag, eps_x=1e-4, eps_z=1e-4):
         if self.distribute:
             is_mult = self.mpi_problem.get_multiplier_indicator()
         else:
@@ -370,7 +367,7 @@ class Optimizer:
         # Add regularization terms
         diag_array = diag.get_array()
         diag_array[is_mult_array == 0] += eps_x
-        diag_array[is_mult_array == 1] -= eps_c
+        diag_array[is_mult_array == 1] -= eps_z
 
         return
 
@@ -403,8 +400,8 @@ class Optimizer:
         # Data that is recorded at each iteration
         opt_data = {"options": options, "converged": False, "iterations": []}
 
-        barrier_param = options["initial_barrier_param"]
-        gamma_penalty = options["gamma_peanlty"]
+        self.barrier_param = options["initial_barrier_param"]
+        self.gamma_penalty = options["gamma_peanlty"]
         max_iters = options["max_iterations"]
         tau = options["fraction_to_boundary"]
         tol = options["convergence_tolerance"]
@@ -427,16 +424,20 @@ class Optimizer:
 
         # Set the initial point and slack variable
         self.optimizer.initialize_multipliers_and_slacks(
-            barrier_param, self.grad, self.vars
+            self.barrier_param, self.grad, self.vars
         )
 
         # Initialize the multipliers
-        self._compute_least_squares_multipliers(x, self.grad)
+        if options["init_affine_step_multipliers"]:
+            # Compute the
+            self._compute_least_squares_multipliers()
 
-        # Improve the initial estimate
-        barrier_param = self._compute_affine_multipliers(gamma_penalty=gamma_penalty)
-
-        # barrier_param = self.optimizer.compute_complementarity(self.vars)
+            # Compute the affine step multipliers and
+            self.barrier_param = self._compute_affine_multipliers(
+                beta_min=self.barrier_param, gamma_penalty=self.gamma_penalty
+            )
+        elif options["init_least_squares_multipliers"]:
+            self._compute_least_squares_multipliers()
 
         # Compute the gradient
         if self.distribute:
@@ -455,34 +456,14 @@ class Optimizer:
 
             # Compute the complete KKT residual
             res_norm = self.optimizer.compute_residual(
-                barrier_param, gamma_penalty, self.vars, self.grad, self.res
+                self.barrier_param, self.gamma_penalty, self.vars, self.grad, self.res
             )
-
-            # if i == 200:
-            #     rview = ModelVector(self.model, x=self.res)
-            #     print(np.max(np.absolute(rview["ac.qdot"])))
-            #     print(np.argmax(np.absolute(rview["ac.qdot"])))
-            #     print(np.max(np.absolute(rview["ac.q"])))
-            #     print(np.argmax(np.absolute(rview["ac.q"])))
-            #     exit(0)
-
-            # # Find all the names with the indices
-            # inputs, _, _, _ = self.model.get_all_names()
-            # print("x_index_prev = ", x_index_prev)
-            # for name in inputs:
-            #     indices = self.model.get_indices(name)
-            #     loc = np.where(indices.flatten() == x_index_prev)[0]
-            #     for k in loc:
-            #         print(name, k, indices.flatten()[k])
-
-            # res_array = self.res.get_array()
-            # print(res_array[x_index_prev])
 
             # Set information about the residual norm into the
             iter_data = {
                 "iteration": i,
                 "residual": res_norm,
-                "barrier_param": barrier_param,
+                "barrier_param": self.barrier_param,
                 "line_iters": line_iters,
                 "alpha_x": alpha_x_prev,
                 "x_index": x_index_prev,
@@ -501,31 +482,35 @@ class Optimizer:
             opt_data["iterations"].append(iter_data)
 
             barrier_converged = False
-            if barrier_param <= 0.1 * tol and res_norm < tol:
+            if self.barrier_param <= 0.1 * tol and res_norm < tol:
                 opt_data["converged"] = True
                 break
-            elif res_norm < 0.1 * barrier_param:
+            elif res_norm < 0.1 * self.barrier_param:
                 barrier_converged = True
 
             # Check if the barrier problem has converged
             if barrier_converged:
                 frac = options["monotone_barrier_fraction"]
-                barrier_param *= frac
+                self.barrier_param *= frac
 
                 # Re-compute the reduced residual for the right-hand-side of the KKT system
                 res_norm = self.optimizer.compute_residual(
-                    barrier_param, gamma_penalty, self.vars, self.grad, self.res
+                    self.barrier_param,
+                    self.gamma_penalty,
+                    self.vars,
+                    self.grad,
+                    self.res,
                 )
 
             # Add the diagonal contributions to the Hessian matrix
             self.optimizer.compute_diagonal(self.vars, self.diag)
 
-            # Solve the KKT system
+            # Solve the KKT system with the computed diagonal entries
             self.solver.solve(x, self.diag, self.res, self.px)
 
             # Compute the full update based on the reduced variable update
             self.optimizer.compute_update(
-                barrier_param, gamma_penalty, self.vars, self.px, self.update
+                self.barrier_param, self.gamma_penalty, self.vars, self.px, self.update
             )
 
             # Check the update
@@ -535,8 +520,8 @@ class Optimizer:
                 else:
                     hess = self.problem.create_matrix()
                 self.optimizer.check_update(
-                    barrier_param,
-                    gamma_penalty,
+                    self.barrier_param,
+                    self.gamma_penalty,
                     self.grad,
                     self.vars,
                     self.update,
@@ -549,7 +534,8 @@ class Optimizer:
             )
 
             # Set the line search step length for the primal and dual variables to be equal to one another
-            alpha_x = alpha_z = min(alpha_x, alpha_z)
+            if options["equal_primal_dual_step"]:
+                alpha_x = alpha_z = min(alpha_x, alpha_z)
 
             # Compute the step length
             max_line_iters = options["max_line_search_iterations"]
@@ -570,7 +556,11 @@ class Optimizer:
 
                 # Compute the residual at the perturbed point
                 res_norm_new = self.optimizer.compute_residual(
-                    barrier_param, gamma_penalty, self.temp, self.grad, self.res
+                    self.barrier_param,
+                    self.gamma_penalty,
+                    self.temp,
+                    self.grad,
+                    self.res,
                 )
 
                 if res_norm_new < res_norm or j == max_line_iters - 1:
