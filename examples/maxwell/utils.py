@@ -12,7 +12,7 @@ def plot_matrix(dense_mat):
     return
 
 
-def plot_solution(xyz_nodeCoords, z, title="fig", fname="contour.jpg", flag=False):
+def plot_solution(xyz_nodeCoords, conn, z, title="fig", fname="contour.jpg", flag=False):
     """
     Create a contour plot of the solution.
     Inputs:
@@ -38,36 +38,35 @@ def plot_solution(xyz_nodeCoords, z, title="fig", fname="contour.jpg", flag=Fals
     x = xyz_nodeCoords[:, 0]
     y = xyz_nodeCoords[:, 1]
 
-    # create a Delaunay triangultion
-    tri = mtri.Triangulation(x, y)
-    # ntri = tri.triangles.shape[0]
+    # create a Delaunay triangulation
+    # tri = mtri.Triangulation(x, y)
+    tri = mtri.Triangulation(x, y, conn)
 
-    # Refine the data
-    refiner = mtri.UniformTriRefiner(tri)
-    # tri_refi, z_refi = refiner.refine_field(z, subdiv=3)
 
-    # Defin colormap
+    # Define colormap
     cmap = "coolwarm"
 
     # Plot solution
     fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(8, 6))
-    # plot = ax.tricontour(tri_refi, z_refi, levels=levels, cmap=cmap)
-    plot = ax.tricontour(tri, z, levels=levels, cmap=cmap)
-    plot = ax.tricontourf(tri, z, levels=levels, cmap=cmap)
-    # ax.set_aspect("equal", adjustable="box")
-    # ax.set_title(title, fontsize=10)
+    cntr = ax.tricontourf(tri, z, levels=levels, cmap=cmap)
+    ax.tricontour(
+        tri, z, levels=levels, colors="k", linewidths=0.3, alpha=0.5
+    )  # optional contour lines
+
+    # Overlay mesh
+    ax.triplot(tri, color="k", lw=0.3, alpha=0.8)  # mesh edges
 
     norm = mpl.colors.Normalize(vmin=min_level, vmax=max_level)
     cbar = fig.colorbar(
         mpl.cm.ScalarMappable(norm=norm, cmap=cmap), ax=ax, location="right"
     )
-
     cbar.set_ticks([min(z), (min(z) + max(z)) / 2.0, max(z)])
-    # cbar.set_ticklabels([mn,md,mx])
 
+    ax.set_title(title, fontsize=12)
+    ax.set_aspect("equal", adjustable="box")
     fig.tight_layout()
 
-    if flag == True:
+    if flag:
         plt.savefig(fname, dpi=800, edgecolor="none")
 
     return

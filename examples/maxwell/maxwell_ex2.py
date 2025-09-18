@@ -39,8 +39,8 @@ class Maxwell(am.Component):
         self.add_data("x_coord", shape=(3,))
         self.add_data("y_coord", shape=(3,))
 
-        # Define constants
-        self.add_constant("alpha", 10.0)  # 1/mu_r
+        # Material for each element
+        self.add_data("alpha")
 
         # Define inputs to the problem
         self.add_input("u", shape=(3,), value=0.0)  # Element solution
@@ -55,13 +55,15 @@ class Maxwell(am.Component):
         xi, eta = qxi_qeta[n]
 
         # Extract inputs
-        alpha = self.constants["alpha"]
         u = self.inputs["u"]
 
         # Extract mesh data
         X = self.data["x_coord"]
         Y = self.data["y_coord"]
         N, N_xi, N_ea = compute_shape_derivs(xi, eta, X, Y, self.vars)
+
+        # Extract material
+        alpha = self.data["alpha"]
 
         # Set the values of the shape funcs derivs
         Nx = self.vars["Nx"]
@@ -149,13 +151,9 @@ class DirichletBc(am.Component):
         self.add_input("lam", value=1.0)
         self.add_objective("obj")
 
-        # self.add_constraint("disp_res", value=1.0, lower=0.0, upper=0.0)
-        # self.add_constraint("bc_res", value=1.0, lower=0.0, upper=0.0)
         return
 
     def compute(self):
-        # self.constraints["bc_res"] = self.inputs["u"]
-        # self.constraints["disp_res"] = self.inputs["lam"]
         self.objective["obj"] = self.inputs["u"] * self.inputs["lam"]
         return
 
@@ -170,11 +168,19 @@ class NodeSource(am.Component):
 
         # States
         self.add_input("u")
+        return
+
+
+class MaterialSource(am.Component):
+    def __init__(self):
+        super().__init__()
+        self.add_data("alpha")
+        return
 
 
 if __name__ == "__main__":
     # Retrieve mesh information for the analysis
-    inp_filename = "plate.inp"
+    inp_filename = "multimaterial.inp"
     parser = InpParser()
     parser.parse_inp(inp_filename)
 
@@ -182,46 +188,38 @@ if __name__ == "__main__":
     X = parser.get_nodes()
 
     # Get element connectivity
-    conn = parser.get_conn("SURFACE1", "CPS3")
+    conn_surface1 = parser.get_conn("SURFACE1", "CPS3")
+    conn_surface2 = parser.get_conn("SURFACE2", "CPS3")
+    print(len(conn_surface1), len(conn_surface2))
+    conn = np.concatenate((conn_surface1, conn_surface2))
 
     # Get the boundary condition nodes
     edge1 = parser.get_conn("LINE1", "T3D2")
     edge2 = parser.get_conn("LINE2", "T3D2")
     edge3 = parser.get_conn("LINE3", "T3D2")
     edge4 = parser.get_conn("LINE4", "T3D2")
-
-    # Print out mesh information
-    print("Node Coords")
-    print(tabulate(X, headers=["x", "y", "z"]))
-
-    print("\nConnectivity")
-    print(tabulate(conn, headers=["n1", "n2", "n3"]))
-
-    print("\nBoundary condition edges")
-    print("Edge1:", edge1.flatten())
-    print("Edge2:", edge2.flatten())
-    print("Edge3:", edge3.flatten())
-    print("Edge4:", edge4.flatten())
+    edge5 = parser.get_conn("LINE5", "T3D2")
+    edge6 = parser.get_conn("LINE6", "T3D2")
+    edge7 = parser.get_conn("LINE7", "T3D2")
+    edge8 = parser.get_conn("LINE8", "T3D2")
+    edge9 = parser.get_conn("LINE9", "T3D2")
+    edge10 = parser.get_conn("LINE10", "T3D2")
 
     # Concatenate the unique node tgas for the dirichlet bc
     dirichlet_bc_tags = np.concatenate(
         (
-            edge1.flatten(),
-            edge2.flatten(),
-            # edge3.flatten(),
-            # edge4.flatten(),
+            edge9.flatten(),
+            edge8.flatten(),
+            edge7.flatten(),
+            edge6.flatten(),
         ),
         axis=None,
     )
     dirichlet_bc_tags = np.unique(dirichlet_bc_tags, sorted=True)
-    print("\nDirichlet BC Tags:", dirichlet_bc_tags)
 
-    # Define the total number of elements and nodes in the mesh
+    # Total number of elements and nodes in the mesh
     nelems = conn.shape[0]
     nnodes = X.shape[0]
-
-    # Element tags for coil region
-    # coil_elem_tags = np.linspace(0, nelems - 1, nelems)
 
     # Define parser arguments
     parser = argparse.ArgumentParser()
@@ -268,11 +266,10 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    # Define your amigo module
-    module_name = "maxwell"
-    model = am.Model(module_name=module_name)
+    # Define amigo module
+    model = am.Model("maxwell")
 
-    # Add physics components to amigo model
+    # Maxwell physics
     maxwell = Maxwell()
     model.add_component(name="maxwell", size=nelems, comp_obj=maxwell)
 
@@ -283,19 +280,38 @@ if __name__ == "__main__":
     model.add_component(
         "dirichlet_bc", size=len(dirichlet_bc_tags), comp_obj=dirichlet_bc
     )
-    model.link("src.u", "dirichlet_bc.u", src_indices=dirichlet_bc_tags)
 
-    # Add source components to the amigo model
     node_src = NodeSource()
-    model.add_component("src", nnodes, node_src)
+    model.add_component("node_src", nnodes, node_src)
 
+    materials = MaterialSource()
+    model.add_component("material_src", 2, materials)  # 2 materials
+
+    # Link the node coordinates to the the components
     # Ex: maxwell.y_coord = src.y_coord[conn]
-    model.link("maxwell.x_coord", "src.x_coord", tgt_indices=conn)
-    model.link("maxwell.y_coord", "src.y_coord", tgt_indices=conn)
-    model.link("coils.x_coord", "src.x_coord", tgt_indices=conn)
-    model.link("coils.y_coord", "src.y_coord", tgt_indices=conn)
-    model.link("coils.u", "src.u", tgt_indices=conn)
-    model.link("maxwell.u", "src.u", tgt_indices=conn)
+    model.link("maxwell.x_coord", "node_src.x_coord", tgt_indices=conn)
+    model.link("maxwell.y_coord", "node_src.y_coord", tgt_indices=conn)
+    model.link("coils.x_coord", "node_src.x_coord", tgt_indices=conn)
+    model.link("coils.y_coord", "node_src.y_coord", tgt_indices=conn)
+
+    # Link the solution vectors
+    model.link("coils.u", "node_src.u", tgt_indices=conn)
+    model.link("maxwell.u", "node_src.u", tgt_indices=conn)
+
+    # Link the material properties for each surface
+    material1_indices = np.linspace(
+        0, len(conn_surface1) - 1, len(conn_surface1), dtype=int
+    )
+    material2_indices = np.linspace(
+        0, len(conn_surface2) - 1, len(conn_surface2), dtype=int
+    ) + int(len(conn_surface1))
+
+    # material_src.alpha1 = maxwell.alpha[material1_indices]
+    model.link("material_src.alpha[0]", "maxwell.alpha", tgt_indices=material1_indices)
+    model.link("material_src.alpha[1]", "maxwell.alpha", tgt_indices=material2_indices)
+
+    # Link dirichlet bc nodes
+    model.link("node_src.u", "dirichlet_bc.u", src_indices=dirichlet_bc_tags)
 
     # Build module
     if args.build:
@@ -319,8 +335,10 @@ if __name__ == "__main__":
 
     # Set the problem data
     data = model.get_data_vector()
-    data["src.x_coord"] = X[:, 0]
-    data["src.y_coord"] = X[:, 1]
+    data["node_src.x_coord"] = X[:, 0]
+    data["node_src.y_coord"] = X[:, 1]
+    data["material_src.alpha[0]"] = 10.0
+    data["material_src.alpha[1]"] = 100.0
     problem = model.get_opt_problem()
 
     mat = problem.create_matrix()
@@ -336,10 +354,11 @@ if __name__ == "__main__":
 
     # Plot matrix
     # utils.plot_matrix(csr_mat.todense())
+    # plt.show()
 
     # Plot solution field
     ans.get_array()[:] = spsolve(csr_mat, g.get_array())
     ans_local = ans
-    vals = ans_local.get_array()[model.get_indices("src.u")]
-    utils.plot_solution(X, vals)
+    vals = ans_local.get_array()[model.get_indices("node_src.u")]
+    utils.plot_solution(X, conn, vals)
     plt.show()
