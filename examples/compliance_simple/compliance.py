@@ -353,10 +353,12 @@ topo = Topology()
 model.add_component("topo", nelems, topo)
 
 # Link the data
+# Set topo.x_coord = src.x_coord[conn]
 model.link("topo.x_coord", "src.x_coord", tgt_indices=conn)
 model.link("topo.y_coord", "src.y_coord", tgt_indices=conn)
 
 # Link the inputs and the outputs
+# Set topo.u = src.u[conn]
 model.link("topo.u", "src.u", tgt_indices=conn)
 model.link("topo.v", "src.v", tgt_indices=conn)
 

@@ -282,7 +282,7 @@ scaling = {"velocity": 100.0, "altitude": 1000.0, "range": 1000.0, "mass": 1000.
 ac = AircraftDynamics(scaling)
 trap = TrapezoidRule()
 src = BSplineSource(n=10)
-bspline = am.BSplineInterpolant(k=4, n=10)
+bspline = am.BSplineInterpolant(npts=(num_time_steps + 1), k=4, n=10)
 obj = Objective()
 ic = InitialConditions(scaling)
 fc = FinalConditions(scaling)
