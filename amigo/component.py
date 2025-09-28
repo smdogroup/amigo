@@ -1319,6 +1319,18 @@ class Component:
         for line in out_decl:
             cpp += "    " + line + ";\n"
 
+        var_decl = self.vars.generate_cpp_decl(mode="eval", template_name=template_name)
+        for line in var_decl:
+            cpp += "    " + line + ";\n"
+
+        body = self.vars.generate_passive_cpp()
+        for line in body:
+            cpp += "    " + line + ";\n"
+
+        body = self.vars.generate_active_cpp(mode="eval")
+        for line in body:
+            cpp += "    " + line + ";\n"
+
         lines = self.outputs.generate_cpp()
         for line in lines:
             cpp += "    " + line + ";\n"

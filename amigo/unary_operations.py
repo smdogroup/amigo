@@ -2,6 +2,14 @@ import math
 from .expressions import Expr, UnaryNode, OpNode
 
 
+def abs(expr):
+    return Expr(UnaryNode("fabs", math.fabs, expr.node))
+
+
+def fabs(expr):
+    return Expr(UnaryNode("fabs", math.fabs, expr.node))
+
+
 def sqrt(expr):
     return Expr(UnaryNode("sqrt", math.sqrt, expr.node))
 

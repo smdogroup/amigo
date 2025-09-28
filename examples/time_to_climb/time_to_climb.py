@@ -1,7 +1,6 @@
 import amigo as am
 import numpy as np
 import sys
-from scipy.interpolate import BSpline
 import matplotlib.pylab as plt
 import niceplots
 import argparse
@@ -57,143 +56,7 @@ class BSplineSource(am.Component):
             n (int) : Number of interpolating points
         """
         super().__init__()
-        self.n = n
-        self.add_input("x", shape=n)
-        return
-
-
-class BSplineInterpolant(am.Component):
-    def __init__(self, k: int = 4, n: int = 10):
-        """
-        Bspline interpolation component
-
-        Args:
-            k (int) : Order of the bspline polynomial (degree + 1)
-            n (int) : Number of interpolating points
-        """
-        super().__init__()
-
-        # Set the order of the bspline
-        self.k = k
-
-        # Set the number of inputs
-        self.n = n
-
-        # Set the size of the input data
-        self.add_data("N", shape=self.k)
-
-        # Set the input values to be interpolated
-        self.add_input("x", shape=self.k)
-
-        # Set the output values
-        self.add_input("alpha")
-
-        # Set the coupling constraint
-        self.add_constraint("res")
-
-        return
-
-    def compute(self):
-        N = self.data["N"]
-        x = self.inputs["x"]
-        alpha = self.inputs["alpha"]
-
-        value = 0.0
-        for i in range(self.k):
-            value = value + N[i] * x[i]
-        self.constraints["res"] = alpha - value
-
-        return
-
-    def compute_knots(self):
-        """
-        Compute the knot points
-        """
-
-        # Set the knot locations
-        t = np.zeros(self.n + self.k)
-        t[: self.k] = 0.0
-        t[-self.k : :] = 1.0
-        t[self.k - 1 : -self.k + 1] = np.linspace(0, 1, self.n - self.k + 2)
-
-        return t
-
-    def compute_basis(self, x):
-        t = self.compute_knots()
-
-        # Special case for right endpoint
-        x_clamped = x.copy()
-        x_clamped[x_clamped == t[-1]] = np.nextafter(t[-1], -np.inf)
-
-        # Find span index i such that t[i] <= x < t[i+1]
-        span = np.searchsorted(t, x_clamped, side="right") - 1
-        span = np.clip(span, self.k - 1, self.n - 1)
-
-        N = np.zeros((x.size, self.k), dtype=float)
-
-        # Evaluate using the Cox–de Boor recursion for each point
-        for j in range(x.size):
-            i = span[j]
-            # zeroth-degree basis
-            N_j = np.zeros(self.k)
-            N_j[0] = 1.0
-
-            for d in range(1, self.k):
-                saved = 0.0
-                for r in range(d):
-                    left = t[i - d + 1 + r]
-                    right = t[i + 1 + r]
-                    denom = right - left
-                    temp = 0.0 if denom == 0.0 else N_j[r] / denom
-                    N_j[r] = saved + (right - x_clamped[j]) * temp
-                    saved = (x_clamped[j] - left) * temp
-                N_j[d] = saved
-            N[j, :] = N_j
-
-        # Handle x == t[-1]
-        last_mask = x == t[-1]
-        if np.any(last_mask):
-            N[last_mask, :] = 0.0
-            N[last_mask, -1] = 1.0
-
-        return N
-
-    def set_data(self, name, npts, data):
-        # Set the locations for where to evaluate the bspline basis
-        x = np.linspace(0, 1, npts)
-        data[f"{name}.N"] = self.compute_basis(x)
-
-        return
-
-    def add_links(self, name, npts, model, src_name):
-        """
-        Set the links for the interpolation to work properly
-        """
-
-        # Set the locations for where to evaluate the bspline basis points
-        x = np.linspace(0, 1, npts)
-
-        # Set the knot locations
-        t = self.compute_knots()
-
-        index = self.k - 1
-        for i in range(npts):
-            while index < self.n and x[i] > t[index + 1]:
-                index += 1
-
-            for j in range(self.k):
-                src = f"{src_name}[0, {index - self.k + 1 + j}]"
-                target = f"{name}.x[{i}, {j}]"
-                model.link(src, target)
-
-        # Build via canonical coefficients
-        N = []
-        for i in range(self.n):
-            c = np.zeros(self.n)
-            c[i] = 1.0
-            Bi = BSpline(t, c, self.k - 1, extrapolate=False)
-            N.append(Bi(x))
-
+        self.add_input("x")
         return
 
 
@@ -417,11 +280,14 @@ scaling = {"velocity": 100.0, "altitude": 1000.0, "range": 1000.0, "mass": 1000.
 # Create component instances
 ac = AircraftDynamics(scaling)
 trap = TrapezoidRule()
-src = BSplineSource(n=10)
-bspline = BSplineInterpolant(k=4, n=10)
+bspline_src = BSplineSource()
+bspline = am.BSplineInterpolant(npts=(num_time_steps + 1), k=4, n=10)
 obj = Objective()
 ic = InitialConditions(scaling)
 fc = FinalConditions(scaling)
+
+# Number of bspline control points
+nctrl = 10
 
 # Create the model
 module_name = "time_to_climb"
@@ -430,7 +296,7 @@ model = am.Model(module_name)
 # Add components to the model
 model.add_component("ac", num_time_steps + 1, ac)
 model.add_component("trap", 5 * num_time_steps, trap)
-model.add_component("src", 1, src)
+model.add_component("src", nctrl, bspline_src)
 model.add_component("bspline", num_time_steps + 1, bspline)
 model.add_component("obj", 1, obj)
 model.add_component("ic", 1, ic)
@@ -449,8 +315,8 @@ for i in range(5):
     model.link(f"ac.qdot[:-1, {i}]", f"trap.q1dot[{start}:{end}]")
     model.link(f"ac.qdot[1:, {i}]", f"trap.q2dot[{start}:{end}]")
 
-# Link the alpha values
-model.link("ac.alpha", "bspline.alpha")
+# Link the alpha values - ac.alpha to bspline output
+model.link("ac.alpha", "bspline.output")
 
 # Link final time from objective to all trapezoidal rule components
 model.link("obj.tf[0]", f"trap.tf[:]")
@@ -460,7 +326,7 @@ model.link("ac.q[0, :]", "ic.q[0, :]")
 model.link(f"ac.q[{num_time_steps}, :]", "fc.q[0, :]")
 
 # Add the bspline links
-bspline.add_links("bspline", num_time_steps + 1, model, "src.x")
+bspline.add_links("bspline", model, "src.x")
 
 # Build the module if requested
 if args.build:
@@ -483,7 +349,7 @@ if args.build:
 model.initialize(order_type=am.OrderingType.NESTED_DISSECTION)
 
 data = model.get_data_vector()
-bspline.set_data("bspline", num_time_steps + 1, data)
+bspline.set_data("bspline", data)
 
 print(f"Num variables:              {model.num_variables}")
 print(f"Num constraints:            {model.num_constraints}")
@@ -510,7 +376,7 @@ x["ac.q[:, 4]"] = 19.03 - 0.2 * t_guess / tf_guess  # mass decrease
 
 # Set initial guess for control (constant small angle)
 x["ac.alpha"] = 1.0
-x["bspline.x"] = 1.0
+x["bspline.input"] = 1.0
 
 # Set up bounds
 lower = model.create_vector()

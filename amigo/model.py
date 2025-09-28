@@ -278,7 +278,7 @@ class ModelVector:
         self._model = model
         self._x = x
 
-    def get_opt_problem_vec(self):
+    def get_vector(self):
         return self._x
 
     def __getitem__(self, expr):
@@ -783,7 +783,7 @@ class Model:
 
         return Asub, of_dict, wrt_dict
 
-    def get_all_names(self):
+    def get_names(self):
         """
         Get the scoped names of all inputs, constraints and data within the model
         """

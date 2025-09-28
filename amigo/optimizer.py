@@ -156,25 +156,25 @@ class Optimizer:
         # Get the vector of initial values if none are specified
         if x is None:
             x = model.get_values_from_meta("value")
-            self.x = x.get_opt_problem_vec()
+            self.x = x.get_vector()
         elif isinstance(x, ModelVector):
-            self.x = x.get_opt_problem_vec()
+            self.x = x.get_vector()
         else:
             self.x = x
 
         # Get the lower and upper bounds if none are specified
         if lower is None:
             lower = model.get_values_from_meta("lower")
-            self.lower = lower.get_opt_problem_vec()
+            self.lower = lower.get_vector()
         elif isinstance(lower, ModelVector):
-            self.lower = lower.get_opt_problem_vec()
+            self.lower = lower.get_vector()
         else:
             self.lower = lower
         if upper is None:
             upper = model.get_values_from_meta("upper")
-            self.upper = upper.get_opt_problem_vec()
+            self.upper = upper.get_vector()
         elif isinstance(upper, ModelVector):
-            self.upper = upper.get_opt_problem_vec()
+            self.upper = upper.get_vector()
         else:
             self.upper = upper
 
