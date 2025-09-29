@@ -5,7 +5,7 @@ import numpy as np
 import matplotlib.pylab as plt
 import niceplots
 
-num_cells = 200
+num_cells = 400
 
 
 class RoeFlux(am.Component):
@@ -157,7 +157,7 @@ class InletFlux(am.Component):
 
         # Based on the invariants, compute the velocity and speed of sound
         u_b = self.vars["u_b"] = 0.5 * (invar_int + invar_res)
-        a_b = self.vars["a_b"] = 0.25 * gam1 * (invar_int - invar_res)
+        a_b = self.vars["a_b"] = 0.25 * gam1 * (invar_res - invar_int)
         rho_b = self.vars["rho_b"] = (a_b * a_b * S_res / gamma) ** (1.0 / gam1)
 
         # Compute the remaining states
@@ -295,7 +295,7 @@ def plot_solution(rho, u, p, p_target, num_cells, length):
             )
 
         fontname = "Helvetica"
-        ax[-1].legend(loc="lower right", prop={"family": fontname, "size": 12})
+        ax[-1].legend(loc="lower left", prop={"family": fontname, "size": 12})
 
         for axis in ax:
             niceplots.adjust_spines(axis, outward=True)
@@ -322,6 +322,71 @@ def plot_solution(rho, u, p, p_target, num_cells, length):
 
         fig.savefig("nozzle_stacked.svg")
         fig.savefig("nozzle_stacked.png")
+
+    return
+
+
+def plot_nozzle(A, dAdx, num_cells, length):
+    dx = length / num_cells
+    xintr = np.linspace(0.0, length, num_cells + 1)
+    xcell = np.linspace(0.5 * dx, length - 0.5 * dx, num_cells)
+
+    with plt.style.context(niceplots.get_style()):
+        fig, ax = plt.subplots(2, 1, figsize=(10, 4))
+        colors = niceplots.get_colors_list()
+
+        labels = [r"$A$", r"$dA/dx$"]
+        xlabel = "location"
+        xticks = [0, 2, 4, 6, 8, 10]
+
+        for i, label in enumerate(labels):
+            ax[i].set_ylabel(label, rotation="horizontal", horizontalalignment="right")
+
+        line_scaler = 1.0
+
+        indices = [0, 1]
+        cindices = [0, 0]
+        xdata = [xintr, xcell]
+        ydata = [A, dAdx]
+
+        for i, (index, c, x, y) in enumerate(zip(indices, cindices, xdata, ydata)):
+            ax[index].plot(
+                x,
+                y,
+                clip_on=False,
+                lw=3 * line_scaler,
+                color=colors[c],
+                label=label[i],
+            )
+
+        fontname = "Helvetica"
+        # ax[-1].legend(loc="lower right", prop={"family": fontname, "size": 12})
+
+        for axis in ax:
+            niceplots.adjust_spines(axis, outward=True)
+
+        for axis in ax[:-1]:
+            axis.get_xaxis().set_visible(False)
+            axis.spines["bottom"].set_visible(False)
+            axis.get_xaxis().set_ticks([])
+
+        fig.align_labels()
+        ax[-1].set_xlabel(xlabel)
+        ax[-1].set_xticks(xticks)
+
+        for axis in ax:
+            axis.xaxis.label.set_fontname(fontname)
+            axis.yaxis.label.set_fontname(fontname)
+
+            # Update tick labels
+            for tick in axis.get_xticklabels():
+                tick.set_fontname(fontname)
+
+            for tick in axis.get_yticklabels():
+                tick.set_fontname(fontname)
+
+        fig.savefig("nozzle_design_stacked.svg")
+        fig.savefig("nozzle_design_stacked.png")
 
     return
 
@@ -398,7 +463,7 @@ T_res = T_reservoir / T_ref
 p_res = p_reservoir / p_ref
 
 # Set the back-pressure
-p_back = 0.9 * p_res
+p_back = 0.5 * p_res
 
 # Set values for the length
 length = 10.0
@@ -408,11 +473,11 @@ dx = length / num_cells
 
 # Set the pressure values
 p_inlet = 0.95 * p_res
-p_min = 0.5 * p_res
-p_outlet = 0.9 * p_res
+p_min = 0.2 * p_res
+p_outlet = p_back
 
 # Number of control points
-nctrl = 5
+nctrl = 10
 
 # Create the model
 model = am.Model("nozzle")
@@ -561,10 +626,10 @@ opt = am.Optimizer(model, x, lower=lower, upper=upper)
 
 opt_history = opt.optimize(
     {
-        "max_iterations": 1500,
+        "max_iterations": 100,
         "record_components": ["area_ctrl.area"],
-        "max_line_search_iterations": 10,
-        "convergence_tolerance": 1e-12,
+        "max_line_search_iterations": 4,
+        "convergence_tolerance": 1e-11,
     }
 )
 
@@ -590,6 +655,8 @@ u = x["nozzle.Q[:, 1]"] / rho
 p = (gamma - 1.0) * (x["nozzle.Q[:, 2]"] - 0.5 * rho * u**2)
 p_target = data["objective.p0"]
 plot_solution(rho, u, p, p_target, num_cells, length)
+
+plot_nozzle(x["area.output"], x["area_derivative.output"], num_cells, length)
 
 norms = []
 for iter_data in opt_history["iterations"]:
