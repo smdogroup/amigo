@@ -562,7 +562,9 @@ class Model:
     def _reorder_indices(self, order_type, order_for_block=False):
         arrays = []
         for name, comp in self.comp.items():
-            arrays.append(comp.get_indices(comp.vars))
+            array = comp.get_indices(comp.vars)
+            if array.size > 0:
+                arrays.append(array)
 
         if order_for_block:
             constraint_indices = self._get_constraint_indices()
