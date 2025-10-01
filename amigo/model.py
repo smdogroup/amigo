@@ -15,6 +15,7 @@ from .amigo import (
 )
 from .component import Component
 from scipy.sparse import spmatrix
+import networkx as nx
 
 try:
     from mpi4py.MPI import COMM_WORLD
@@ -1111,3 +1112,73 @@ class Model:
         model_data["links"] = links
 
         return model_data
+
+    def create_graph(self, comp_list=None, var_shape="dot", comp_shape="square"):
+        """
+        Create a networkx instance of the model structure
+        """
+
+        if not self._initialized:
+            raise RuntimeError(
+                "Must call initialize before creating the graph structure"
+            )
+
+        node_names = [None] * self.num_variables
+        comp_names = []
+
+        if comp_list is None:
+            comp_items = self.comp.items()
+        else:
+            comp_items = []
+            for comp_name, comp in self.comp.items():
+                if comp_name in comp_list:
+                    comp_items.append((comp_name, comp))
+
+        # Loop over all the components and add the various names for each variable
+        for comp_name, comp in comp_items:
+            for var_name, array in comp.vars.items():
+                for idx in np.ndindex(array.shape):
+                    index = array[idx]
+                    node_name = f"{comp_name}.{var_name}[{', '.join(map(str, idx))}]"
+
+                    if node_names[index] == None:
+                        node_names[index] = node_name
+                    else:
+                        node_names[index] += "," + node_name
+
+            # Add the component names
+            for i in range(comp.size):
+                comp_names.append(f"{comp_name}[{i}]")
+
+        # Set the variable names
+        graph = nx.Graph()
+
+        # Add all the variable (inputs and constraints)
+        for i, name in enumerate(node_names):
+            if name is not None:
+                graph.add_node(int(i), label=name, title=name, shape=var_shape)
+
+        # Add all of the individual components within each component group
+        for i, name in enumerate(comp_names):
+            graph.add_node(
+                int(i + self.num_variables),
+                label=name,
+                title=name,
+                shape=comp_shape,
+            )
+
+        # Add the edges in the graph - always from variable to component
+        counter = self.num_variables
+        for comp_name, comp in comp_items:
+            for var_name, array in comp.vars.items():
+                for i in range(comp.size):
+                    comp_index = counter + i
+
+                    vars = array[i]
+                    for idx in np.ndindex(vars.shape):
+                        array_idx = (i,) + idx
+                        graph.add_edge(int(comp_index), int(array[array_idx]))
+
+            counter += comp.size
+
+        return graph

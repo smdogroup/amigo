@@ -14,7 +14,7 @@ except:
 
 
 final_time = 2.0
-num_time_steps = 1000
+num_time_steps = 100
 
 
 class TrapezoidRule(am.Component):
@@ -310,6 +310,13 @@ parser.add_argument(
     help="Show the sparsity pattern",
 )
 parser.add_argument(
+    "--show-graph",
+    dest="show_graph",
+    action="store_true",
+    default=False,
+    help="Show the graph",
+)
+parser.add_argument(
     "--distribute",
     dest="distribute",
     action="store_true",
@@ -407,3 +414,15 @@ if comm_rank == 0:
         plt.spy(H, markersize=0.2)
         plt.title("Sparsity pattern of matrix A")
         plt.show()
+
+    if args.show_graph:
+        # Convert to interactive Pyvis network
+        from pyvis.network import Network
+
+        graph = model.create_graph()
+
+        net = Network(notebook=True)
+        net.from_nx(graph)
+
+        # Show in browser (or inline in Jupyter if notebook=True)
+        net.show("cart_pole_graph.html")
