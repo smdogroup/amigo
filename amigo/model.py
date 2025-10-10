@@ -1130,6 +1130,9 @@ class Model:
             )
 
         node_names = [None] * self.num_variables
+        # Track a semantic type for each variable node based on metadata
+        # Types: "constraint", "input", or None/other
+        node_types = [None] * self.num_variables
         comp_names = []
 
         if comp_list is None:
@@ -1141,9 +1144,11 @@ class Model:
                     comp_items.append((comp_name, comp))
 
         # Loop over all the components and add the various names for each variable
+        # Also determine variable types from component metadata for robust coloring
+        comp_time_indices = {}
         for comp_name, comp in comp_items:
 
-            # Decide which timesteps  to include:
+            # Decide which timesteps to include and cache for edges
             if timestep is None:
                 time_indices = range(comp.size)
             elif isinstance(timestep, int):
@@ -1154,11 +1159,24 @@ class Model:
                 raise ValueError(
                     "Invalid timestep format. Use int, tuple, list, or range."
                 )
+            # Filter invalid indices now and cache
+            filtered_time_indices = [i for i in time_indices if i < comp.size]
+            comp_time_indices[comp_name] = filtered_time_indices
+
+            # Prepare sets for quick type lookup
+            input_names = set(comp.get_input_names())
+            constraint_names = set(comp.get_constraint_names())
 
             for var_name, array in comp.vars.items():
-                for i in time_indices:
-                    if i >= comp.size:
-                        continue
+                # Determine semantic type for this variable name
+                if var_name in constraint_names:
+                    vtype = "constraint"
+                elif var_name in input_names:
+                    vtype = "input"
+                else:
+                    vtype = None
+
+                for i in filtered_time_indices:
                     for idx in np.ndindex(
                         array.shape[1:]
                     ):  # Loop over the position indices
@@ -1172,10 +1190,16 @@ class Model:
                         else:
                             node_names[index] += "," + node_name
 
+                        # Assign or upgrade node type (constraint overrides input)
+                        if vtype is not None:
+                            if node_types[index] is None:
+                                node_types[index] = vtype
+                            elif node_types[index] != "constraint" and vtype == "constraint":
+                                node_types[index] = "constraint"
+
             # Add the component names for only selected time steps:
-            for i in time_indices:
-                if i < comp.size:
-                    comp_names.append(f"{comp_name}[{i}]")
+            for i in filtered_time_indices:
+                comp_names.append(f"{comp_name}[{i}]")
 
         # Set the variable names
         graph = nx.Graph()
@@ -1183,7 +1207,13 @@ class Model:
         # Add all the variable (inputs and constraints)
         for i, name in enumerate(node_names):
             if name is not None:
-                graph.add_node(int(i), label=name, title=name, shape=var_shape)
+                vtype = node_types[i]
+                node_color = (
+                    "red" if vtype == "constraint" else ("green" if vtype == "input" else "blue")
+                )
+                graph.add_node(
+                    int(i), label=name, title=name, shape=var_shape, color=node_color
+                )
 
         # Add all of the individual components within each component group
         # and build a mapping from (component name, timestep) -> node id
@@ -1191,10 +1221,7 @@ class Model:
         for i, name in enumerate(comp_names):
             node_id = int(i + self.num_variables)
             graph.add_node(
-                node_id,
-                label=name,
-                title=name,
-                shape=comp_shape,
+                node_id, label=name, title=name, shape=comp_shape, color="orange"
             )
 
             # name has the form "group[i]"; parse back out (group, i)
@@ -1208,21 +1235,10 @@ class Model:
 
         # Add edges between variables and components
         for comp_name, comp in comp_items:
-            if timestep is None:
-                time_indices = range(comp.size)
-            elif isinstance(timestep, int):
-                time_indices = [timestep]
-            elif isinstance(timestep, (tuple, list, range)):
-                time_indices = timestep
-            else:
-                raise ValueError(
-                    "Invalid timestep format. Use int, tuple, list, or range."
-                )
+            filtered_time_indices = comp_time_indices.get(comp_name, [])
 
             for var_name, array in comp.vars.items():
-                for i in time_indices:
-                    if i >= comp.size:
-                        continue
+                for i in filtered_time_indices:
                     comp_index = comp_node_id.get((comp_name, i))
                     if comp_index is None:
                         continue
