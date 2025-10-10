@@ -1129,10 +1129,8 @@ class Model:
                 "Must call initialize before creating the graph structure"
             )
 
-        node_names = [None] * self.num_variables
-        # Track a semantic type for each variable node based on metadata
-        # Types: "constraint", "input", or None/other
-        node_types = [None] * self.num_variables
+        # Track aliases for each global variable ID and their types
+        global_var_aliases = {}  # global_id -> list of (alias_string, vtype)
         comp_names = []
 
         if comp_list is None:
@@ -1185,20 +1183,11 @@ class Model:
                         node_name = (
                             f"{comp_name}.{var_name}[{i}, {', '.join(map(str, idx))}]"
                         )
-                        if node_names[index] == None:
-                            node_names[index] = node_name
-                        else:
-                            node_names[index] += "," + node_name
-
-                        # Assign or upgrade node type (constraint overrides input)
-                        if vtype is not None:
-                            if node_types[index] is None:
-                                node_types[index] = vtype
-                            elif (
-                                node_types[index] != "constraint"
-                                and vtype == "constraint"
-                            ):
-                                node_types[index] = "constraint"
+                        
+                        # Track aliases for this global variable ID
+                        if index not in global_var_aliases:
+                            global_var_aliases[index] = []
+                        global_var_aliases[index].append((node_name, vtype))
 
             # Add the component names for only selected time steps:
             for i in filtered_time_indices:
@@ -1206,25 +1195,49 @@ class Model:
 
         # Set the variable names
         graph = nx.Graph()
-
-        # Add all the variable (inputs and constraints)
-        for i, name in enumerate(node_names):
-            if name is not None:
-                vtype = node_types[i]
+        
+        # Create separate nodes for each alias and track linkage relationships
+        alias_to_node_id = {}  # alias_string -> node_id
+        linkage_edges = []  # list of (node_id1, node_id2) for dashed edges
+        
+        # Add variable nodes (one per alias)
+        node_counter = 0
+        for global_id, aliases in global_var_aliases.items():
+            if not aliases:
+                continue
+                
+            # Create nodes for each alias
+            alias_nodes = []
+            for alias_name, vtype in aliases:
+                node_id = node_counter
+                node_counter += 1
+                alias_to_node_id[alias_name] = node_id
+                alias_nodes.append(node_id)
+                
+                # Determine color based on type
                 node_color = (
-                    "red"
-                    if vtype == "constraint"
+                    "red" if vtype == "constraint" 
                     else ("green" if vtype == "input" else "blue")
                 )
+                
                 graph.add_node(
-                    int(i), label=name, title=name, shape=var_shape, color=node_color
+                    node_id, 
+                    label=alias_name, 
+                    title=alias_name, 
+                    shape=var_shape, 
+                    color=node_color
                 )
+            
+            # Add dashed linkage edges between aliases of the same global variable
+            for i in range(len(alias_nodes)):
+                for j in range(i + 1, len(alias_nodes)):
+                    linkage_edges.append((alias_nodes[i], alias_nodes[j]))
 
         # Add all of the individual components within each component group
         # and build a mapping from (component name, timestep) -> node id
         comp_node_id = {}
         for i, name in enumerate(comp_names):
-            node_id = int(i + self.num_variables)
+            node_id = node_counter + i
             graph.add_node(
                 node_id, label=name, title=name, shape=comp_shape, color="orange"
             )
@@ -1250,6 +1263,16 @@ class Model:
                     vars = array[i]
                     for idx in np.ndindex(vars.shape):
                         array_idx = (i,) + idx
-                        graph.add_edge(int(comp_index), int(array[array_idx]))
+                        global_id = array[array_idx]
+                        
+                        # Find the alias node for this global variable
+                        alias_name = f"{comp_name}.{var_name}[{i}, {', '.join(map(str, idx))}]"
+                        if alias_name in alias_to_node_id:
+                            var_node_id = alias_to_node_id[alias_name]
+                            graph.add_edge(comp_index, var_node_id)
+        
+        # Add dashed linkage edges between aliased variables
+        for node1, node2 in linkage_edges:
+            graph.add_edge(node1, node2, dashes=True, color="gray")
 
         return graph
