@@ -314,10 +314,17 @@ parser.add_argument(
     default=False,
     help="Show the sparsity pattern",
 )
+parser.add_argument(
+    "--with-lnks",
+    dest="use_lnks",
+    action="store_true",
+    default=False,
+    help="Enable the Largrange-Newton-Krylov-Schur inexact solver",
+)
 args = parser.parse_args()
 
-nx = 128
-ny = 64
+nx = 256
+ny = 128
 
 nnodes = (nx + 1) * (ny + 1)
 nelems = nx * ny
@@ -419,11 +426,10 @@ elif args.order_type == "nd":
 elif args.order_type == "natural":
     order_type = am.OrderingType.NATURAL
 
+# Initialize the problem
 order_for_block = args.order_for_block
 model.initialize(order_type=order_type, order_for_block=order_for_block)
-
-# Initialize the problem
-prob = model.get_opt_problem()
+prob = model.get_problem()
 
 end = time.perf_counter()
 print(f"Initialization time:        {end - start:.6f} seconds")
@@ -448,26 +454,50 @@ x["src.v_res"] = 1.0
 # Apply lower and upper bound constraints
 lower = model.create_vector()
 upper = model.create_vector()
+
 lower["src.rho"] = 1e-3
 upper["src.rho"] = 1.0
+lower["src.u"] = -np.inf
+upper["src.u"] = np.inf
+lower["src.v"] = -np.inf
+upper["src.v"] = np.inf
+lower["bcs_u.lam"] = -np.inf
+upper["bcs_u.lam"] = np.inf
+lower["bcs_v.lam"] = -np.inf
+upper["bcs_v.lam"] = np.inf
 
 start = time.perf_counter()
-mat_obj = prob.create_csr_matrix()
+mat_obj = prob.create_matrix()
 end = time.perf_counter()
 print(f"Matrix initialization time: {end - start:.6f} seconds")
 
 start = time.perf_counter()
-prob.hessian(x.get_opt_problem_vec(), mat_obj)
+prob.hessian(x.get_vector(), mat_obj)
 end = time.perf_counter()
 print(f"Matrix computation time:    {end - start:.6f} seconds")
 
 grad = prob.create_vector()
 start = time.perf_counter()
-prob.gradient(x.get_opt_problem_vec(), grad)
+prob.gradient(x.get_vector(), grad)
 end = time.perf_counter()
 print(f"Residual computation time:  {end - start:.6f} seconds")
 
-opt = am.Optimizer(model, x=x, lower=lower, upper=upper)
+solver = None
+if args.use_lnks:
+    problem = model.get_problem()
+
+    state_vars = ["src.u", "src.v", "bcs_u.lam", "bcs_v.lam"]
+    residuals = ["src.u_res", "src.v_res", "bcs_u.bc_res", "bcs_v.bc_res"]
+
+    solver = am.LNKSInexactSolver(
+        problem,
+        model=model,
+        state_vars=state_vars,
+        residuals=residuals,
+        gmres_subspace_size=50,
+    )
+
+opt = am.Optimizer(model, x=x, lower=lower, upper=upper, solver=solver)
 
 options = {
     "max_iterations": 100,

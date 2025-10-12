@@ -233,8 +233,6 @@ with open("brachistochrone_model.json", "w") as fp:
 print(f"Num variables:              {model.num_variables}")
 print(f"Num constraints:            {model.num_constraints}")
 
-prob = model.get_opt_problem()
-
 # Create the design variable vector and provide an initial guess
 x = model.create_vector()
 x[:] = 0.0

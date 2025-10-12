@@ -476,7 +476,7 @@ d = 10 * ((x_coord - 0.5) ** 2 + (y_coord - 0.25) ** 2 - r**2)
 data["src.level_set"] = np.fabs(x_coord + y_coord - 1.0) * np.fabs(y_coord - 0.05) * d
 
 # Set the initial problem variable values
-problem = model.get_opt_problem()
+problem = model.get_problem()
 mat = problem.create_matrix()
 
 x = problem.create_vector()
@@ -494,7 +494,7 @@ u = ans.get_array()[model.get_indices("src.u")][nodes].T
 v = ans.get_array()[model.get_indices("src.v")][nodes].T
 theta = ans.get_array()[model.get_indices("src.theta")][nodes].T
 
-d = data.get_opt_problem_vec()
+d = data.get_vector()
 lsf = d.get_array()[model.get_indices("src.level_set")][nodes].T
 
 # Plot the u, v and theta values

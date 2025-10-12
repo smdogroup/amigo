@@ -244,7 +244,7 @@ elif args.order_type == "natural":
 
 order_for_block = args.order_for_block
 model.initialize(order_type=order_type, order_for_block=order_for_block, comm=comm)
-serial_problem = model.get_opt_problem()
+serial_problem = model.get_problem()
 
 end = time.perf_counter()
 if comm_rank == 0:
@@ -265,9 +265,7 @@ else:
     mpi_problem = serial_problem.partition_from_root()
 
     mpi_data = mpi_problem.get_data_vector()
-    serial_problem.scatter_data_vector(
-        data.get_opt_problem_vec(), mpi_problem, mpi_data
-    )
+    serial_problem.scatter_data_vector(data.get_vector(), mpi_problem, mpi_data)
 
     problem = mpi_problem
 

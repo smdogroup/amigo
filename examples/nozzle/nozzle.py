@@ -514,6 +514,14 @@ parser.add_argument(
     default=False,
     help="Enable debug flags",
 )
+parser.add_argument(
+    "--with-lnks",
+    dest="use_lnks",
+    action="store_true",
+    default=False,
+    help="Enable the Largrange-Newton-Krylov-Schur inexact solver",
+)
+
 args = parser.parse_args()
 
 # Set reference and reservoir temperature, pressure in physical units
@@ -711,16 +719,36 @@ upper["inlet.F"] = float("inf")
 lower["outlet.F"] = float("-inf")
 upper["outlet.F"] = float("inf")
 
+solver = None
+if args.use_lnks:
+    problem = model.get_problem()
+
+    state_vars = [
+        "nozzle.Q",
+        "flux.F",
+        "inlet.F",
+        "outlet.F",
+        "calc.M_inlet",
+    ]
+    residuals = ["nozzle.res", "flux.res", "inlet.res", "outlet.res", "calc.res"]
+
+    solver = am.LNKSInexactSolver(
+        problem,
+        model=model,
+        state_vars=state_vars,
+        residuals=residuals,
+    )
+
 # Set up the optimizer
-opt = am.Optimizer(model, x, lower=lower, upper=upper)
+opt = am.Optimizer(model, x, lower=lower, upper=upper, solver=solver)
 
 opt_history = opt.optimize(
     {
         "max_iterations": 100,
         "record_components": ["area_ctrl.area"],
         "max_line_search_iterations": 4,
-        "convergence_tolerance": 1e-12,
-        "monotone_barrier_fraction": 0.01,
+        "convergence_tolerance": 1e-10,
+        "monotone_barrier_fraction": 0.1,
     }
 )
 

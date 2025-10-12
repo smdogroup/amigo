@@ -132,8 +132,6 @@ if args.build:
 model.initialize()
 
 # Set the starting point and the bounds
-prob = model.get_opt_problem()
-
 x = model.create_vector()
 lower = model.create_vector()
 upper = model.create_vector()

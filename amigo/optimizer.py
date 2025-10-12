@@ -1,8 +1,8 @@
 import warnings
 import numpy as np
 from scipy.sparse.linalg import MatrixRankWarning
-from scipy.sparse import csr_matrix, save_npz
-from scipy.sparse.linalg import spsolve, eigsh
+from scipy.sparse import csr_matrix
+from scipy.sparse.linalg import splu, eigsh
 
 from .amigo import InteriorPointOptimizer
 from .model import ModelVector
@@ -21,21 +21,35 @@ class DirectScipySolver:
         self.nrows, self.ncols, self.nnz, self.rowp, self.cols = (
             self.hess.get_nonzero_structure()
         )
+
+        self.lu = None
         return
 
-    def solve(self, x, diag, bx, px, zero_design_contrib=False):
+    def factor(self, x, diag, zero_design_contrib=False):
         """
-        Solve the KKT system - many different appraoches could be inserted here
+        Compute and factor the Hessian matrix
         """
 
         # Compute the Hessian
         self.problem.hessian(x, self.hess, zero_design_contrib=zero_design_contrib)
-        H0 = tocsr(self.hess)
         self.hess.add_diagonal(diag)
 
+        # Build the CSR matrix and convert to CSC
+        shape = (self.nrows, self.ncols)
         data = self.hess.get_data()
-        H = csr_matrix((data, self.cols, self.rowp), shape=(self.nrows, self.ncols))
-        px.get_array()[:] = spsolve(H, bx.get_array())
+        H = csr_matrix((data, self.cols, self.rowp), shape=shape).tocsc()
+
+        # Compute the LU factorization
+        self.lu = splu(H, permc_spec="COLAMD", diag_pivot_thresh=1.0)
+
+        return
+
+    def solve(self, bx, px):
+        """
+        Solve the KKT system
+        """
+
+        px.get_array()[:] = self.lu.solve(bx.get_array())
 
         return
 
@@ -53,6 +67,164 @@ class DirectScipySolver:
         eigs, vecs = eigsh(H, k=k, sigma=sigma, which=which)
 
         return eigs, vecs
+
+
+class LNKSInexactSolver:
+    def __init__(
+        self,
+        problem,
+        model=None,
+        state_vars=None,
+        residuals=None,
+        state_indices=None,
+        res_indices=None,
+        gmres_subspace_size=20,
+        gmres_rtol=1e-2,
+    ):
+        self.problem = problem
+        self.hess = self.problem.create_matrix()
+        self.gmres_subspace_size = gmres_subspace_size
+        self.gmres_rtol = gmres_rtol
+
+        if state_indices is None:
+            self.state_indices = np.sort(model.get_indices(state_vars))
+        else:
+            self.state_indices = np.sort(state_indices)
+
+        if res_indices is None:
+            self.res_indices = np.sort(model.get_indices(residuals))
+        else:
+            self.res_indices = np.sort(res_indices)
+
+        if len(self.state_indices) != len(self.res_indices):
+            raise ValueError("Residual and states must be of the same dimension")
+
+        # Determine the design indices based on the remaining values
+        all_states = np.concatenate((self.state_indices, self.res_indices))
+        upper = model.num_variables
+        self.design_indices = np.sort(np.setdiff1d(np.arange(upper), all_states))
+
+        return
+
+    def factor(self, x, diag, zero_design_contrib=False):
+
+        # Compute the Hessian
+        self.problem.hessian(x, self.hess, zero_design_contrib=zero_design_contrib)
+        self.hess.add_diagonal(diag)
+
+        self.Hmat = tocsr(self.hess)
+        self.Hxx = self.Hmat[self.design_indices, :][:, self.design_indices]
+        self.A = self.Hmat[self.res_indices, :][:, self.state_indices]
+        self.dRdx = self.Hmat[self.res_indices, :][:, self.design_indices]
+
+        # Factor the matrices required
+        self.A_lu = splu(self.A.tocsc(), permc_spec="COLAMD", diag_pivot_thresh=1.0)
+        self.Hxx_lu = splu(self.Hxx.tocsc(), permc_spec="COLAMD", diag_pivot_thresh=1.0)
+
+        return
+
+    def _precon(self, b, x):
+        x[self.res_indices] = self.A_lu.solve(b[self.state_indices], trans="T")
+        bx = b[self.design_indices] - self.dRdx.T @ x[self.res_indices]
+        x[self.design_indices] = self.Hxx_lu.solve(bx)
+        bu = b[self.res_indices] - self.dRdx @ x[self.design_indices]
+        x[self.state_indices] = self.A_lu.solve(bu)
+
+        return
+
+    def _gmres(self, b, x, msub, rtol=1e-2, atol=1e-30):
+        # Allocate the Hessenberg - this allocates a full matrix
+        H = np.zeros((msub + 1, msub))
+
+        # Allocate small arrays of size m
+        res = np.zeros(msub + 1)
+
+        # Store the normal rotations
+        Qsin = np.zeros(msub)
+        Qcos = np.zeros(msub)
+
+        # Allocate the subspaces
+        W = np.zeros((msub + 1, self.Hmat.shape[0]))
+        Z = np.zeros((msub, self.Hmat.shape[0]))
+
+        # Perform the initialization: copy over b to W[0] and
+        W[0, :] = b[:]
+        beta = np.linalg.norm(W[0, :])
+
+        x[:] = 0.0
+        if beta < atol:
+            return
+
+        W[0, :] /= beta
+        res[0] = beta
+
+        # Perform the matrix-vector products
+        niters = 0
+        for i in range(msub):
+            # Apply the preconditioner
+            self._precon(W[i, :], Z[i, :])
+
+            # Compute the matrix-vector product
+            W[i + 1, :] = self.Hmat @ Z[i, :]
+
+            # Perform modified Gram-Schmidt orthogonalization
+            for j in range(i + 1):
+                H[j, i] = np.dot(W[j, :], W[i + 1, :])
+                W[i + 1, :] -= H[j, i] * W[j, :]
+
+            # Compute the norm of the orthogonalized vector and
+            # normalize it
+            H[i + 1, i] = np.linalg.norm(W[i + 1, :])
+            W[i + 1, :] /= H[i + 1, i]
+
+            # Apply the Givens rotations
+            for j in range(i):
+                h1 = H[j, i]
+                h2 = H[j + 1, i]
+                H[j, i] = h1 * Qcos[j] + h2 * Qsin[j]
+                H[j + 1, i] = -h1 * Qsin[j] + h2 * Qcos[j]
+
+            # Compute the contribution to the Givens rotation
+            # for the current entry
+            h1 = H[i, i]
+            h2 = H[i + 1, i]
+
+            # Modification for complex from Saad pg. 193
+            sq = np.sqrt(h1**2 + h2**2)
+            Qsin[i] = h2 / sq
+            Qcos[i] = h1 / sq
+
+            # Apply the newest Givens rotation to the last entry
+            H[i, i] = h1 * Qcos[i] + h2 * Qsin[i]
+            H[i + 1, i] = -h1 * Qsin[i] + h2 * Qcos[i]
+
+            # Update the residual
+            h1 = res[i]
+            res[i] = h1 * Qcos[i]
+            res[i + 1] = -h1 * Qsin[i]
+
+            if np.fabs(res[i + 1]) < rtol * beta:
+                niters = i
+                break
+
+        # Compute the linear combination
+        for i in range(niters, -1, -1):
+            for j in range(i + 1, msub):
+                res[i] -= H[i, j] * res[j]
+            res[i] /= H[i, i]
+
+        # Form the linear combination
+        for i in range(msub):
+            x += res[i] * Z[i]
+
+        return
+
+    def solve(self, bx, px):
+        self._gmres(
+            bx.get_array(), px.get_array(), self.gmres_subspace_size, self.gmres_rtol
+        )
+
+        return
 
 
 class DirectPetscSolver:
@@ -77,7 +249,7 @@ class DirectPetscSolver:
 
         return
 
-    def solve(self, x, diag, bx, px):
+    def factor(self, x, diag):
         # Compute the Hessian
         self.mpi_problem.hessian(x, self.hess)
         self.hess.add_diagonal(diag)
@@ -93,12 +265,12 @@ class DirectPetscSolver:
         self.H.assemble()
 
         # Create KSP solver
-        ksp = PETSc.KSP().create(comm=self.comm)
-        ksp.setOperators(self.H)
-        ksp.setTolerances(rtol=1e-16)
-        ksp.setType("preonly")  # Do not iterate — direct solve only
+        self.ksp = PETSc.KSP().create(comm=self.comm)
+        self.ksp.setOperators(self.H)
+        self.ksp.setTolerances(rtol=1e-16)
+        self.ksp.setType("preonly")  # Do not iterate — direct solve only
 
-        pc = ksp.getPC()
+        pc = self.ksp.getPC()
         pc.setType("cholesky")
         pc.setFactorSolverType("mumps")
 
@@ -113,11 +285,13 @@ class DirectPetscSolver:
         # ksp.setMonitor(
         #     lambda ksp, its, rnorm: print(f"Iter {its}: ||r|| = {rnorm:.3e}")
         # )
-        ksp.setUp()
+        self.ksp.setUp()
+
+    def solve(self, bx, px):
 
         # Solve the system
         self.b.getArray()[:] = bx.get_array()[: self.nrows_local]
-        ksp.solve(self.b, self.x)
+        self.ksp.solve(self.b, self.x)
         px.get_array()[: self.nrows_local] = self.x.getArray()[:]
 
         # if self.comm.size == 1:
@@ -139,7 +313,7 @@ class Optimizer:
         distribute=False,
     ):
         self.model = model
-        self.problem = self.model.get_opt_problem()
+        self.problem = self.model.get_problem()
 
         self.comm = comm
         self.distribute = distribute
@@ -309,7 +483,8 @@ class Optimizer:
 
         # Find the solution values
         x = self.vars.get_solution()
-        self.solver.solve(x, self.diag, self.res, self.px, zero_design_contrib=True)
+        self.solver.factor(x, self.diag, zero_design_contrib=True)
+        self.solver.solve(self.res, self.px)
 
         # Update the multiplier values
         x_array = x.get_array()
@@ -339,7 +514,8 @@ class Optimizer:
         self.optimizer.compute_diagonal(self.vars, self.diag)
 
         # Solve the KKT system
-        self.solver.solve(x, self.diag, self.res, self.px)
+        self.solver.factor(x, self.diag)
+        self.solver.solve(self.res, self.px)
 
         # Compute the full update based on the reduced variable update
         self.optimizer.compute_update(
@@ -511,7 +687,8 @@ class Optimizer:
             self.optimizer.compute_diagonal(self.vars, self.diag)
 
             # Solve the KKT system with the computed diagonal entries
-            self.solver.solve(x, self.diag, self.res, self.px)
+            self.solver.factor(x, self.diag)
+            self.solver.solve(self.res, self.px)
 
             # Compute the full update based on the reduced variable update
             self.optimizer.compute_update(

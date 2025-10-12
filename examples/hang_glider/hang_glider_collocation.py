@@ -298,8 +298,6 @@ with open("glider_model.json", "w") as fp:
 print(f"Num variables:              {model.num_variables}")
 print(f"Num constraints:            {model.num_constraints}")
 
-prob = model.get_opt_problem()
-
 # Get the design variables
 x = model.create_vector()
 x[:] = 0.0

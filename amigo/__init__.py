@@ -8,7 +8,7 @@ if sys.platform == "win32":
 from .amigo import Vector, OptimizationProblem, SparseCholesky, OrderingType
 from .component import Component
 from .model import Model
-from .optimizer import Optimizer
+from .optimizer import *
 from .utils import tocsr, topetsc, BSplineInterpolant
 from .unary_operations import *
 

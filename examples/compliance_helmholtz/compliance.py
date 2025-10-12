@@ -348,10 +348,17 @@ parser.add_argument(
     default=False,
     help="Show the sparsity pattern",
 )
+parser.add_argument(
+    "--with-lnks",
+    dest="use_lnks",
+    action="store_true",
+    default=False,
+    help="Enable the Largrange-Newton-Krylov-Schur inexact solver",
+)
 args = parser.parse_args()
 
-nx = 64
-ny = 32
+nx = 128
+ny = 64
 
 nnodes = (nx + 1) * (ny + 1)
 nelems = nx * ny
@@ -461,11 +468,10 @@ elif args.order_type == "nd":
 elif args.order_type == "natural":
     order_type = am.OrderingType.NATURAL
 
+# Initialize the problem
 order_for_block = args.order_for_block
 model.initialize(order_type=order_type, order_for_block=order_for_block)
-
-# Initialize the problem
-prob = model.get_opt_problem()
+prob = model.get_problem()
 
 end = time.perf_counter()
 print(f"Initialization time:        {end - start:.6f} seconds")
@@ -496,27 +502,50 @@ lower["src.x"] = 1e-3
 upper["src.x"] = 1.0
 lower["src.rho"] = 1e-3
 upper["src.rho"] = float("inf")
+lower["src.u"] = -np.inf
+upper["src.u"] = np.inf
+lower["src.v"] = -np.inf
+upper["src.v"] = np.inf
+lower["bcs_u.lam"] = -np.inf
+upper["bcs_u.lam"] = np.inf
+lower["bcs_v.lam"] = -np.inf
+upper["bcs_v.lam"] = np.inf
 
 start = time.perf_counter()
-mat_obj = prob.create_csr_matrix()
+mat_obj = prob.create_matrix()
 end = time.perf_counter()
 print(f"Matrix initialization time: {end - start:.6f} seconds")
 
 start = time.perf_counter()
-prob.hessian(x.get_opt_problem_vec(), mat_obj)
+prob.hessian(x.get_vector(), mat_obj)
 end = time.perf_counter()
 print(f"Matrix computation time:    {end - start:.6f} seconds")
 
 grad = prob.create_vector()
 start = time.perf_counter()
-prob.gradient(x.get_opt_problem_vec(), grad)
+prob.gradient(x.get_vector(), grad)
 end = time.perf_counter()
 print(f"Residual computation time:  {end - start:.6f} seconds")
 
-opt = am.Optimizer(model, x=x, lower=lower, upper=upper)
+solver = None
+if args.use_lnks:
+    problem = model.get_problem()
+
+    state_vars = ["src.u", "src.v", "bcs_u.lam", "bcs_v.lam"]
+    residuals = ["src.u_res", "src.v_res", "bcs_u.bc_res", "bcs_v.bc_res"]
+
+    solver = am.LNKSInexactSolver(
+        problem,
+        model=model,
+        state_vars=state_vars,
+        residuals=residuals,
+        gmres_subspace_size=50,
+    )
+
+opt = am.Optimizer(model, x=x, lower=lower, upper=upper, solver=solver)
 
 options = {
-    "max_iterations": 100,
+    "max_iterations": 25,
     "initial_barrier_param": 0.1,
     "max_line_search_iterations": 1,
 }
@@ -525,20 +554,23 @@ opt.optimize(options)
 vals = x["src.rho"]
 vals = vals.reshape((nx + 1, ny + 1)).T
 
+# Set the x and y coordinates
 X, Y = np.meshgrid(xpts, ypts)
-plt.figure()
-plt.contourf(X, Y, vals, levels=20, cmap="viridis")
-plt.colorbar(label="rho value")
-plt.xlabel("x")
-plt.ylabel("y")
 
-vals = x["src.x"]
-vals = vals.reshape((nx + 1, ny + 1)).T
+# Plot the result as a figure
+fig, ax = plt.subplots(figsize=(8, 4))
+ax.set_aspect("equal")
+ax.get_xaxis().set_ticks([])
+ax.get_yaxis().set_ticks([])
+ax.axis("off")
 
-plt.figure()
-plt.contourf(X, Y, vals, levels=20, cmap="viridis")
-plt.colorbar(label="x value")
-plt.xlabel("x")
-plt.ylabel("y")
+# Set the number of levels to use.
+levels = np.linspace(0.0, 1.0, 26)
+ax.contourf(X, Y, vals, levels, cmap="coolwarm", extend="max")
 
+plt.savefig(
+    "compliance.png", dpi=500, transparent=True, bbox_inches="tight", pad_inches=0.01
+)
+
+fig.tight_layout(pad=0.01)
 plt.show()

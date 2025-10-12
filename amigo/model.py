@@ -641,7 +641,7 @@ class Model:
                 f"Name {comp_name}.{name} is neither an input, constraint, output or data"
             )
 
-    def get_indices(self, name: str):
+    def get_indices(self, name: str | List[str]):
         """
         Get the indices associated with the variable.
 
@@ -651,29 +651,65 @@ class Model:
         a sliced version of the indices.
 
         Args:
-            name (str): The name of the variable indices to retrieve
+            name (str or list of str): The name of the variable indices to retrieve
+
+        Returns:
+            indices (np.ndarray): Array of indices
         """
-        path, indices = _parse_var_expr(name)
-        comp_name = ".".join(path[:-1])
-        name = path[-1]
 
-        if comp_name not in self.comp:
-            raise ValueError(f"Component name {comp_name} not found")
+        if isinstance(name, list):
+            idx_list = []
+            for name_ in name:
+                idx_list.append(self.get_indices(name_).ravel())
+            indices = np.concatenate(idx_list)
 
-        if name in self.comp[comp_name].vars:
-            if indices is None:
-                return self.comp[comp_name].get_var(name)
-            else:
-                return self.comp[comp_name].get_var(name)[indices]
-        elif name in self.comp[comp_name].data:
-            if indices is None:
-                return self.comp[comp_name].get_data(name)
-            else:
-                return self.comp[comp_name].get_data(name)[indices]
+            return indices
         else:
-            raise ValueError(
-                f"Name {comp_name}.{name} is not an input, constraint, output or data name"
-            )
+            path, indices = _parse_var_expr(name)
+            comp_name = ".".join(path[:-1])
+            name = path[-1]
+
+            if comp_name not in self.comp:
+                raise ValueError(f"Component name {comp_name} not found")
+
+            if name in self.comp[comp_name].vars:
+                if indices is None:
+                    return self.comp[comp_name].get_var(name)
+                else:
+                    return self.comp[comp_name].get_var(name)[indices]
+            elif name in self.comp[comp_name].data:
+                if indices is None:
+                    return self.comp[comp_name].get_data(name)
+                else:
+                    return self.comp[comp_name].get_data(name)[indices]
+            else:
+                raise ValueError(
+                    f"Name {comp_name}.{name} is not an input, constraint, output or data name"
+                )
+
+    def get_indices_and_map(self, names: List[str]):
+        """
+        Given a list of variable names, create a concatenated list of indices and a mapping between
+        the names and indices.
+
+        Args:
+            names (list(str)): List of strings containing the names names
+
+        Returns:
+            indices (np.ndarray): Concatenated array of the indices
+            idx_dict (dict): Name -> new index mapping
+        """
+        idx_list = []
+        idx_dict = {}
+        idx_count = 0
+        for name in names:
+            idx = self.get_indices(name).ravel()
+            idx_list.append(idx)
+            idx_dict[name] = np.arange(idx_count, idx_count + idx.size, dtype=int)
+            idx_count += idx.size
+        indices = np.concatenate(idx_list)
+
+        return indices, idx_dict
 
     def get_meta(self, name: str):
         """
@@ -741,33 +777,9 @@ class Model:
     def create_output_vector(self):
         return ModelVector(self, self.problem.create_output_vector())
 
-    def get_opt_problem(self):
+    def get_problem(self):
         """Retrieve the optimization problem"""
         return self.problem
-
-    def get_indices_from_list(self, names: List[str]):
-        """
-        Given a list of variable names, create a concatenated list of indices and a mapping between
-        the names and indices.
-
-        Args:
-            names (list(str)): List of strings containing the names names
-
-        Returns:
-            indices (np.ndarray): Concatenated array of the indices
-            idx_dict (dict): Name -> new index mapping
-        """
-        idx_list = []
-        idx_dict = {}
-        idx_count = 0
-        for name in names:
-            idx = self.get_indices(name).ravel()
-            idx_list.append(idx)
-            idx_dict[name] = np.arange(idx_count, idx_count + idx.size, dtype=int)
-            idx_count += idx.size
-        indices = np.concatenate(idx_list)
-
-        return indices, idx_dict
 
     def extract_submatrix(
         self, A: Union[CSRMat, spmatrix], of: List[str], wrt: List[str]
@@ -776,8 +788,8 @@ class Model:
         Given the matrix A, find the sub-matrix A[indices[of], indices[wrt]]
         """
 
-        of_indices, of_dict = self.get_indices_from_list(of)
-        wrt_indices, wrt_dict = self.get_indices_from_list(wrt)
+        of_indices, of_dict = self.get_indices_and_map(of)
+        wrt_indices, wrt_dict = self.get_indices_and_map(wrt)
 
         if isinstance(A, spmatrix):
             Asub = A[of_indices, :][:, wrt_indices]
