@@ -437,8 +437,6 @@ PYBIND11_MODULE(amigo, mod) {
             return py::make_tuple(complementarity, uniformity);
           },
           py::arg("vars"), py::arg("compute_uniformity"))
-      .def("compute_uniformity_measure",
-           &amigo::InteriorPointOptimizer<double>::compute_uniformity_measure)
       .def("compute_affine_start_point",
            &amigo::InteriorPointOptimizer<double>::compute_affine_start_point)
       .def("check_update",

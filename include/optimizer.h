@@ -978,17 +978,6 @@ class InteriorPointOptimizer {
   }
 
   /**
-   * @brief Compute the uniformity measure ξ = min_i [w_i y_i / (y^T w / m)]
-   * @param vars The optimization variables
-   * @return T The uniformity measure value
-   */
-  T compute_uniformity_measure(const std::shared_ptr<OptVector<T>> vars) const {
-    T uniformity;
-    compute_complementarity(vars, &uniformity);
-    return uniformity;
-  }
-
-  /**
    * @brief Compute the variable values for the new starting point
    *
    * @param beta_min The minimum value of the multiplier or slack variable

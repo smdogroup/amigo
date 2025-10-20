@@ -282,13 +282,17 @@ class Optimizer:
 
         return default
 
-    def _compute_uniformity_measure(self):
+    def _compute_complementarity_and_uniformity(self):
         """
-        Compute the uniformity measure ξ = min_i [w_i y_i / (y^T w / m)]
-        where w_i y_i are the complementary products.
+        Compute both complementarity and uniformity measure in a single pass.
+        Returns (complementarity, uniformity) where:
+        - complementarity is the average: y^T w / m
+        - uniformity ξ = min_i [w_i y_i / (y^T w / m)]
         """
-        xi = self.optimizer.compute_uniformity_measure(self.vars)
-        return xi
+        complementarity, uniformity = self.optimizer.compute_complementarity(
+            self.vars, True
+        )
+        return complementarity, uniformity
 
     def _compute_barrier_heuristic(self, xi, complementarity, gamma, r):
         """
@@ -512,8 +516,7 @@ class Optimizer:
                 options["barrier_strategy"] == "heuristic"
                 and options["verbose_barrier"]
             ):
-                xi = self._compute_uniformity_measure()
-                complementarity = self.optimizer.compute_complementarity(self.vars)
+                complementarity, xi = self._compute_complementarity_and_uniformity()
                 iter_data["xi"] = xi
                 iter_data["complementarity"] = complementarity
                 heuristic_data.append(
