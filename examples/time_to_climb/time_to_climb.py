@@ -415,6 +415,7 @@ data = opt.optimize(
     {
         "initial_barrier_param": 1.0,
         "monotone_barrier_fraction": 0.25,
+        "barrier_strategy": "monotone",
         "convergence_tolerance": 1e-10,
         "max_line_search_iterations": 5,
         "max_iterations": 1000,

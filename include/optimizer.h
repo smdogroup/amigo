@@ -940,6 +940,71 @@ class InteriorPointOptimizer {
   }
 
   /**
+   * @brief Compute the uniformity measure ξ = min_i [w_i y_i / (y^T w / m)]
+   *
+   * @param vars The optimization variables
+   * @return T The uniformity measure value
+   */
+  T compute_uniformity_measure(const std::shared_ptr<OptVector<T>> vars) {
+    // First compute the average complementarity (y^T w / m)
+    T avg_complementarity = compute_complementarity(vars);
+    
+    if (avg_complementarity <= 0.0) {
+      return 1.0;
+    }
+
+    // Get the dual values for the bound constraints
+    const T *zl, *zu;
+    vars->get_bound_duals(&zl, &zu);
+
+    // Get the slack variable values
+    const T *sl, *tl, *su, *tu;
+    vars->get_slacks(nullptr, &sl, &tl, &su, &tu);
+
+    // Get the dual values for the slacks
+    const T *zsl, *ztl, *zsu, *ztu;
+    vars->get_slack_duals(&zsl, &ztl, &zsu, &ztu);
+
+    Vector<T> &xlam = *vars->get_solution();
+
+    // Compute min_i [w_i y_i / (y^T w / m)]
+    T local_min = std::numeric_limits<T>::max();
+    for (int i = 0; i < num_variables; i++) {
+      // Extract the design variable value
+      int index = design_variable_indices[i];
+      T x = xlam[index];
+
+      if (!std::isinf(lbx[i])) {
+        T comp = (x - lbx[i]) * zl[i];
+        local_min = std::min(local_min, comp / avg_complementarity);
+      }
+      if (!std::isinf(ubx[i])) {
+        T comp = (ubx[i] - x) * zu[i];
+        local_min = std::min(local_min, comp / avg_complementarity);
+      }
+    }
+
+    for (int i = 0; i < num_inequalities; i++) {
+      if (!std::isinf(lbc[i])) {
+        local_min = std::min(local_min, sl[i] * zsl[i] / avg_complementarity);
+        local_min = std::min(local_min, tl[i] * ztl[i] / avg_complementarity);
+      }
+
+      if (!std::isinf(ubc[i])) {
+        local_min = std::min(local_min, su[i] * zsu[i] / avg_complementarity);
+        local_min = std::min(local_min, tu[i] * ztu[i] / avg_complementarity);
+      }
+    }
+
+    // Compute the minimum across all processors
+    T global_min;
+    MPI_Allreduce(&local_min, &global_min, 1, get_mpi_type<T>(), MPI_MIN, comm);
+
+    // Clamp to [0, 1]
+    return std::max(0.0, std::min(1.0, global_min));
+  }
+
+  /**
    * @brief Compute the variable values for the new starting point
    *
    * @param beta_min The minimum value of the multiplier or slack variable

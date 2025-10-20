@@ -421,6 +421,8 @@ PYBIND11_MODULE(amigo, mod) {
            &amigo::InteriorPointOptimizer<double>::apply_step_update)
       .def("compute_complementarity",
            &amigo::InteriorPointOptimizer<double>::compute_complementarity)
+      .def("compute_uniformity_measure",
+           &amigo::InteriorPointOptimizer<double>::compute_uniformity_measure)
       .def("compute_affine_start_point",
            &amigo::InteriorPointOptimizer<double>::compute_affine_start_point)
       .def("check_update",

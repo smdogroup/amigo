@@ -395,12 +395,18 @@ opt = am.Optimizer(model, x, lower=lower, upper=upper, comm=comm, distribute=dis
 
 data = opt.optimize(
     {
-        "max_iterations": 100,
-        "record_components": ["cart.x[-1]"],
-        "max_line_search_iterations": 10,
-        "convergence_tolerance": 1e-8,
+        "initial_barrier_param": 0.1,
+        "convergence_tolerance": 1e-10,
+        "max_line_search_iterations": 4,  # 30,  # Reasonable for intermediate problem
+        "max_iterations": 500,  # Sufficient iterations
+        "init_affine_step_multipliers": True,  # Enable for better scaling
+        # Use the new heuristic barrier parameter update
+        "barrier_strategy": "heuristic",
+        "verbose_barrier": True,  # Show ξ and complementarity values
     }
 )
+
+
 with open("cart_opt_data.json", "w") as fp:
     json.dump(data, fp, indent=2)
 

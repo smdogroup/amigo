@@ -268,6 +268,10 @@ class Optimizer:
             "equal_primal_dual_step": False,
             "init_least_squares_multipliers": True,
             "init_affine_step_multipliers": False,
+            # Heuristic barrier parameter options
+            "heuristic_barrier_gamma": 0.1,
+            "heuristic_barrier_r": 0.95,
+            "verbose_barrier": False,
         }
 
         for name in options:
@@ -277,6 +281,27 @@ class Optimizer:
                 raise ValueError(f"Unrecognized option {name}")
 
         return default
+
+    def _compute_uniformity_measure(self):
+        """
+        Compute the uniformity measure ξ = min_i [w_i y_i / (y^T w / m)]
+        where w_i y_i are the complementary products.
+        """
+        xi = self.optimizer.compute_uniformity_measure(self.vars)
+        return xi
+
+    def _compute_barrier_heuristic(self, xi, complementarity, gamma, r):
+        """
+        Compute the heuristic barrier parameter.
+        Formula: μ = γ * min((1-r)*(1-ξ)/ξ, 2)^3 * complementarity
+        """
+        if xi > 1e-10:
+            term = (1 - r) * (1 - xi) / xi
+            heuristic_factor = min(term, 2.0) ** 3
+        else:
+            heuristic_factor = 2.0**3
+
+        return gamma * heuristic_factor * complementarity, heuristic_factor
 
     def _compute_least_squares_multipliers(self):
         """
@@ -456,6 +481,9 @@ class Optimizer:
         x_index_prev = -1
         z_index_prev = -1
 
+        # Storage for heuristic barrier table (to display after optimization)
+        heuristic_data = []
+
         for i in range(max_iters):
             iter_data = {}
 
@@ -479,6 +507,19 @@ class Optimizer:
             if comm_rank == 0:
                 self.write_log(i, iter_data)
 
+            # Compute and store xi and complementarity for heuristic (display table after optimization)
+            if (
+                options["barrier_strategy"] == "heuristic"
+                and options["verbose_barrier"]
+            ):
+                xi = self._compute_uniformity_measure()
+                complementarity = self.optimizer.compute_complementarity(self.vars)
+                iter_data["xi"] = xi
+                iter_data["complementarity"] = complementarity
+                heuristic_data.append(
+                    {"iteration": i, "xi": xi, "complementarity": complementarity}
+                )
+
             iter_data["x"] = {}
             if xview is not None:
                 for name in record_components:
@@ -493,8 +534,32 @@ class Optimizer:
             elif res_norm <= 0.1 * self.barrier_param:
                 barrier_converged = True
 
-            # Check if the barrier problem has converged
-            if barrier_converged:
+            # Check if the barrier problem has converged and update barrier parameter
+            if options["barrier_strategy"] == "heuristic":
+                # Heuristic barrier update - compute xi and complementarity if not already done
+                if "xi" in iter_data:
+                    xi = iter_data["xi"]
+                    complementarity = iter_data["complementarity"]
+                else:
+                    xi = self._compute_uniformity_measure()
+                    complementarity = self.optimizer.compute_complementarity(self.vars)
+
+                self.barrier_param, _ = self._compute_barrier_heuristic(
+                    xi,
+                    complementarity,
+                    options["heuristic_barrier_gamma"],
+                    options["heuristic_barrier_r"],
+                )
+
+                # Re-compute the reduced residual for the right-hand-side of the KKT system
+                res_norm = self.optimizer.compute_residual(
+                    self.barrier_param,
+                    self.gamma_penalty,
+                    self.vars,
+                    self.grad,
+                    self.res,
+                )
+            elif barrier_converged:
                 frac = options["monotone_barrier_fraction"]
                 self.barrier_param *= frac
 
@@ -586,5 +651,23 @@ class Optimizer:
             alpha_z_prev = alpha * alpha_z
             x_index_prev = x_index
             z_index_prev = z_index
+
+        # Print heuristic barrier table after optimization completes
+        if (
+            comm_rank == 0
+            and options["barrier_strategy"] == "heuristic"
+            and options["verbose_barrier"]
+        ):
+            if len(heuristic_data) > 0:
+                print()
+                print(f"{'iteration':>10s} {'xi':>15s} {'complementarity':>15s}")
+                for idx, data in enumerate(heuristic_data):
+                    if idx % 10 == 0 and idx > 0:
+                        print(
+                            f"{'iteration':>10s} {'xi':>15s} {'complementarity':>15s}"
+                        )
+                    print(
+                        f"{data['iteration']:10d} {data['xi']:15.6e} {data['complementarity']:15.6e}"
+                    )
 
         return opt_data
