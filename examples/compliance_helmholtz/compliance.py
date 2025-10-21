@@ -349,6 +349,13 @@ parser.add_argument(
     help="Show the sparsity pattern",
 )
 parser.add_argument(
+    "--with-debug",
+    dest="use_debug",
+    action="store_true",
+    default=False,
+    help="Enable debug flags",
+)
+parser.add_argument(
     "--with-lnks",
     dest="use_lnks",
     action="store_true",
@@ -456,7 +463,10 @@ if args.build:
         define_macros = [("AMIGO_USE_OPENMP", "1")]
 
     model.build_module(
-        compile_args=compile_args, link_args=link_args, define_macros=define_macros
+        compile_args=compile_args,
+        link_args=link_args,
+        define_macros=define_macros,
+        debug=args.use_debug,
     )
 
 start = time.perf_counter()

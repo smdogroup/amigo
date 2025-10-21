@@ -218,9 +218,9 @@ class CSRMat {
       // Set the diagonal elements of the matrix
       auto* it = std::lower_bound(start, end, isub);
       if (it != end && *it == isub) {
-        mat->diag[i] = it - mat->cols;
+        mat->diag[isub] = it - mat->cols;
       } else {
-        mat->diag[i] = -1;
+        mat->diag[isub] = -1;
       }
     }
 
@@ -279,7 +279,7 @@ class CSRMat {
       // Extract the values from the submatrix row
       for (int jp = mat->rowp[isub]; jp < mat->rowp[isub + 1]; jp++) {
         int jsub = mat->cols[jp];
-        data[jp] = temp[jsub];
+        mat->data[jp] = temp[jsub];
       }
     }
 
