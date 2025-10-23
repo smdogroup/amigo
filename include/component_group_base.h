@@ -28,13 +28,31 @@ class ComponentGroupBase {
   virtual void add_hessian(const Vector<T>& data, const Vector<T>& x,
                            const NodeOwners& owners, CSRMat<T>& mat) const {}
 
-  // Output functions
-  virtual void add_output(const Vector<T>& data, const Vector<T>& vec,
+  // Gradient coupling function
+  virtual void add_grad_jac_product_wrt_data(const Vector<T>& data,
+                                             const Vector<T>& x,
+                                             const Vector<T>& pdata,
+                                             Vector<T>& g) const {}
+  virtual void add_grad_jac_tproduct_wrt_data(const Vector<T>& data,
+                                              const Vector<T>& x,
+                                              const Vector<T>& px,
+                                              Vector<T>& dx) const {}
+  virtual void add_grad_jac_wrt_data(const Vector<T>& data_vec,
+                                     const Vector<T>& vec,
+                                     const NodeOwners& owners,
+                                     CSRMat<T>& jact) const {}
+
+  // Compute the output
+  virtual void add_output(const Vector<T>& data, const Vector<T>& x,
                           Vector<T>& output) const {}
-  virtual void add_input_jacobian(const Vector<T>& data, const Vector<T>& vec,
-                                  CSRMat<T>& jac) const {}
-  virtual void add_data_jacobian(const Vector<T>& data, const Vector<T>& vec,
-                                 CSRMat<T>& jac) const {}
+
+  // Functions needed for the post-optimality direct and adjoint methods
+  virtual void add_output_jac_wrt_input(const Vector<T>& data,
+                                        const Vector<T>& x,
+                                        CSRMat<T>& jac) const {}
+  virtual void add_output_jac_wrt_data(const Vector<T>& data,
+                                       const Vector<T>& x,
+                                       CSRMat<T>& jac) const {}
 
   // Ordering information
   virtual void get_data_layout_data(int* num_elements, int* nodes_per_elem,

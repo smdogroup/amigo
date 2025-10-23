@@ -19,7 +19,7 @@ namespace py = pybind11;
 
 // Templated wrapper function
 template <typename T>
-void bind_vector(py::module_ &m, const std::string &name) {
+void bind_vector(py::module_& m, const std::string& name) {
   py::class_<amigo::Vector<T>, std::shared_ptr<amigo::Vector<T>>>(m,
                                                                   name.c_str())
       .def(py::init<int>())
@@ -28,7 +28,7 @@ void bind_vector(py::module_ &m, const std::string &name) {
       .def("scale", &amigo::Vector<T>::scale)
       .def("get_size", &amigo::Vector<T>::get_size)
       .def("__getitem__",
-           [](const amigo::Vector<T> &v, py::object index) -> py::object {
+           [](const amigo::Vector<T>& v, py::object index) -> py::object {
              if (py::isinstance<py::int_>(index)) {
                ssize_t i = index.cast<ssize_t>();
                if (i < 0) i += v.get_size();
@@ -55,7 +55,7 @@ void bind_vector(py::module_ &m, const std::string &name) {
              }
            })
       .def("__setitem__",
-           [](amigo::Vector<T> &v, py::object index, py::object value) {
+           [](amigo::Vector<T>& v, py::object index, py::object value) {
              if (py::isinstance<py::int_>(index)) {
                ssize_t i = index.cast<ssize_t>();
                if (i < 0) i += v.get_size();
@@ -102,7 +102,7 @@ py::array_t<int> reorder_model(amigo::OrderingType order_type,
   // Check the dimension of the arrays
   ssize_t max_columns = 0;
   for (size_t i = 0; i < arrays.size(); i++) {
-    const auto &arr = arrays[i];
+    const auto& arr = arrays[i];
     if (arr.ndim() != 2) {
       throw std::runtime_error("Each input array must be 2D");
     }
@@ -130,7 +130,7 @@ py::array_t<int> reorder_model(amigo::OrderingType order_type,
 
   std::vector<int> columns(max_columns);
 
-  auto element_nodes = [&](int element, const int **ptr) {
+  auto element_nodes = [&](int element, const int** ptr) {
     // upper_bound finds the first index i such that intervals[i] >
     // element
     auto it = std::upper_bound(intervals.begin(), intervals.end(), element);
@@ -167,7 +167,7 @@ py::array_t<int> reorder_model(amigo::OrderingType order_type,
     auto outputs_ = output_array.unchecked<1>();
 
     int num_outputs = outputs_.shape(0);
-    int *outputs = new int[num_outputs];
+    int* outputs = new int[num_outputs];
     for (int i = 0; i < num_outputs; i++) {
       outputs[i] = outputs_[i];
     }
@@ -214,7 +214,7 @@ PYBIND11_MODULE(amigo, mod) {
   py::class_<amigo::CSRMat<double>, std::shared_ptr<amigo::CSRMat<double>>>(
       mod, "CSRMat")
       .def("get_nonzero_structure",
-           [](amigo::CSRMat<double> &mat) {
+           [](amigo::CSRMat<double>& mat) {
              int nrows, ncols, nnz;
              const int *mat_rowp, *mat_cols;
              mat.get_data(&nrows, &ncols, &nnz, &mat_rowp, &mat_cols, nullptr);
@@ -228,9 +228,9 @@ PYBIND11_MODULE(amigo, mod) {
              return py::make_tuple(nrows, ncols, nnz, rowp, cols);
            })
       .def("get_data",
-           [](amigo::CSRMat<double> &mat) -> py::array_t<double> {
+           [](amigo::CSRMat<double>& mat) -> py::array_t<double> {
              int nnz;
-             double *mat_data;
+             double* mat_data;
              mat.get_data(nullptr, nullptr, &nnz, nullptr, nullptr, &mat_data);
 
              py::array_t<double> data(nnz);
@@ -238,13 +238,13 @@ PYBIND11_MODULE(amigo, mod) {
              return data;
            })
       .def("extract_submatrix",
-           [](const amigo::CSRMat<double> &self, py::array_t<int> rows,
+           [](const amigo::CSRMat<double>& self, py::array_t<int> rows,
               py::array_t<int> cols) {
              return self.extract_submatrix(rows.size(), rows.data(),
                                            cols.size(), cols.data());
            })
       .def("extract_submatrix_values",
-           [](const amigo::CSRMat<double> &self, py::array_t<int> rows,
+           [](const amigo::CSRMat<double>& self, py::array_t<int> rows,
               py::array_t<int> cols,
               std::shared_ptr<amigo::CSRMat<double>> mat) {
              self.extract_submatrix_values(rows.size(), rows.data(),
@@ -279,7 +279,7 @@ PYBIND11_MODULE(amigo, mod) {
         return std::make_shared<amigo::NodeOwners>(comm, ranges.data());
       }))
       .def("get_mpi_comm",
-           [](const amigo::NodeOwners &self) {
+           [](const amigo::NodeOwners& self) {
              return py::reinterpret_steal<py::object>(
                  PyMPIComm_New(self.get_mpi_comm()));
            })
@@ -294,7 +294,7 @@ PYBIND11_MODULE(amigo, mod) {
                        std::shared_ptr<amigo::NodeOwners> output_owners,
                        std::shared_ptr<amigo::Vector<int>> is_multiplier,
                        const std::vector<std::shared_ptr<
-                           amigo::ComponentGroupBase<double>>> &components) {
+                           amigo::ComponentGroupBase<double>>>& components) {
         MPI_Comm comm = MPI_COMM_SELF;
         if (!pyobj.is_none()) {
           comm = *PyMPIComm_Get(pyobj.ptr());
@@ -345,14 +345,15 @@ PYBIND11_MODULE(amigo, mod) {
            &amigo::OptimizationProblem<double>::create_output_vector)
       .def("compute_output",
            &amigo::OptimizationProblem<double>::compute_output)
-      .def("create_input_jacobian",
-           &amigo::OptimizationProblem<double>::create_input_jacobian)
-      .def("create_data_jacobian",
-           &amigo::OptimizationProblem<double>::create_data_jacobian)
-      .def("input_jacobian",
-           &amigo::OptimizationProblem<double>::input_jacobian)
-      .def("data_jacobian",
-           &amigo::OptimizationProblem<double>::input_jacobian);
+      .def(
+          "create_output_jacobian_wrt_input",
+          &amigo::OptimizationProblem<double>::create_output_jacobian_wrt_input)
+      .def("create_output_jacobian_wrt_data",
+           &amigo::OptimizationProblem<double>::create_output_jacobian_wrt_data)
+      .def("output_jacobian_wrt_input",
+           &amigo::OptimizationProblem<double>::output_jacobian_wrt_input)
+      .def("output_jacobian_wrt_data",
+           &amigo::OptimizationProblem<double>::output_jacobian_wrt_data);
 
   py::class_<amigo::AliasTracker<int>>(mod, "AliasTracker")
       .def(py::init<int>(), py::arg("size"))
@@ -388,7 +389,7 @@ PYBIND11_MODULE(amigo, mod) {
                     std::shared_ptr<amigo::Vector<double>>>())
       .def(
           "create_opt_vector",
-          [](const amigo::InteriorPointOptimizer<double> &self,
+          [](const amigo::InteriorPointOptimizer<double>& self,
              py::object x = py::none()) {
             if (!x.is_none()) {
               return self.create_opt_vector(
@@ -407,7 +408,7 @@ PYBIND11_MODULE(amigo, mod) {
       .def("compute_diagonal",
            &amigo::InteriorPointOptimizer<double>::compute_diagonal)
       .def("compute_max_step",
-           [](const amigo::InteriorPointOptimizer<double> &self,
+           [](const amigo::InteriorPointOptimizer<double>& self,
               const double tau,
               const std::shared_ptr<amigo::OptVector<double>> vars,
               const std::shared_ptr<amigo::OptVector<double>> update) {

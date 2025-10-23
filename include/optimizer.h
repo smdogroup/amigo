@@ -39,7 +39,7 @@ class OptVector {
     std::copy(src->array, src->array + size, array);
   }
 
-  void get_bound_duals(T **zl, T **zu) {
+  void get_bound_duals(T** zl, T** zu) {
     if (zl) {
       *zl = &array[0];
     }
@@ -47,7 +47,7 @@ class OptVector {
       *zu = &array[num_variables];
     }
   }
-  void get_bound_duals(const T **zl, const T **zu) const {
+  void get_bound_duals(const T** zl, const T** zu) const {
     if (zl) {
       *zl = &array[0];
     }
@@ -55,7 +55,7 @@ class OptVector {
       *zu = &array[num_variables];
     }
   }
-  void get_slacks(T **s, T **sl, T **tl, T **su, T **tu) {
+  void get_slacks(T** s, T** sl, T** tl, T** su, T** tu) {
     const int offset = 2 * num_variables;
     if (s) {
       *s = &array[offset];
@@ -73,8 +73,8 @@ class OptVector {
       *tu = &array[offset + 4 * num_inequalities];
     }
   }
-  void get_slacks(const T **s, const T **sl, const T **tl, const T **su,
-                  const T **tu) const {
+  void get_slacks(const T** s, const T** sl, const T** tl, const T** su,
+                  const T** tu) const {
     const int offset = 2 * num_variables;
     if (s) {
       *s = &array[offset];
@@ -92,7 +92,7 @@ class OptVector {
       *tu = &array[offset + 4 * num_inequalities];
     }
   }
-  void get_slack_duals(T **zsl, T **ztl, T **zsu, T **ztu) {
+  void get_slack_duals(T** zsl, T** ztl, T** zsu, T** ztu) {
     const int offset = 2 * num_variables + 5 * num_inequalities;
     if (zsl) {
       *zsl = &array[offset];
@@ -107,8 +107,8 @@ class OptVector {
       *ztu = &array[offset + 3 * num_inequalities];
     }
   }
-  void get_slack_duals(const T **zsl, const T **ztl, const T **zsu,
-                       const T **ztu) const {
+  void get_slack_duals(const T** zsl, const T** ztl, const T** zsu,
+                       const T** ztu) const {
     const int offset = 2 * num_variables + 5 * num_inequalities;
     if (zsl) {
       *zsl = &array[offset];
@@ -134,7 +134,7 @@ class OptVector {
   std::shared_ptr<Vector<T>> x;
 
   int size;
-  T *array;
+  T* array;
 };
 
 /**
@@ -179,11 +179,11 @@ class InteriorPointOptimizer {
 
     // Get the total number of variables (primal + dual)
     int size = problem->get_num_variables();
-    const Vector<int> &is_multiplier = *problem->get_multiplier_indicator();
+    const Vector<int>& is_multiplier = *problem->get_multiplier_indicator();
 
     // Find how many types of variables
-    const Vector<T> &lb = *lower;
-    const Vector<T> &ub = *upper;
+    const Vector<T>& lb = *lower;
+    const Vector<T>& ub = *upper;
     for (int i = 0; i < size; i++) {
       if (is_multiplier[i]) {
         if (!std::isinf(lb[i]) && !std::isinf(ub[i]) && lb[i] == ub[i]) {
@@ -274,20 +274,13 @@ class InteriorPointOptimizer {
     T *zsl, *ztl, *zsu, *ztu;
     vars->get_slack_duals(&zsl, &ztl, &zsu, &ztu);
 
-    // Get the solution vector
-    const Vector<T> &xlam = *vars->get_solution();
-
     // Set a pointer to the vector
-    const Vector<T> &g = *grad;
+    const Vector<T>& g = *grad;
 
     T mu_sqrt = barrier_param;  // std::sqrt(barrier_param);
 
     // Initialize the lower and upper bound dual variables
     for (int i = 0; i < num_variables; i++) {
-      int index = design_variable_indices[i];
-
-      T x = xlam[index];
-
       zl[i] = zu[i] = 0.0;
       if (!std::isinf(lbx[i])) {
         zl[i] = barrier_param;  //  // barrier_param / (x - lbx[i]);
@@ -347,11 +340,11 @@ class InteriorPointOptimizer {
     vars->get_slack_duals(&zsl, &ztl, &zsu, &ztu);
 
     // Get the solution vector - design variables and multipliers
-    const Vector<T> &xlam = *vars->get_solution();
+    const Vector<T>& xlam = *vars->get_solution();
 
     // Set the gradient vector
-    const Vector<T> &g = *grad;
-    Vector<T> &r = *res;
+    const Vector<T>& g = *grad;
+    Vector<T>& r = *res;
 
     // Zero the residual
     res->zero();
@@ -479,8 +472,8 @@ class InteriorPointOptimizer {
     update->get_slack_duals(&pzsl, &pztl, &pzsu, &pztu);
 
     // Get the solution update
-    const Vector<T> &xlam = *vars->get_solution();
-    Vector<T> &pxlam = *update->get_solution();
+    const Vector<T>& xlam = *vars->get_solution();
+    Vector<T>& pxlam = *update->get_solution();
 
     // Copy the update for the design variables and dual variables
     pxlam.copy(*reduced_update);
@@ -596,11 +589,11 @@ class InteriorPointOptimizer {
     vars->get_slack_duals(&zsl, &ztl, &zsu, &ztu);
 
     // Get the solution vector - design variables and multipliers
-    const Vector<T> &xlam = *vars->get_solution();
+    const Vector<T>& xlam = *vars->get_solution();
 
     // Zero the residual
     diagonal->zero();
-    Vector<T> &diag = *diagonal;
+    Vector<T>& diag = *diagonal;
 
     for (int i = 0; i < num_variables; i++) {
       // Get the gradient component corresponding to this variable
@@ -652,8 +645,8 @@ class InteriorPointOptimizer {
    */
   void compute_max_step(const T tau, const std::shared_ptr<OptVector<T>> vars,
                         const std::shared_ptr<OptVector<T>> update,
-                        T &alpha_x_max, int &x_index, T &alpha_z_max,
-                        int &z_index) const {
+                        T& alpha_x_max, int& x_index, T& alpha_z_max,
+                        int& z_index) const {
     // Get the dual values for the bound constraints
     T *zl, *zu;
     const T *pzl, *pzu;
@@ -673,8 +666,8 @@ class InteriorPointOptimizer {
     update->get_slack_duals(&pzsl, &pztl, &pzsu, &pztu);
 
     // Get the solution update
-    const Vector<T> &xlam = *vars->get_solution();
-    const Vector<T> &pxlam = *update->get_solution();
+    const Vector<T>& xlam = *vars->get_solution();
+    const Vector<T>& pxlam = *update->get_solution();
 
     // Set the max step for the design variables and multipliers
     alpha_x_max = 1.0;
@@ -844,9 +837,9 @@ class InteriorPointOptimizer {
     temp->get_slack_duals(&nzsl, &nztl, &nzsu, &nztu);
 
     // Get the solution update
-    const Vector<T> &xlam = *vars->get_solution();
-    const Vector<T> &pxlam = *update->get_solution();
-    Vector<T> &nxlam = *temp->get_solution();
+    const Vector<T>& xlam = *vars->get_solution();
+    const Vector<T>& pxlam = *update->get_solution();
+    Vector<T>& nxlam = *temp->get_solution();
 
     nxlam.copy(xlam);
     nxlam.axpy(alpha_x, pxlam);
@@ -898,7 +891,7 @@ class InteriorPointOptimizer {
     const T *zsl, *ztl, *zsu, *ztu;
     vars->get_slack_duals(&zsl, &ztl, &zsu, &ztu);
 
-    Vector<T> &xlam = *vars->get_solution();
+    Vector<T>& xlam = *vars->get_solution();
 
     T partial_sum[2] = {0.0, 0.0};
     for (int i = 0; i < num_variables; i++) {
@@ -1033,14 +1026,14 @@ class InteriorPointOptimizer {
     update->get_slack_duals(&pzsl, &pztl, &pzsu, &pztu);
 
     // Get the solution update
-    const Vector<T> &xlam = *vars->get_solution();
-    const Vector<T> &pxlam = *update->get_solution();
+    const Vector<T>& xlam = *vars->get_solution();
+    const Vector<T>& pxlam = *update->get_solution();
 
     // Set the gradient vector
-    const Vector<T> &g = *grad;
+    const Vector<T>& g = *grad;
 
     std::shared_ptr<Vector<T>> tmp = problem->create_vector();
-    Vector<T> &t = *tmp;
+    Vector<T>& t = *tmp;
 
     std::printf("KKT step check\n");
 

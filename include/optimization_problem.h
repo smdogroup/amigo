@@ -561,6 +561,46 @@ class OptimizationProblem {
   }
 
   /**
+   * @brief Create the CSR matrix object that can store the Hessian
+   *
+   * @return std::shared_ptr<CSRMat<T>>
+   */
+  std::shared_ptr<CSRMat<T>> create_matrix() {
+    if (mat) {
+      return mat->duplicate();
+    } else {
+      std::vector<int> intervals;
+      auto element_nodes = get_element_nodes(intervals);
+      int num_elements = intervals[components.size()];
+      int num_variables =
+          var_owners->get_local_size() + var_owners->get_ext_size();
+
+      // Create the local CSR structure
+      bool include_diagonal = true;
+
+      // Columns sorted in MatrixDistribute initialization
+      bool sort_columns = false;
+
+      // Generate the non-zero pattern
+      int *rowp, *cols;
+      OrderingUtils::create_csr_from_element_conn(
+          num_variables, num_variables, num_elements, element_nodes,
+          include_diagonal, sort_columns, &rowp, &cols);
+
+      // Distribute the pattern across matrices
+      mat_dist =
+          new MatrixDistribute(comm, var_owners, var_owners, num_variables,
+                               num_variables, rowp, cols, mat);
+      mat_dist_ctx = mat_dist->create_context<T>();
+
+      delete[] rowp;
+      delete[] cols;
+
+      return mat;
+    }
+  }
+
+  /**
    * @brief Compute the value of the Lagrangian
    *
    * @param x The design variable values
@@ -665,44 +705,9 @@ class OptimizationProblem {
   }
 
   /**
-   * @brief Create the CSR matrix object that can store the Hessian
+   * @brief Compute the Jacobian of the gradient of the Lagrangian wrt
    *
-   * @return std::shared_ptr<CSRMat<T>>
    */
-  std::shared_ptr<CSRMat<T>> create_matrix() {
-    if (mat) {
-      return mat->duplicate();
-    } else {
-      std::vector<int> intervals;
-      auto element_nodes = get_element_nodes(intervals);
-      int num_elements = intervals[components.size()];
-      int num_variables =
-          var_owners->get_local_size() + var_owners->get_ext_size();
-
-      // Create the local CSR structure
-      bool include_diagonal = true;
-
-      // Columns sorted in MatrixDistribute initialization
-      bool sort_columns = false;
-
-      // Generate the non-zero pattern
-      int *rowp, *cols;
-      OrderingUtils::create_csr_from_element_conn(
-          num_variables, num_variables, num_elements, element_nodes,
-          include_diagonal, sort_columns, &rowp, &cols);
-
-      // Distribute the pattern across matrices
-      mat_dist =
-          new MatrixDistribute(comm, var_owners, var_owners, num_variables,
-                               num_variables, rowp, cols, mat);
-      mat_dist_ctx = mat_dist->create_context<T>();
-
-      delete[] rowp;
-      delete[] cols;
-
-      return mat;
-    }
-  }
 
   /**
    * @brief Compute the output as a function of the inputs
@@ -725,19 +730,19 @@ class OptimizationProblem {
   }
 
   /**
-   * @brief Compute the input Jacobian matrix
+   * @brief Compute the Jacobian of the outputs wrt inputs
    *
    * @param x The design variable vector
    * @param jacobian The Jacobian matrix
    */
-  void input_jacobian(const std::shared_ptr<Vector<T>> x,
-                      std::shared_ptr<CSRMat<T>> jacobian) {
+  void output_jacobian_wrt_input(const std::shared_ptr<Vector<T>> x,
+                                 std::shared_ptr<CSRMat<T>> jacobian) {
     var_dist.begin_forward(x, var_ctx);
     var_dist.end_forward(x, var_ctx);
 
     jacobian->zero();
     for (size_t i = 0; i < components.size(); i++) {
-      components[i]->add_input_jacobian(*data_vec, *x, *jacobian);
+      components[i]->add_output_jac_wrt_input(*data_vec, *x, *jacobian);
     }
 
     input_jac_dist->begin_assembly(jacobian, input_jac_dist_ctx);
@@ -745,19 +750,19 @@ class OptimizationProblem {
   }
 
   /**
-   * @brief Compute the data Jacobian matrix
+   * @brief Compute the Jacobian of the outputs wrt data
    *
    * @param x The design variable vector
    * @param jacobian The Jacobian matrix
    */
-  void data_jacobian(const std::shared_ptr<Vector<T>> x,
-                     std::shared_ptr<CSRMat<T>> jacobian) {
+  void output_jacobian_wrt_data(const std::shared_ptr<Vector<T>> x,
+                                std::shared_ptr<CSRMat<T>> jacobian) {
     var_dist.begin_forward(x, var_ctx);
     var_dist.end_forward(x, var_ctx);
 
     jacobian->zero();
     for (size_t i = 0; i < components.size(); i++) {
-      components[i]->add_data_jacobian(*data_vec, *x, *jacobian);
+      components[i]->add_output_jac_wrt_data(*data_vec, *x, *jacobian);
     }
 
     data_jac_dist->begin_assembly(jacobian, data_jac_dist_ctx);
@@ -769,7 +774,7 @@ class OptimizationProblem {
    *
    * @return std::shared_ptr<CSRMat<T>>
    */
-  std::shared_ptr<CSRMat<T>> create_input_jacobian() {
+  std::shared_ptr<CSRMat<T>> create_output_jacobian_wrt_input() {
     if (input_jac) {
       return input_jac->duplicate();
     } else {
@@ -833,7 +838,7 @@ class OptimizationProblem {
    *
    * @return std::shared_ptr<CSRMat<T>>
    */
-  std::shared_ptr<CSRMat<T>> create_data_jacobian() {
+  std::shared_ptr<CSRMat<T>> create_output_jacobian_wrt_data() {
     if (data_jac) {
       return data_jac->duplicate();
     } else {

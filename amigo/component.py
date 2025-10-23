@@ -1041,6 +1041,7 @@ class Component:
         prod_name="pinput__",
         hprod_name="houtput__",
         stack_name="stack__",
+        output_name="output__",
     ):
         """
         Generate the code for a c++ implementation
@@ -1118,6 +1119,7 @@ class Component:
             for mode in ["eval", "rev", "hprod"]:
                 cpp += self._generate_compute_cpp(
                     mode,
+                    template_name=using_template,
                     data_name=data_name,
                     input_name=input_name,
                     grad_name=grad_name,
@@ -1159,7 +1161,12 @@ class Component:
                 truth = "true"
             cpp += "  " + f"static constexpr bool is_output_empty = {truth};\n"
 
-            cpp += self._generate_output_cpp()
+            cpp += self._generate_output_cpp(
+                template_name=using_template,
+                data_name=data_name,
+                input_name=input_name,
+                output_name=output_name,
+            )
 
             cpp += "};\n"
 
@@ -1179,6 +1186,7 @@ class Component:
         cpp = ""
 
         # Add the contributions for each of the functions
+        cpp += "  " + f"template <typename {template_name}>\n"
         pre = "  AMIGO_HOST_DEVICE static"
         if mode == "eval":
             cpp += (

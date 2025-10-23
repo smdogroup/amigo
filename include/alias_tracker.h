@@ -25,7 +25,7 @@ class AliasTracker {
     return parent[var];
   }
 
-  void alias(std::vector<I> vec1, std::vector<I> vec2) {
+  void alias(std::vector<I>& vec1, std::vector<I>& vec2) {
     for (size_t i = 0; i < vec1.size(); i++) {
       I var1 = vec1[i];
       I var2 = vec2[i];
@@ -58,7 +58,7 @@ class AliasTracker {
     return group;
   }
 
-  I assign_group_vars(I *ptr) {
+  I assign_group_vars(I* ptr) {
     I array_size = size();
     for (I i = 0; i < array_size; i++) {
       ptr[i] = -1;

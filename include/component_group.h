@@ -16,20 +16,20 @@ template <typename T, int ncomp, class Input, int ndata, class Data,
 class SerialGroupBackend {
  public:
   template <int noutputs>
-  SerialGroupBackend(IndexLayout<ndata> &data_layout,
-                     IndexLayout<ncomp> &layout,
-                     IndexLayout<noutputs> &outputs) {}
+  SerialGroupBackend(IndexLayout<ndata>& data_layout,
+                     IndexLayout<ncomp>& layout,
+                     IndexLayout<noutputs>& outputs) {}
 
-  T lagrangian_kernel(const IndexLayout<ndata> &data_layout,
-                      const IndexLayout<ncomp> &layout,
-                      const Vector<T> &data_vec, const Vector<T> &vec) const {
+  T lagrangian_kernel(const IndexLayout<ndata>& data_layout,
+                      const IndexLayout<ncomp>& layout,
+                      const Vector<T>& data_vec, const Vector<T>& vec) const {
     return lagrangian_kernel<Components...>(data_layout, layout, data_vec, vec);
   }
 
   template <class Component, class... Remain>
-  T lagrangian_kernel(const IndexLayout<ndata> &data_layout,
-                      const IndexLayout<ncomp> &layout,
-                      const Vector<T> &data_vec, const Vector<T> &vec) const {
+  T lagrangian_kernel(const IndexLayout<ndata>& data_layout,
+                      const IndexLayout<ncomp>& layout,
+                      const Vector<T>& data_vec, const Vector<T>& vec) const {
     Data data;
     Input input;
     T value = 0.0;
@@ -49,18 +49,18 @@ class SerialGroupBackend {
     }
   }
 
-  void add_gradient_kernel(const IndexLayout<ndata> &data_layout,
-                           const IndexLayout<ncomp> &layout,
-                           const Vector<T> &data_vec, const Vector<T> &vec,
-                           Vector<T> &res) const {
+  void add_gradient_kernel(const IndexLayout<ndata>& data_layout,
+                           const IndexLayout<ncomp>& layout,
+                           const Vector<T>& data_vec, const Vector<T>& vec,
+                           Vector<T>& res) const {
     add_gradient_kernel<Components...>(data_layout, layout, data_vec, vec, res);
   }
 
   template <class Component, class... Remain>
-  void add_gradient_kernel(const IndexLayout<ndata> &data_layout,
-                           const IndexLayout<ncomp> &layout,
-                           const Vector<T> &data_vec, const Vector<T> &vec,
-                           Vector<T> &res) const {
+  void add_gradient_kernel(const IndexLayout<ndata>& data_layout,
+                           const IndexLayout<ncomp>& layout,
+                           const Vector<T>& data_vec, const Vector<T>& vec,
+                           Vector<T>& res) const {
     Data data;
     Input input, gradient;
     for (int i = 0; i < layout.get_num_elements(); i++) {
@@ -76,21 +76,21 @@ class SerialGroupBackend {
     }
   }
 
-  void add_hessian_product_kernel(const IndexLayout<ndata> &data_layout,
-                                  const IndexLayout<ncomp> &layout,
-                                  const Vector<T> &data_vec,
-                                  const Vector<T> &vec, const Vector<T> &dir,
-                                  Vector<T> &res) const {
+  void add_hessian_product_kernel(const IndexLayout<ndata>& data_layout,
+                                  const IndexLayout<ncomp>& layout,
+                                  const Vector<T>& data_vec,
+                                  const Vector<T>& vec, const Vector<T>& dir,
+                                  Vector<T>& res) const {
     add_hessian_product_kernel<Components...>(data_layout, layout, data_vec,
                                               vec, dir, res);
   }
 
   template <class Component, class... Remain>
-  void add_hessian_product_kernel(const IndexLayout<ndata> &data_layout,
-                                  const IndexLayout<ncomp> &layout,
-                                  const Vector<T> &data_vec,
-                                  const Vector<T> &vec, const Vector<T> &dir,
-                                  Vector<T> &res) const {
+  void add_hessian_product_kernel(const IndexLayout<ndata>& data_layout,
+                                  const IndexLayout<ncomp>& layout,
+                                  const Vector<T>& data_vec,
+                                  const Vector<T>& vec, const Vector<T>& dir,
+                                  Vector<T>& res) const {
     Data data;
     Input input, gradient, direction, result;
     for (int i = 0; i < layout.get_num_elements(); i++) {
@@ -109,19 +109,19 @@ class SerialGroupBackend {
     }
   }
 
-  void add_hessian_kernel(const IndexLayout<ndata> &data_layout,
-                          const IndexLayout<ncomp> &layout,
-                          const Vector<T> &data_vec, const Vector<T> &vec,
-                          const NodeOwners &owners, CSRMat<T> &jac) const {
+  void add_hessian_kernel(const IndexLayout<ndata>& data_layout,
+                          const IndexLayout<ncomp>& layout,
+                          const Vector<T>& data_vec, const Vector<T>& vec,
+                          const NodeOwners& owners, CSRMat<T>& jac) const {
     add_hessian_kernel<Components...>(data_layout, layout, data_vec, vec,
                                       owners, jac);
   }
 
   template <class Component, class... Remain>
-  void add_hessian_kernel(const IndexLayout<ndata> &data_layout,
-                          const IndexLayout<ncomp> &layout,
-                          const Vector<T> &data_vec, const Vector<T> &vec,
-                          const NodeOwners &owners, CSRMat<T> &jac) const {
+  void add_hessian_kernel(const IndexLayout<ndata>& data_layout,
+                          const IndexLayout<ncomp>& layout,
+                          const Vector<T>& data_vec, const Vector<T>& vec,
+                          const NodeOwners& owners, CSRMat<T>& jac) const {
     Data data;
     Input input, gradient, direction, result;
     for (int i = 0; i < layout.get_num_elements(); i++) {
@@ -150,6 +150,114 @@ class SerialGroupBackend {
                                     jac);
     }
   }
+
+  void add_grad_jac_product_wrt_data_kernel(
+      const IndexLayout<ndata>& data_layout, const IndexLayout<ncomp>& layout,
+      const Vector<T>& data_vec, const Vector<T>& vec, const Vector<T>& dir,
+      Vector<T>& res) const {
+    add_grad_jac_product_wrt_data_kernel<Components...>(
+        data_layout, layout, data_vec, vec, dir, res);
+  }
+
+  template <class Component, class... Remain>
+  void add_grad_jac_product_wrt_data_kernel(
+      const IndexLayout<ndata>& data_layout, const IndexLayout<ncomp>& layout,
+      const Vector<T>& data_vec, const Vector<T>& vec, const Vector<T>& dir,
+      Vector<T>& res) const {
+    Data data;
+    Input input, gradient, direction, result;
+    for (int i = 0; i < layout.get_num_elements(); i++) {
+      data_layout.get_values(i, data_vec, data);
+      gradient.zero();
+      result.zero();
+      layout.get_values(i, vec, input);
+      layout.get_values(i, dir, direction);
+      Component::hessian(data, input, direction, gradient, result);
+      layout.add_values(i, result, res);
+    }
+
+    if constexpr (sizeof...(Remain) > 0) {
+      add_grad_jac_product_wrt_data_kernel<Remain...>(data_layout, layout,
+                                                      data_vec, vec, dir, res);
+    }
+  }
+
+  void add_grad_jac_tproduct_wrt_data_kernel(
+      const IndexLayout<ndata>& data_layout, const IndexLayout<ncomp>& layout,
+      const Vector<T>& data_vec, const Vector<T>& vec, const Vector<T>& dir,
+      Vector<T>& res) const {
+    add_grad_jac_tproduct_wrt_data_kernel<Components...>(
+        data_layout, layout, data_vec, vec, dir, res);
+  }
+
+  template <class Component, class... Remain>
+  void add_grad_jac_tproduct_wrt_data_kernel(
+      const IndexLayout<ndata>& data_layout, const IndexLayout<ncomp>& layout,
+      const Vector<T>& data_vec, const Vector<T>& vec, const Vector<T>& dir,
+      Vector<T>& res) const {
+    Data data;
+    Input input, gradient, direction, result;
+    for (int i = 0; i < layout.get_num_elements(); i++) {
+      data_layout.get_values(i, data_vec, data);
+      gradient.zero();
+      result.zero();
+      layout.get_values(i, vec, input);
+      layout.get_values(i, dir, direction);
+      Component::hessian(data, input, direction, gradient, result);
+      layout.add_values(i, result, res);
+    }
+
+    if constexpr (sizeof...(Remain) > 0) {
+      add_grad_jac_tproduct_wrt_data_kernel<Remain...>(data_layout, layout,
+                                                       data_vec, vec, dir, res);
+    }
+  }
+
+  void add_grad_jac_wrt_data_kernel(const IndexLayout<ndata>& data_layout,
+                                    const IndexLayout<ncomp>& layout,
+                                    const Vector<T>& data_vec,
+                                    const Vector<T>& vec,
+                                    const NodeOwners& owners,
+                                    CSRMat<T>& jac) const {
+    add_grad_jac_wrt_data_kernel<Components...>(data_layout, layout, data_vec,
+                                                vec, owners, jac);
+  }
+
+  template <class Component, class... Remain>
+  void add_grad_jac_wrt_data_kernel(const IndexLayout<ndata>& data_layout,
+                                    const IndexLayout<ncomp>& layout,
+                                    const Vector<T>& data_vec,
+                                    const Vector<T>& vec,
+                                    const NodeOwners& owners,
+                                    CSRMat<T>& jac) const {
+    Data data;
+    Input input, gradient, direction, result;
+    for (int i = 0; i < layout.get_num_elements(); i++) {
+      int index[ncomp], index_global[ncomp];
+      layout.get_indices(i, index);
+      owners.local_to_global(ncomp, index, index_global);
+
+      data_layout.get_values(i, data_vec, data);
+      layout.get_values(i, vec, input);
+
+      for (int j = 0; j < Component::ncomp; j++) {
+        direction.zero();
+        gradient.zero();
+        result.zero();
+
+        direction[j] = 1.0;
+
+        Component::hessian(data, input, direction, gradient, result);
+
+        jac.add_row(index[j], Component::ncomp, index_global, result);
+      }
+    }
+
+    if constexpr (sizeof...(Remain) > 0) {
+      add_grad_jac_wrt_data_kernel<Remain...>(data_layout, layout, data_vec,
+                                              vec, owners, jac);
+    }
+  }
 };
 
 template <typename T, int ncomp, int ndata, int noutputs, class... Components>
@@ -157,21 +265,21 @@ class SerialOutputBackend {
  public:
   SerialOutputBackend() {}
 
-  void add_output_kernel(const IndexLayout<ndata> &data_layout,
-                         const IndexLayout<ncomp> &layout,
-                         const IndexLayout<noutputs> &output_layout,
-                         const Vector<T> &data_vec, const Vector<T> &vec,
-                         Vector<T> &out) const {
+  void add_output_kernel(const IndexLayout<ndata>& data_layout,
+                         const IndexLayout<ncomp>& layout,
+                         const IndexLayout<noutputs>& output_layout,
+                         const Vector<T>& data_vec, const Vector<T>& vec,
+                         Vector<T>& out) const {
     add_output_kernel<Components...>(data_layout, layout, output_layout,
                                      data_vec, vec, out);
   }
 
   template <class Component, class... Remain>
-  void add_output_kernel(const IndexLayout<ndata> &data_layout,
-                         const IndexLayout<ncomp> &layout,
-                         const IndexLayout<noutputs> &output_layout,
-                         const Vector<T> &data_vec, const Vector<T> &vec,
-                         Vector<T> &out) const {
+  void add_output_kernel(const IndexLayout<ndata>& data_layout,
+                         const IndexLayout<ncomp>& layout,
+                         const IndexLayout<noutputs>& output_layout,
+                         const Vector<T>& data_vec, const Vector<T>& vec,
+                         Vector<T>& out) const {
     if constexpr (Component::noutputs > 0) {
       typename Component::template Data<T> data;
       typename Component::template Input<T> input;
@@ -192,21 +300,19 @@ class SerialOutputBackend {
     }
   }
 
-  void add_input_jacobian_kernel(const IndexLayout<ndata> &data_layout,
-                                 const IndexLayout<ncomp> &layout,
-                                 const IndexLayout<noutputs> &output_layout,
-                                 const Vector<T> &data_vec,
-                                 const Vector<T> &vec, CSRMat<T> &jac) const {
-    add_input_jacobian_kernel<Components...>(data_layout, layout, output_layout,
-                                             data_vec, vec, jac);
+  void add_output_jac_wrt_input_kernel(
+      const IndexLayout<ndata>& data_layout, const IndexLayout<ncomp>& layout,
+      const IndexLayout<noutputs>& output_layout, const Vector<T>& data_vec,
+      const Vector<T>& vec, CSRMat<T>& jac) const {
+    add_output_jac_wrt_input_kernel<Components...>(
+        data_layout, layout, output_layout, data_vec, vec, jac);
   }
 
   template <class Component, class... Remain>
-  void add_input_jacobian_kernel(const IndexLayout<ndata> &data_layout,
-                                 const IndexLayout<ncomp> &layout,
-                                 const IndexLayout<noutputs> &output_layout,
-                                 const Vector<T> &data_vec,
-                                 const Vector<T> &vec, CSRMat<T> &jac) const {
+  void add_output_jac_wrt_input_kernel(
+      const IndexLayout<ndata>& data_layout, const IndexLayout<ncomp>& layout,
+      const IndexLayout<noutputs>& output_layout, const Vector<T>& data_vec,
+      const Vector<T>& vec, CSRMat<T>& jac) const {
     if constexpr (Component::noutputs > 0 && Component::ncomp > 0) {
       typename Component::template Data<A2D::ADScalar<T, 1>> data;
       typename Component::template Input<A2D::ADScalar<T, 1>> input;
@@ -241,26 +347,24 @@ class SerialOutputBackend {
     }
 
     if constexpr (sizeof...(Remain) > 0) {
-      add_input_jacobian_kernel<Remain...>(data_layout, layout, output_layout,
-                                           data_vec, vec, jac);
+      add_output_jac_wrt_input_kernel<Remain...>(
+          data_layout, layout, output_layout, data_vec, vec, jac);
     }
   }
 
-  void add_data_jacobian_kernel(const IndexLayout<ndata> &data_layout,
-                                const IndexLayout<ncomp> &layout,
-                                const IndexLayout<noutputs> &output_layout,
-                                const Vector<T> &data_vec, const Vector<T> &vec,
-                                CSRMat<T> &jac) const {
-    add_data_jacobian_kernel<Components...>(data_layout, layout, output_layout,
-                                            data_vec, vec, jac);
+  void add_output_jac_wrt_data_kernel(
+      const IndexLayout<ndata>& data_layout, const IndexLayout<ncomp>& layout,
+      const IndexLayout<noutputs>& output_layout, const Vector<T>& data_vec,
+      const Vector<T>& vec, CSRMat<T>& jac) const {
+    add_output_jac_wrt_data_kernel<Components...>(
+        data_layout, layout, output_layout, data_vec, vec, jac);
   }
 
   template <class Component, class... Remain>
-  void add_data_jacobian_kernel(const IndexLayout<ndata> &data_layout,
-                                const IndexLayout<ncomp> &layout,
-                                const IndexLayout<noutputs> &output_layout,
-                                const Vector<T> &data_vec, const Vector<T> &vec,
-                                CSRMat<T> &jac) const {
+  void add_output_jac_wrt_data_kernel(
+      const IndexLayout<ndata>& data_layout, const IndexLayout<ncomp>& layout,
+      const IndexLayout<noutputs>& output_layout, const Vector<T>& data_vec,
+      const Vector<T>& vec, CSRMat<T>& jac) const {
     if constexpr (Component::noutputs > 0 && Component::ndata > 0) {
       typename Component::template Data<A2D::ADScalar<T, 1>> data;
       typename Component::template Input<A2D::ADScalar<T, 1>> input;
@@ -294,8 +398,8 @@ class SerialOutputBackend {
     }
 
     if constexpr (sizeof...(Remain) > 0) {
-      add_data_jacobian_kernel<Remain...>(data_layout, layout, output_layout,
-                                          data_vec, vec, jac);
+      add_output_jac_wrt_data_kernel<Remain...>(
+          data_layout, layout, output_layout, data_vec, vec, jac);
     }
   }
 };
@@ -311,16 +415,16 @@ template <typename T, int ncomp, class Input, int ndata, class Data,
 class OmpGroupBackend {
  public:
   template <int noutputs>
-  OmpGroupBackend(IndexLayout<ndata> &data_layout, IndexLayout<ncomp> &layout,
-                  IndexLayout<noutputs> &output_layout)
+  OmpGroupBackend(IndexLayout<ndata>& data_layout, IndexLayout<ncomp>& layout,
+                  IndexLayout<noutputs>& output_layout)
       : num_colors(0), elem_per_color(nullptr) {
     int num_elems, ncomps;
-    const int *array;
+    const int* array;
     layout.get_data(&num_elems, &ncomps, &array);
 
     // Create a coloring for the layout
-    int *elem_by_color_ptr;
-    int *elem_by_color;
+    int* elem_by_color_ptr;
+    int* elem_by_color;
     OrderingUtils::color_elements(num_elems, ncomp, array, &num_colors,
                                   &elem_by_color_ptr, &elem_by_color);
 
@@ -339,16 +443,16 @@ class OmpGroupBackend {
   }
   ~OmpGroupBackend() { delete[] elem_per_color; }
 
-  T lagrangian_kernel(const IndexLayout<ndata> &data_layout,
-                      const IndexLayout<ncomp> &layout,
-                      const Vector<T> &data_vec, const Vector<T> &vec) const {
+  T lagrangian_kernel(const IndexLayout<ndata>& data_layout,
+                      const IndexLayout<ncomp>& layout,
+                      const Vector<T>& data_vec, const Vector<T>& vec) const {
     return lagrangian_kernel<Components...>(data_layout, layout, data_vec, vec);
   }
 
   template <class Component, class... Remain>
-  T lagrangian_kernel(const IndexLayout<ndata> &data_layout,
-                      const IndexLayout<ncomp> &layout,
-                      const Vector<T> &data_vec, const Vector<T> &vec) const {
+  T lagrangian_kernel(const IndexLayout<ndata>& data_layout,
+                      const IndexLayout<ncomp>& layout,
+                      const Vector<T>& data_vec, const Vector<T>& vec) const {
     T value = 0.0;
     int num_elems = layout.get_num_elements();
 
@@ -369,18 +473,18 @@ class OmpGroupBackend {
     }
   }
 
-  void add_gradient_kernel(const IndexLayout<ndata> &data_layout,
-                           const IndexLayout<ncomp> &layout,
-                           const Vector<T> &data_vec, const Vector<T> &vec,
-                           Vector<T> &res) const {
+  void add_gradient_kernel(const IndexLayout<ndata>& data_layout,
+                           const IndexLayout<ncomp>& layout,
+                           const Vector<T>& data_vec, const Vector<T>& vec,
+                           Vector<T>& res) const {
     add_gradient_kernel<Components...>(data_layout, layout, data_vec, vec, res);
   }
 
   template <class Component, class... Remain>
-  void add_gradient_kernel(const IndexLayout<ndata> &data_layout,
-                           const IndexLayout<ncomp> &layout,
-                           const Vector<T> &data_vec, const Vector<T> &vec,
-                           Vector<T> &res) const {
+  void add_gradient_kernel(const IndexLayout<ndata>& data_layout,
+                           const IndexLayout<ncomp>& layout,
+                           const Vector<T>& data_vec, const Vector<T>& vec,
+                           Vector<T>& res) const {
     int end = 0;
     for (int j = 0; j < num_colors; j++) {
       int start = end;
@@ -403,21 +507,21 @@ class OmpGroupBackend {
     }
   }
 
-  void add_hessian_product_kernel(const IndexLayout<ndata> &data_layout,
-                                  const IndexLayout<ncomp> &layout,
-                                  const Vector<T> &data_vec,
-                                  const Vector<T> &vec, const Vector<T> &dir,
-                                  Vector<T> &res) const {
+  void add_hessian_product_kernel(const IndexLayout<ndata>& data_layout,
+                                  const IndexLayout<ncomp>& layout,
+                                  const Vector<T>& data_vec,
+                                  const Vector<T>& vec, const Vector<T>& dir,
+                                  Vector<T>& res) const {
     add_hessian_product_kernel<Components...>(data_layout, layout, data_vec,
                                               vec, dir, res);
   }
 
   template <class Component, class... Remain>
-  void add_hessian_product_kernel(const IndexLayout<ndata> &data_layout,
-                                  const IndexLayout<ncomp> &layout,
-                                  const Vector<T> &data_vec,
-                                  const Vector<T> &vec, const Vector<T> &dir,
-                                  Vector<T> &res) const {
+  void add_hessian_product_kernel(const IndexLayout<ndata>& data_layout,
+                                  const IndexLayout<ncomp>& layout,
+                                  const Vector<T>& data_vec,
+                                  const Vector<T>& vec, const Vector<T>& dir,
+                                  Vector<T>& res) const {
     int end = 0;
     for (int j = 0; j < num_colors; j++) {
       int start = end;
@@ -443,19 +547,19 @@ class OmpGroupBackend {
     }
   }
 
-  void add_hessian_kernel(const IndexLayout<ndata> &data_layout,
-                          const IndexLayout<ncomp> &layout,
-                          const Vector<T> &data_vec, const Vector<T> &vec,
-                          const NodeOwners &owners, CSRMat<T> &jac) const {
+  void add_hessian_kernel(const IndexLayout<ndata>& data_layout,
+                          const IndexLayout<ncomp>& layout,
+                          const Vector<T>& data_vec, const Vector<T>& vec,
+                          const NodeOwners& owners, CSRMat<T>& jac) const {
     add_hessian_kernel<Components...>(data_layout, layout, data_vec, vec,
                                       owners, jac);
   }
 
   template <class Component, class... Remain>
-  void add_hessian_kernel(const IndexLayout<ndata> &data_layout,
-                          const IndexLayout<ncomp> &layout,
-                          const Vector<T> &data_vec, const Vector<T> &vec,
-                          const NodeOwners &owners, CSRMat<T> &jac) const {
+  void add_hessian_kernel(const IndexLayout<ndata>& data_layout,
+                          const IndexLayout<ncomp>& layout,
+                          const Vector<T>& data_vec, const Vector<T>& vec,
+                          const NodeOwners& owners, CSRMat<T>& jac) const {
     int end = 0;
     for (int j = 0; j < num_colors; j++) {
       int start = end;
@@ -493,7 +597,7 @@ class OmpGroupBackend {
 
  private:
   int num_colors;
-  int *elem_per_color;
+  int* elem_per_color;
 };
 
 template <typename T, int ncomp, class Input, int ndata, class Data,
@@ -523,28 +627,28 @@ class CudaGroupBackend {
   using Input = typename Component::Input;
   using Data = typename Component::Data;
 
-  CudaGroupBackend(IndexLayout<ndata> &data_layout,
-                   IndexLayout<ncomp> &layout) {
+  CudaGroupBackend(IndexLayout<ndata>& data_layout,
+                   IndexLayout<ncomp>& layout) {
     data_layout.copy_host_to_device();
     layout.copy_host_to_device();
   }
-  T lagrangian_kernel(const IndexLayout<ndata> &data_layout,
-                      const IndexLayout<ncomp> &layout,
-                      const Vector<T> &data_vec, const Vector<T> &vec) const {}
+  T lagrangian_kernel(const IndexLayout<ndata>& data_layout,
+                      const IndexLayout<ncomp>& layout,
+                      const Vector<T>& data_vec, const Vector<T>& vec) const {}
 
-  void add_gradient_kernel(const IndexLayout<ndata> &data_layout,
-                           const IndexLayout<ncomp> &layout,
-                           const Vector<T> &data_vec, const Vector<T> &vec,
-                           Vector<T> &res) const {}
-  void add_hessian_product_kernel(const IndexLayout<ndata> &data_layout,
-                                  const IndexLayout<ncomp> &layout,
-                                  const Vector<T> &data_vec,
-                                  const Vector<T> &vec, const Vector<T> &dir,
-                                  Vector<T> &res) const {}
-  void add_hessian_kernel(const IndexLayout<ndata> &data_layout,
-                          const IndexLayout<ncomp> &layout,
-                          const Vector<T> &data_vec, const Vector<T> &vec,
-                          CSRMat<T> &jac) const {}
+  void add_gradient_kernel(const IndexLayout<ndata>& data_layout,
+                           const IndexLayout<ncomp>& layout,
+                           const Vector<T>& data_vec, const Vector<T>& vec,
+                           Vector<T>& res) const {}
+  void add_hessian_product_kernel(const IndexLayout<ndata>& data_layout,
+                                  const IndexLayout<ncomp>& layout,
+                                  const Vector<T>& data_vec,
+                                  const Vector<T>& vec, const Vector<T>& dir,
+                                  Vector<T>& res) const {}
+  void add_hessian_kernel(const IndexLayout<ndata>& data_layout,
+                          const IndexLayout<ncomp>& layout,
+                          const Vector<T>& data_vec, const Vector<T>& vec,
+                          CSRMat<T>& jac) const {}
 };
 
 #else  // Default to serial implementation
@@ -591,51 +695,72 @@ class ComponentGroup : public ComponentGroupBase<T> {
   }
 
   // Group compute functions
-  T lagrangian(const Vector<T> &data_vec, const Vector<T> &vec) const {
+  T lagrangian(const Vector<T>& data_vec, const Vector<T>& vec) const {
     return backend.lagrangian_kernel(data_layout, layout, data_vec, vec);
   }
-  void add_gradient(const Vector<T> &data_vec, const Vector<T> &vec,
-                    Vector<T> &res) const {
+  void add_gradient(const Vector<T>& data_vec, const Vector<T>& vec,
+                    Vector<T>& res) const {
     backend.add_gradient_kernel(data_layout, layout, data_vec, vec, res);
   }
-  void add_hessian_product(const Vector<T> &data_vec, const Vector<T> &vec,
-                           const Vector<T> &dir, Vector<T> &res) const {
+  void add_hessian_product(const Vector<T>& data_vec, const Vector<T>& vec,
+                           const Vector<T>& dir, Vector<T>& res) const {
     backend.add_hessian_product_kernel(data_layout, layout, data_vec, vec, dir,
                                        res);
   }
-  void add_hessian(const Vector<T> &data_vec, const Vector<T> &vec,
-                   const NodeOwners &owners, CSRMat<T> &jac) const {
+  void add_hessian(const Vector<T>& data_vec, const Vector<T>& vec,
+                   const NodeOwners& owners, CSRMat<T>& jac) const {
     backend.add_hessian_kernel(data_layout, layout, data_vec, vec, owners, jac);
   }
 
-  // Group output functions
-  void add_output(const Vector<T> &data_vec, const Vector<T> &vec,
-                  Vector<T> &output) const {
+  // Gradient coupling function
+  void add_grad_jac_product_wrt_data(const Vector<T>& data_vec,
+                                     const Vector<T>& vec,
+                                     const Vector<T>& pdata,
+                                     Vector<T>& grad) const {
+    backend.add_grad_jac_product_wrt_data_kernel(data_layout, layout, data_vec,
+                                                 vec, pdata, grad);
+  }
+  void add_grad_jac_tproduct_wrt_data(const Vector<T>& data_vec,
+                                      const Vector<T>& vec,
+                                      const Vector<T>& pvec,
+                                      Vector<T>& pdata) const {
+    backend.add_grad_jac_tproduct_wrt_data_kernel(data_layout, layout, data_vec,
+                                                  vec, pvec, pdata);
+  }
+  void add_grad_jac_wrt_data(const Vector<T>& data_vec, const Vector<T>& vec,
+                             const NodeOwners& owners, CSRMat<T>& jac) const {
+    backend.add_grad_jac_wrt_data_kernel(data_layout, layout, data_vec, vec,
+                                         owners, jac);
+  }
+
+  // Compute the output as a function of the input and data
+  void add_output(const Vector<T>& data_vec, const Vector<T>& vec,
+                  Vector<T>& output) const {
     output_backend.add_output_kernel(data_layout, layout, output_layout,
                                      data_vec, vec, output);
   }
-  void add_input_jacobian(const Vector<T> &data_vec, const Vector<T> &vec,
-                          CSRMat<T> &jac) const {
-    output_backend.add_input_jacobian_kernel(data_layout, layout, output_layout,
-                                             data_vec, vec, jac);
+  void add_output_jac_wrt_input(const Vector<T>& data_vec, const Vector<T>& vec,
+                                CSRMat<T>& jac) const {
+    output_backend.add_output_jac_wrt_input_kernel(
+        data_layout, layout, output_layout, data_vec, vec, jac);
   }
-  void add_data_jacobian(const Vector<T> &data_vec, const Vector<T> &vec,
-                         CSRMat<T> &jac) const {
-    output_backend.add_data_jacobian_kernel(data_layout, layout, output_layout,
-                                            data_vec, vec, jac);
+  void add_output_jac_wrt_data(const Vector<T>& data_vec, const Vector<T>& vec,
+                               CSRMat<T>& jac) const {
+    output_backend.add_output_jac_wrt_data_kernel(
+        data_layout, layout, output_layout, data_vec, vec, jac);
   }
 
   // Get the ordering information
-  void get_data_layout_data(int *num_elements, int *nodes_per_elem,
-                            const int **array) const {
+  void get_data_layout_data(int* num_elements, int* nodes_per_elem,
+                            const int** array) const {
     data_layout.get_data(num_elements, nodes_per_elem, array);
   }
-  void get_layout_data(int *num_elements, int *nodes_per_elem,
-                       const int **array) const {
+  void get_layout_data(int* num_elements, int* nodes_per_elem,
+                       const int** array) const {
     layout.get_data(num_elements, nodes_per_elem, array);
   }
-  void get_output_layout_data(int *num_elements, int *outputs_per_elem,
-                              const int **array) const {
+  void get_output_layout_data(int* num_elements, int* outputs_per_elem,
+                              const int** array) const {
     output_layout.get_data(num_elements, outputs_per_elem, array);
   }
 

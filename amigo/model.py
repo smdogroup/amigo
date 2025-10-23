@@ -201,6 +201,9 @@ class ComponentGroup:
     def get_data(self, name: str):
         return self.data[name]
 
+    def get_output(self, name: str):
+        return self.outputs[name]
+
     def get_meta(self, name):
         if name in self.comp_obj.inputs:
             return self.comp_obj.inputs.get_meta(name)
@@ -682,6 +685,11 @@ class Model:
                     return self.comp[comp_name].get_data(name)
                 else:
                     return self.comp[comp_name].get_data(name)[indices]
+            elif name in self.comp[comp_name].outputs:
+                if indices is None:
+                    return self.comp[comp_name].get_output(name)
+                else:
+                    return self.comp[comp_name].get_output(name)[indices]
             else:
                 raise ValueError(
                     f"Name {comp_name}.{name} is not an input, constraint, output or data name"
