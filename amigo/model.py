@@ -1228,9 +1228,9 @@ class Model:
 
                 # Determine color based on type
                 node_color = (
-                    "red"
+                    "#decbe4"
                     if vtype == "constraint"
-                    else ("green" if vtype == "input" else "blue")
+                    else ("#97c2fc" if vtype == "input" else "blue")
                 )
 
                 graph.add_node(
@@ -1252,7 +1252,7 @@ class Model:
         for i, name in enumerate(comp_names):
             node_id = node_counter + i
             graph.add_node(
-                node_id, label=name, title=name, shape=comp_shape, color="orange"
+                node_id, label=name, title=name, shape=comp_shape, color="#fed9a6"
             )
 
             # name has the form "group[i]"; parse back out (group, i)

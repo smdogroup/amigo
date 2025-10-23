@@ -452,18 +452,18 @@ if comm_rank == 0:
                     t = None
 
         graph = model.create_graph(timestep=t)
-        net = Network(notebook=True)
+        net = Network(notebook=True, height="1000px", width="100%", bgcolor="#ffffff", font_color="black")
 
         net.from_nx(graph)
         # net.show_buttons(filter_=["physics"])
-        # net.set_options(
-        #     """
-        #     var options = {
-        #     "interaction": {
-        #         "dragNodes": false
-        #     }
-        #     }
-        #     """
-        # )
+        net.set_options(
+            """
+            var options = {
+            "interaction": {
+                "dragNodes": false
+            }
+            }
+            """
+        )
 
         net.show("cart_pole_graph.html")
