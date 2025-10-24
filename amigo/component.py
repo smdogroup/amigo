@@ -1208,72 +1208,80 @@ class Component:
                 + " {\n"
             )
 
-        data_decl = self.data.generate_cpp_input_decl(
-            template_name=template_name, data_name=data_name
-        )
-        for line in data_decl:
-            cpp += "    " + line + ";\n"
+        is_empty = self.is_compute_empty()
 
-        in_decl = self.inputs.generate_cpp_input_decl(
-            mode=mode,
-            template_name=template_name,
-            input_name=input_name,
-            grad_name=grad_name,
-            prod_name=prod_name,
-            hprod_name=hprod_name,
-        )
-        for line in in_decl:
-            cpp += "    " + line + ";\n"
-
-        offset = self.inputs.get_num_inputs()
-        con_decl = self.constraints.generate_cpp_input_decl(
-            mode=mode,
-            offset=offset,
-            template_name=template_name,
-            input_name=input_name,
-            grad_name=grad_name,
-            prod_name=prod_name,
-            hprod_name=hprod_name,
-        )
-        for line in con_decl:
-            cpp += "    " + line + ";\n"
-
-        var_decl = self.vars.generate_cpp_decl(mode=mode, template_name=template_name)
-        for line in var_decl:
-            cpp += "    " + line + ";\n"
-
-        con_decl = self.constraints.generate_cpp_decl(
-            mode=mode, template_name=template_name
-        )
-        for line in con_decl:
-            cpp += "    " + line + ";\n"
-
-        lines = self.vars.generate_passive_cpp()
-        for line in lines:
-            cpp += "    " + f"{line};\n"
-
-        obj_expr = self.objective.generate_cpp()
-        body = self.vars.generate_active_cpp(mode=mode)
-        body.extend(self.constraints.generate_cpp(mode=mode, obj_expr=obj_expr))
-
-        if mode == "eval":
-            for line in body:
+        if not is_empty:
+            data_decl = self.data.generate_cpp_input_decl(
+                template_name=template_name, data_name=data_name
+            )
+            for line in data_decl:
                 cpp += "    " + line + ";\n"
-            cpp += "    " + f"return {self.constraints.lagrangian_name};\n"
-        else:
-            cpp += "    " + f"auto {stack_name} = A2D::MakeStack(\n"
-            for index, line in enumerate(body):
-                cpp += "      " + line
-                if index == len(body) - 1:
-                    cpp += ");\n"
-                else:
-                    cpp += ",\n"
 
-            cpp += "    " + f"{self.constraints.lagrangian_name}.bvalue() = 1.0;\n"
-            cpp += "    " + f"{stack_name}.reverse();\n"
-            if mode == "hprod":
-                cpp += "    " + f"{stack_name}.hforward();\n"
-                cpp += "    " + f"{stack_name}.hreverse();\n"
+            in_decl = self.inputs.generate_cpp_input_decl(
+                mode=mode,
+                template_name=template_name,
+                input_name=input_name,
+                grad_name=grad_name,
+                prod_name=prod_name,
+                hprod_name=hprod_name,
+            )
+            for line in in_decl:
+                cpp += "    " + line + ";\n"
+
+            offset = self.inputs.get_num_inputs()
+            con_decl = self.constraints.generate_cpp_input_decl(
+                mode=mode,
+                offset=offset,
+                template_name=template_name,
+                input_name=input_name,
+                grad_name=grad_name,
+                prod_name=prod_name,
+                hprod_name=hprod_name,
+            )
+            for line in con_decl:
+                cpp += "    " + line + ";\n"
+
+            var_decl = self.vars.generate_cpp_decl(
+                mode=mode, template_name=template_name
+            )
+            for line in var_decl:
+                cpp += "    " + line + ";\n"
+
+            con_decl = self.constraints.generate_cpp_decl(
+                mode=mode, template_name=template_name
+            )
+            for line in con_decl:
+                cpp += "    " + line + ";\n"
+
+            lines = self.vars.generate_passive_cpp()
+            for line in lines:
+                cpp += "    " + f"{line};\n"
+
+            obj_expr = self.objective.generate_cpp()
+            body = self.vars.generate_active_cpp(mode=mode)
+            body.extend(self.constraints.generate_cpp(mode=mode, obj_expr=obj_expr))
+
+            if mode == "eval":
+                for line in body:
+                    cpp += "    " + line + ";\n"
+                cpp += "    " + f"return {self.constraints.lagrangian_name};\n"
+            else:
+                cpp += "    " + f"auto {stack_name} = A2D::MakeStack(\n"
+                for index, line in enumerate(body):
+                    cpp += "      " + line
+                    if index == len(body) - 1:
+                        cpp += ");\n"
+                    else:
+                        cpp += ",\n"
+
+                cpp += "    " + f"{self.constraints.lagrangian_name}.bvalue() = 1.0;\n"
+                cpp += "    " + f"{stack_name}.reverse();\n"
+                if mode == "hprod":
+                    cpp += "    " + f"{stack_name}.hforward();\n"
+                    cpp += "    " + f"{stack_name}.hreverse();\n"
+
+        if mode == "eval" and is_empty:
+            cpp += "    " + f"return {template_name}(0.0);\n"
 
         cpp += "  }\n"
 
