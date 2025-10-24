@@ -51,9 +51,9 @@ class CartComponent(am.Component):
         super().__init__()
 
         self.add_constant("g", value=9.81)
-        self.add_constant("L", value=0.5)
-        self.add_constant("m1", value=1.0)
-        self.add_constant("m2", value=0.3)
+        self.add_data("L", value=0.5)
+        self.add_data("m1", value=1.0)
+        self.add_data("m2", value=0.3)
 
         self.add_input("x", label="control")
         self.add_input("q", shape=(4), label="state")
@@ -65,9 +65,9 @@ class CartComponent(am.Component):
 
     def compute(self):
         g = self.constants["g"]
-        L = self.constants["L"]
-        m1 = self.constants["m1"]
-        m2 = self.constants["m2"]
+        L0 = self.data["L"]
+        m1 = self.data["m1"]
+        m2 = self.data["m2"]
 
         x = self.inputs["x"]
         q = self.inputs["q"]
@@ -81,10 +81,10 @@ class CartComponent(am.Component):
         res[0] = q[2] - qdot[0]
         res[1] = q[3] - qdot[1]
         res[2] = (m1 + m2 * (1.0 - cost * cost)) * qdot[2] - (
-            L * m2 * sint * q[3] * q[3] * x + m2 * g * cost * sint
+            L0 * m2 * sint * q[3] * q[3] * x + m2 * g * cost * sint
         )
-        res[3] = L * (m1 + m2 * (1.0 - cost * cost)) * qdot[3] + (
-            L * m2 * cost * sint * q[3] * q[3] + x * cost + (m1 + m2) * g * sint
+        res[3] = L0 * (m1 + m2 * (1.0 - cost * cost)) * qdot[3] + (
+            L0 * m2 * cost * sint * q[3] * q[3] + x * cost + (m1 + m2) * g * sint
         )
 
         self.constraints["res"] = res
@@ -92,11 +92,33 @@ class CartComponent(am.Component):
         return
 
 
-class Objective(am.Component):
+class KineticEnergyOutput(am.Component):
     def __init__(self):
         super().__init__()
 
         self.add_constant("dt", value=final_time / num_time_steps)
+        self.add_data("m1")
+
+        self.add_input("u1dot")
+        self.add_input("u2dot")
+
+        self.add_output("ke")
+
+        return
+
+    def compute_output(self):
+        dt = self.constants["dt"]
+        m1 = self.data["m1"]
+
+        u1dot = self.inputs["u1dot"]
+        u2dot = self.inputs["u2dot"]
+
+        self.outputs["ke"] = m1 * dt * (u1dot * u1dot + u2dot * u2dot)
+
+
+class Objective(am.Component):
+    def __init__(self):
+        super().__init__()
 
         self.add_input("x1", label="control")
         self.add_input("x2", label="control")
@@ -108,7 +130,6 @@ class Objective(am.Component):
     def compute(self):
         x1 = self.inputs["x1"]
         x2 = self.inputs["x2"]
-        dt = self.constants["dt"]
 
         self.objective["obj"] = (x1 * x1 + x2 * x2) / 2
 
@@ -254,6 +275,7 @@ def create_cart_model(module_name="cart_pole"):
     obj = Objective()
     ic = InitialConditions()
     fc = FinalConditions()
+    kin = KineticEnergyOutput()
 
     model = am.Model(module_name)
 
@@ -262,6 +284,7 @@ def create_cart_model(module_name="cart_pole"):
     model.add_component("obj", num_time_steps, obj)
     model.add_component("ic", 1, ic)
     model.add_component("fc", 1, fc)
+    model.add_component("kin", num_time_steps, kin)
 
     # Add the links
     for i in range(4):
@@ -281,7 +304,53 @@ def create_cart_model(module_name="cart_pole"):
     model.link("cart.q[0, :]", "ic.q[0, :]")
     model.link(f"cart.q[{num_time_steps}, :]", "fc.q[0, :]")
 
+    # Link the data
+    model.link("cart.m1[1:]", "cart.m1[0]")
+    model.link("cart.m2[1:]", "cart.m2[0]")
+    model.link("cart.L[1:]", "cart.L[0]")
+
+    # Link the kinetic energy computation
+    model.link("kin.m1", "cart.m1[0]")
+    model.link("kin.u1dot", "cart.qdot[:-1, 0]")
+    model.link("kin.u2dot", "cart.qdot[1:, 0]")
+
+    # Link the outputs
+    model.link("kin.ke[1:]", "kin.ke[0]")
+
     return model
+
+
+def check_post_optimality_derivative(x, opt, opt_options={}, dh=1e-7):
+    # Set the initial conditions based on the varaibles
+    x[:] = 0.0
+    x["cart.q[:, 0]"] = np.linspace(0, 2.0, num_time_steps + 1)
+    x["cart.q[:, 1]"] = np.linspace(0, np.pi, num_time_steps + 1)
+    x["cart.q[:, 2]"] = 1.0
+    x["cart.q[:, 3]"] = 1.0
+
+    opt.optimize(opt_options)
+    output = opt.compute_output()
+
+    dfdx, of_map, wrt_map = opt.compute_post_opt_derivatives(
+        of="kin.ke[0]", wrt=["cart.m1[0]", "cart.m2[0]", "cart.L[0]"], method="adjoint"
+    )
+
+    # Set the initial conditions based on the varaibles
+    x[:] = 0.0
+    x["cart.q[:, 0]"] = np.linspace(0, 2.0, num_time_steps + 1)
+    x["cart.q[:, 1]"] = np.linspace(0, np.pi, num_time_steps + 1)
+    x["cart.q[:, 2]"] = 1.0
+    x["cart.q[:, 3]"] = 1.0
+
+    # Compute the derivative wrt L
+    data["cart.L[0]"] += dh
+
+    opt.optimize(opt_options)
+    output2 = opt.compute_output()
+
+    ans = dfdx[0, wrt_map["cart.L[0]"]]
+    fd = (output2["kin.ke[0]"] - output["kin.ke[0]"]) / dh
+    print(ans, fd, (ans - fd) / fd)
 
 
 parser = argparse.ArgumentParser()
@@ -316,7 +385,6 @@ parser.add_argument(
     default=False,
     help="Show the graph",
 )
-
 parser.add_argument(
     "--graph-timestep",
     dest="graph_timestep",
@@ -324,7 +392,6 @@ parser.add_argument(
     default=None,
     help="Show graph for timesteps. Can be a single int (e.g., 0) or a list (e.g., '[0,5,6]')",
 )
-
 parser.add_argument(
     "--distribute",
     dest="distribute",
@@ -332,6 +399,14 @@ parser.add_argument(
     default=False,
     help="Distribute the problem",
 )
+parser.add_argument(
+    "--post-optimality",
+    dest="post_optimality",
+    action="store_true",
+    default=False,
+    help="Compute the post-optimality",
+)
+
 args = parser.parse_args()
 
 model = create_cart_model()
@@ -369,6 +444,13 @@ if comm_rank == 0:
     print(f"Num variables:              {model.num_variables}")
     print(f"Num constraints:            {model.num_constraints}")
 
+# Set the data
+data = model.get_data_vector()
+
+data["cart.L"] = 0.5
+data["cart.m1"] = 1.0
+data["cart.m2"] = 0.3
+
 # Get the design variables
 x = model.create_vector()
 lower = model.create_vector()
@@ -390,25 +472,29 @@ if comm_rank == 0:
     upper["cart.qdot"] = float("inf")
     upper["cart.x"] = 50
 
+
+opt_options = {
+    "initial_barrier_param": 0.1,
+    "convergence_tolerance": 1e-10,
+    "max_line_search_iterations": 4,  # 30,  # Reasonable for intermediate problem
+    "max_iterations": 500,  # Sufficient iterations
+    "init_affine_step_multipliers": True,  # Enable for better scaling
+    # Use the new heuristic barrier parameter update
+    "barrier_strategy": "heuristic",
+    "verbose_barrier": True,  # Show ξ and complementarity values
+}
+
 # Set up the optimizer
 opt = am.Optimizer(model, x, lower=lower, upper=upper, comm=comm, distribute=distribute)
 
-data = opt.optimize(
-    {
-        "initial_barrier_param": 0.1,
-        "convergence_tolerance": 1e-10,
-        "max_line_search_iterations": 4,  # 30,  # Reasonable for intermediate problem
-        "max_iterations": 500,  # Sufficient iterations
-        "init_affine_step_multipliers": True,  # Enable for better scaling
-        # Use the new heuristic barrier parameter update
-        "barrier_strategy": "heuristic",
-        "verbose_barrier": True,  # Show ξ and complementarity values
-    }
-)
-
+opt_data = opt.optimize(opt_options)
 
 with open("cart_opt_data.json", "w") as fp:
-    json.dump(data, fp, indent=2)
+    json.dump(opt_data, fp, indent=2)
+
+if args.post_optimality:
+    check_post_optimality_derivative(x, opt, opt_options)
+
 
 if comm_rank == 0:
     d = x["cart.q[:, 0]"]
@@ -416,7 +502,7 @@ if comm_rank == 0:
     xctrl = x["cart.x"]
 
     norms = []
-    for iter_data in data["iterations"]:
+    for iter_data in opt_data["iterations"]:
         norms.append(iter_data["residual"])
 
     plot(d, theta, xctrl)

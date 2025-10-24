@@ -21,8 +21,8 @@ enum class OrderingType { NESTED_DISSECTION, AMD, MULTI_COLOR, NATURAL };
 
 class OrderingUtils {
  public:
-  static void reorder(OrderingType order, int nrows, int *rowp, int *cols,
-                      int **perm_, int **iperm_) {
+  static void reorder(OrderingType order, int nrows, int* rowp, int* cols,
+                      int** perm_, int** iperm_) {
     if (order == OrderingType::NESTED_DISSECTION) {
       nested_dissection(nrows, rowp, cols, perm_, iperm_);
     } else if (order == OrderingType::AMD) {
@@ -31,8 +31,8 @@ class OrderingUtils {
       multi_color(nrows, rowp, cols, perm_, iperm_);
     } else {  // order == OrderingType::NATURAL
       // Natural ordering
-      int *perm = new int[nrows];
-      int *iperm = new int[nrows];
+      int* perm = new int[nrows];
+      int* iperm = new int[nrows];
       for (int i = 0; i < nrows; i++) {
         perm[i] = iperm[i] = i;
       }
@@ -41,15 +41,15 @@ class OrderingUtils {
     }
   }
 
-  static void reorder_block(OrderingType order, int nrows, int *rowp, int *cols,
-                            int nmult, int *mult, int **perm_, int **iperm_) {
+  static void reorder_block(OrderingType order, int nrows, int* rowp, int* cols,
+                            int nmult, int* mult, int** perm_, int** iperm_) {
     if (order == OrderingType::NESTED_DISSECTION ||
         order == OrderingType::NATURAL || order == OrderingType::MULTI_COLOR) {
       reorder(order, nrows, rowp, cols, perm_, iperm_);
-      int *perm = *perm_;
-      int *iperm = *iperm_;
+      int* perm = *perm_;
+      int* iperm = *iperm_;
 
-      int *is_mult = new int[nrows];
+      int* is_mult = new int[nrows];
       std::fill(is_mult, is_mult + nrows, 0);
       for (int i = 0; i < nrows; i++) {
         if (mult[i] >= 0 && mult[i] < nrows) {
@@ -83,14 +83,14 @@ class OrderingUtils {
    */
   template <class Functor>
   static void compute_partition(int nnodes, int nelems,
-                                const Functor &element_nodes, int part_size,
-                                int *partition_[]) {
+                                const Functor& element_nodes, int part_size,
+                                int* partition_[]) {
     // Create a pointer from the nodes back to the elements
     int *elem_to_elem_ptr, *elem_to_elem;
     build_element_to_element(nnodes, nelems, element_nodes, &elem_to_elem_ptr,
                              &elem_to_elem);
 
-    int *partition = new int[nelems];
+    int* partition = new int[nelems];
 
 #ifdef AMIGO_USE_METIS
     if (part_size > 1) {
@@ -143,10 +143,10 @@ class OrderingUtils {
    *
    * Note that for a variable k, these arrays satisfy iperm[perm[k]] = k
    */
-  static void nested_dissection(int nrows, int *rowp, int *cols, int **perm_,
-                                int **iperm_) {
-    int *perm = new int[nrows];
-    int *iperm = new int[nrows];
+  static void nested_dissection(int nrows, int* rowp, int* cols, int** perm_,
+                                int** iperm_) {
+    int* perm = new int[nrows];
+    int* iperm = new int[nrows];
 #ifdef AMIGO_USE_METIS
     // Set the default options in METIS
     int options[METIS_NOPTIONS];
@@ -168,10 +168,10 @@ class OrderingUtils {
   /**
    * @brief Perform an AMD reordering
    */
-  static void amd(int nrows, int *rowp, int *cols, int nmult, int *mult,
-                  int **perm_, int **iperm_) {
-    int *perm = new int[nrows];
-    int *iperm = new int[nrows];
+  static void amd(int nrows, int* rowp, int* cols, int nmult, int* mult,
+                  int** perm_, int** iperm_) {
+    int* perm = new int[nrows];
+    int* iperm = new int[nrows];
 
     int use_exact_degree = 0;
     BlockAMD::amd(nrows, rowp, cols, nmult, mult, perm, use_exact_degree);
@@ -193,10 +193,10 @@ class OrderingUtils {
    * @param perm_ Permutation of the array
    * @param iperm_ Inverse permutation
    */
-  static void multi_color(int nrows, const int *rowp, const int *cols,
-                          int **perm_, int **iperm_) {
-    int *colors = new int[nrows];
-    int *tmp = new int[nrows + 1];
+  static void multi_color(int nrows, const int* rowp, const int* cols,
+                          int** perm_, int** iperm_) {
+    int* colors = new int[nrows];
+    int* tmp = new int[nrows + 1];
     std::fill(colors, colors + nrows, -1);
     std::fill(tmp, tmp + nrows, -1);
 
@@ -241,8 +241,8 @@ class OrderingUtils {
       tmp[i] += tmp[i - 1];
     }
 
-    int *iperm = new int[nrows];
-    int *perm = new int[nrows];
+    int* iperm = new int[nrows];
+    int* perm = new int[nrows];
 
     // Create the new color variables
     for (int i = 0; i < nrows; i++) {
@@ -275,18 +275,18 @@ class OrderingUtils {
    */
   template <class Functor>
   static void create_csr_from_element_conn(int nrows, int ncols, int nelems,
-                                           const Functor &element_nodes,
+                                           const Functor& element_nodes,
                                            bool include_diagonal,
-                                           bool sort_columns, int **rowp_,
-                                           int **cols_) {
-    int *node_to_elem_ptr = nullptr;
-    int *node_to_elem = nullptr;
+                                           bool sort_columns, int** rowp_,
+                                           int** cols_) {
+    int* node_to_elem_ptr = nullptr;
+    int* node_to_elem = nullptr;
     compute_node_to_element_ptr(ncols, nelems, element_nodes, &node_to_elem_ptr,
                                 &node_to_elem);
 
     // Set up the CSR data structure
-    int *rowp = new int[nrows + 1];
-    int *counter = new int[ncols];
+    int* rowp = new int[nrows + 1];
+    int* counter = new int[ncols];
 
     // Initialize the counter
     for (int i = 0; i < ncols; i++) {
@@ -307,7 +307,7 @@ class OrderingUtils {
       for (int j = node_to_elem_ptr[i]; j < node_to_elem_ptr[i + 1]; j++) {
         int elem = node_to_elem[j];
 
-        const int *ptr;
+        const int* ptr;
         int nodes_per_element = element_nodes(elem, &ptr);
         for (int k = 0; k < nodes_per_element; k++, ptr++) {
           int node = ptr[0];
@@ -321,7 +321,7 @@ class OrderingUtils {
     }
 
     // Allocate the column indices
-    int *cols = new int[nnz_count];
+    int* cols = new int[nnz_count];
 
     // Reset the counter
     for (int i = 0; i < ncols; i++) {
@@ -342,7 +342,7 @@ class OrderingUtils {
       for (int j = node_to_elem_ptr[i]; j < node_to_elem_ptr[i + 1]; j++) {
         int elem = node_to_elem[j];
 
-        const int *ptr;
+        const int* ptr;
         int nodes_per_element = element_nodes(elem, &ptr);
         for (int k = 0; k < nodes_per_element; k++, ptr++) {
           int node = ptr[0];
@@ -382,17 +382,17 @@ class OrderingUtils {
    */
   template <class Functor>
   static void compute_node_to_element_ptr(int nnodes, int nelems,
-                                          const Functor &element_nodes,
-                                          int **node_to_elem_ptr_,
-                                          int **node_to_elem_) {
+                                          const Functor& element_nodes,
+                                          int** node_to_elem_ptr_,
+                                          int** node_to_elem_) {
     // Create data to store node -> element connectivity
-    int *node_to_elem_ptr = new int[nnodes + 1];
+    int* node_to_elem_ptr = new int[nnodes + 1];
     for (int i = 0; i < nnodes + 1; i++) {
       node_to_elem_ptr[i] = 0;
     }
 
     for (int i = 0; i < nelems; i++) {
-      const int *ptr;
+      const int* ptr;
       int nodes_per_element = element_nodes(i, &ptr);
       for (int j = 0; j < nodes_per_element; j++, ptr++) {
         int node = ptr[0];
@@ -407,9 +407,9 @@ class OrderingUtils {
     }
 
     // Set up the node to element data
-    int *node_to_elem = new int[node_to_elem_ptr[nnodes]];
+    int* node_to_elem = new int[node_to_elem_ptr[nnodes]];
     for (int i = 0; i < nelems; i++) {
-      const int *ptr;
+      const int* ptr;
       int nodes_per_element = element_nodes(i, &ptr);
       for (int j = 0; j < nodes_per_element; j++, ptr++) {
         int node = ptr[0];
@@ -442,8 +442,8 @@ class OrderingUtils {
    * @param elem_by_color_ Elements listed by color
    */
   static void color_elements(const int nelems, const int nnodes_per_elem,
-                             const int *elem_nodes, int *num_colors_,
-                             int **elem_by_color_ptr_, int **elem_by_color_) {
+                             const int* elem_nodes, int* num_colors_,
+                             int** elem_by_color_ptr_, int** elem_by_color_) {
     int max_node = 0;
     for (int i = 0; i < nelems * nnodes_per_elem; i++) {
       if (elem_nodes[i] > max_node) {
@@ -452,7 +452,7 @@ class OrderingUtils {
     }
     max_node++;
 
-    auto element_nodes = [&](int elem, const int *ptr[]) {
+    auto element_nodes = [&](int elem, const int* ptr[]) {
       *ptr = &elem_nodes[elem * nnodes_per_elem];
       return nnodes_per_elem;
     };
@@ -475,20 +475,20 @@ class OrderingUtils {
    */
   template <class Functor>
   static void color_elements(const int nnodes, const int nelems,
-                             const Functor &element_nodes, int *num_colors_,
-                             int **elem_by_color_ptr_, int **elem_by_color_) {
+                             const Functor& element_nodes, int* num_colors_,
+                             int** elem_by_color_ptr_, int** elem_by_color_) {
     int *elem_to_elem_ptr, *elem_to_elem;
     build_element_to_element(nnodes, nelems, element_nodes, &elem_to_elem_ptr,
                              &elem_to_elem);
 
     // Greedy coloring
-    int *elem_colors = new int[nelems];
+    int* elem_colors = new int[nelems];
     std::fill(elem_colors, elem_colors + nelems, -1);
 
     // Keep track of the number of colors
     int num_colors = 0;
 
-    int *flags = new int[nelems];
+    int* flags = new int[nelems];
     std::fill(flags, flags + nelems, -1);
 
     for (int e = 0; e < nelems; e++) {
@@ -521,8 +521,8 @@ class OrderingUtils {
     }
 
     // Set up the elements by color
-    int *elem_by_color = new int[nelems];
-    int *elem_by_color_ptr = new int[num_colors + 1];
+    int* elem_by_color = new int[nelems];
+    int* elem_by_color_ptr = new int[num_colors + 1];
     std::fill(elem_by_color_ptr, elem_by_color_ptr + num_colors + 1, 0);
     for (int e = 0; e < nelems; e++) {
       elem_by_color_ptr[elem_colors[e] + 1]++;
@@ -563,24 +563,24 @@ class OrderingUtils {
    */
   template <class Functor>
   static void build_element_to_element(const int nnodes, const int nelems,
-                                       const Functor &element_nodes,
-                                       int **elem_to_elem_ptr_,
-                                       int **elem_to_elem_) {
+                                       const Functor& element_nodes,
+                                       int** elem_to_elem_ptr_,
+                                       int** elem_to_elem_) {
     // Create a pointer from the nodes back to the elements
     int *node_to_elem_ptr, *node_to_elem;
     compute_node_to_element_ptr(nnodes, nelems, element_nodes,
                                 &node_to_elem_ptr, &node_to_elem);
 
     // Compute the element -> element data structure
-    int *elem_flags = new int[nelems];
+    int* elem_flags = new int[nelems];
     std::fill(elem_flags, elem_flags + nelems, -1);
 
-    int *elem_to_elem_ptr = new int[nelems + 1];
+    int* elem_to_elem_ptr = new int[nelems + 1];
     elem_to_elem_ptr[0] = 0;
     for (int i = 0; i < nelems; i++) {
       int count = 0;
 
-      const int *ptr;
+      const int* ptr;
       int nnodes_per_elem = element_nodes(i, &ptr);
       for (int j = 0; j < nnodes_per_elem; j++, ptr++) {
         int node = ptr[0];
@@ -607,11 +607,11 @@ class OrderingUtils {
     }
 
     std::fill(elem_flags, elem_flags + nelems, -1);
-    int *elem_to_elem = new int[elem_to_elem_ptr[nelems]];
+    int* elem_to_elem = new int[elem_to_elem_ptr[nelems]];
     for (int i = 0; i < nelems; i++) {
       int count = 0;
 
-      const int *ptr;
+      const int* ptr;
       int nnodes_per_elem = element_nodes(i, &ptr);
       for (int j = 0; j < nnodes_per_elem; j++, ptr++) {
         int node = ptr[0];
@@ -653,9 +653,9 @@ class OrderingUtils {
    */
   template <class Functor>
   static void create_csr_from_output_data(int nrows, int ncols, int nelems,
-                                          const Functor &elements, int **rowp_,
-                                          int **cols_) {
-    int *rowp = new int[nrows + 1];
+                                          const Functor& elements, int** rowp_,
+                                          int** cols_) {
+    int* rowp = new int[nrows + 1];
     std::fill(rowp, rowp + (nrows + 1), 0);
     for (int elem = 0; elem < nelems; elem++) {
       int nout, nin;
@@ -672,18 +672,18 @@ class OrderingUtils {
       rowp[i + 1] += rowp[i];
     }
 
-    int *cols = new int[rowp[nrows]];
+    int* cols = new int[rowp[nrows]];
     for (int elem = 0; elem < nelems; elem++) {
       int nout, nin;
       const int *outputs, *inputs;
       elements(elem, &nout, &nin, &outputs, &inputs);
 
       for (int i = 0; i < nout; i++) {
-        int pos = rowp[i];
+        int pos = rowp[outputs[i]];
         for (int j = 0; j < nin; j++) {
           cols[pos + j] = inputs[j];
         }
-        rowp[i] += nin;
+        rowp[outputs[i]] += nin;
       }
     }
 
@@ -696,16 +696,20 @@ class OrderingUtils {
     int start = rowp[0];
     for (int i = 0; i < nrows; i++) {
       int size = rowp[i + 1] - start;
-      int *array = &cols[start];
+      int* array = &cols[start];
       std::sort(array, array + size);
 
       // Uniquify an array with duplicates
       int new_size = 0;
       if (size > 0) {
-        new_size = 1;
+        // Copy the first entry
+        cols[rowp[i]] = array[0];
+        new_size++;
+
         for (int read_idx = 1; read_idx < size; read_idx++) {
-          if (array[read_idx] != array[new_size - 1]) {
-            array[new_size++] = array[read_idx];
+          if (array[read_idx] != cols[rowp[i] + new_size - 1]) {
+            cols[rowp[i] + new_size] = array[read_idx];
+            new_size++;
           }
         }
       }
@@ -733,7 +737,7 @@ class OrderingUtils {
    */
   template <class Functor>
   static void reorder_for_partition(const int nnodes, const int nelems,
-                                    const Functor &element_nodes, int part_size,
+                                    const Functor& element_nodes, int part_size,
                                     const int partition[],
                                     int new_node_numbers[], int node_ranges[]) {
     std::fill(new_node_numbers, new_node_numbers + nnodes, -1);
@@ -741,7 +745,7 @@ class OrderingUtils {
 
     // Count up the number of times each node will be assigned
     for (int i = 0; i < nelems; i++) {
-      const int *ptr;
+      const int* ptr;
       int nnodes_per_elem = element_nodes(i, &ptr);
       for (int j = 0; j < nnodes_per_elem; j++, ptr++) {
         int node = ptr[0];
@@ -761,7 +765,7 @@ class OrderingUtils {
 
     // Count up the number of times each node will be assigned
     for (int i = 0; i < nelems; i++) {
-      const int *ptr;
+      const int* ptr;
       int nnodes_per_elem = element_nodes(i, &ptr);
       for (int j = 0; j < nnodes_per_elem; j++, ptr++) {
         int node = ptr[0];
@@ -797,7 +801,7 @@ class OrderingUtils {
                                   const int nnodes_per_elem,
                                   const int elem_nodes[], const int partition[],
                                   const int new_node_numbers[],
-                                  int *nelems_local_, int *elem_nodes_local_[],
+                                  int* nelems_local_, int* elem_nodes_local_[],
                                   const int root = 0) {
     int size, rank;
     MPI_Comm_size(comm, &size);
@@ -829,8 +833,8 @@ class OrderingUtils {
     // Send the element counts
     MPI_Scatter(count, 1, MPI_INT, &nelems_local, 1, MPI_INT, root, comm);
 
-    int *elem_nodes_root = nullptr;
-    int *elem_nodes_local = new int[nelems_local * nnodes_per_elem];
+    int* elem_nodes_root = nullptr;
+    int* elem_nodes_local = new int[nelems_local * nnodes_per_elem];
 
     if (rank == root) {
       elem_nodes_root = new int[nelems * nnodes_per_elem];
