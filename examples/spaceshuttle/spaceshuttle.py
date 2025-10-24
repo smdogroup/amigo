@@ -414,11 +414,15 @@ opt = am.Optimizer(model, x, lower=lower, upper=upper)
 data = opt.optimize(
     {
         "initial_barrier_param": 0.1,
-        "monotone_barrier_fraction": 0.1,
         "convergence_tolerance": 1e-10,
         "max_line_search_iterations": 4,  # 30,  # Reasonable for intermediate problem
         "max_iterations": 500,  # Sufficient iterations
         "init_affine_step_multipliers": True,  # Enable for better scaling
+        # Use the new heuristic barrier parameter update
+        "barrier_strategy": "heuristic",
+        "heuristic_barrier_gamma": 0.1,  # Scale factor γ
+        "heuristic_barrier_r": 0.95,  # Steplength parameter r
+        "verbose_barrier": True,  # Show ξ and complementarity values
     }
 )
 
@@ -444,6 +448,21 @@ q[:, 5] = q_scaled[:, 5] * scaling["psi"]  # heading
 u = np.zeros_like(u_scaled)
 u[:, 0] = u_scaled[:, 0] * scaling["alpha"]  # angle of attack
 u[:, 1] = u_scaled[:, 1] * scaling["beta"]  # bank angle
+
+# Print barrier parameter evolution
+print("\nBarrier parameter evolution (heuristic method):")
+print("Iteration | Barrier Param | Residual")
+print("-" * 40)
+for i, iter_data in enumerate(data["iterations"]):
+    if i < 20 or i % 10 == 0:  # Show first 20 iterations, then every 10th
+        print(
+            f"{i:8d} | {iter_data['barrier_param']:12.6e} | {iter_data['residual']:12.6e}"
+        )
+if len(data["iterations"]) > 20:
+    print(f"... (showing every 10th iteration after 20)")
+    print(
+        f"{len(data['iterations'])-1:8d} | {data['iterations'][-1]['barrier_param']:12.6e} | {data['iterations'][-1]['residual']:12.6e}"
+    )
 
 # Print results
 print(f"\nOptimization Results:")

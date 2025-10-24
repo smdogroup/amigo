@@ -425,8 +425,24 @@ PYBIND11_MODULE(amigo, mod) {
            })
       .def("apply_step_update",
            &amigo::InteriorPointOptimizer<double>::apply_step_update)
-      .def("compute_complementarity",
-           &amigo::InteriorPointOptimizer<double>::compute_complementarity)
+      .def(
+          "compute_complementarity",
+          [](const amigo::InteriorPointOptimizer<double> &self,
+             const std::shared_ptr<amigo::OptVector<double>> vars) {
+            return self.compute_complementarity(vars, nullptr);
+          },
+          py::arg("vars"))
+      .def(
+          "compute_complementarity",
+          [](const amigo::InteriorPointOptimizer<double> &self,
+             const std::shared_ptr<amigo::OptVector<double>> vars,
+             bool compute_uniformity) {
+            double uniformity;
+            double complementarity =
+                self.compute_complementarity(vars, &uniformity);
+            return py::make_tuple(complementarity, uniformity);
+          },
+          py::arg("vars"), py::arg("compute_uniformity"))
       .def("compute_affine_start_point",
            &amigo::InteriorPointOptimizer<double>::compute_affine_start_point)
       .def("check_update",

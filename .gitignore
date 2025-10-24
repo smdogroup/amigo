@@ -17,7 +17,12 @@ include/amigo_include_paths.h
 /examples/**/*.svg
 /examples/**/*.json
 /examples/**/*.pyd
+/examples/**/*.html
+/examples/**/*.js
+/examples/**/*.css
 /examples/**/build/
+examples/**/lib/
 
+# Virtual environments and packaging
 venv/
 amigo.egg-info/

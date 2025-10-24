@@ -474,16 +474,21 @@ if comm_rank == 0:
 
 
 opt_options = {
-    "max_iterations": 200,
-    "record_components": ["cart.x[-1]"],
-    "max_line_search_iterations": 10,
-    "convergence_tolerance": 1e-8,
+    "initial_barrier_param": 0.1,
+    "convergence_tolerance": 1e-10,
+    "max_line_search_iterations": 4,  # 30,  # Reasonable for intermediate problem
+    "max_iterations": 500,  # Sufficient iterations
+    "init_affine_step_multipliers": True,  # Enable for better scaling
+    # Use the new heuristic barrier parameter update
+    "barrier_strategy": "heuristic",
+    "verbose_barrier": True,  # Show ξ and complementarity values
 }
 
 # Set up the optimizer
 opt = am.Optimizer(model, x, lower=lower, upper=upper, comm=comm, distribute=distribute)
 
 opt_data = opt.optimize(opt_options)
+
 with open("cart_opt_data.json", "w") as fp:
     json.dump(opt_data, fp, indent=2)
 
@@ -539,18 +544,24 @@ if comm_rank == 0:
                     t = None
 
         graph = model.create_graph(timestep=t)
-        net = Network(notebook=True)
+        net = Network(
+            notebook=True,
+            height="1000px",
+            width="100%",
+            bgcolor="#ffffff",
+            font_color="black",
+        )
 
         net.from_nx(graph)
         # net.show_buttons(filter_=["physics"])
-        # net.set_options(
-        #     """
-        #     var options = {
-        #     "interaction": {
-        #         "dragNodes": false
-        #     }
-        #     }
-        #     """
-        # )
+        net.set_options(
+            """
+            var options = {
+            "interaction": {
+                "dragNodes": false
+            }
+            }
+            """
+        )
 
         net.show("cart_pole_graph.html")
