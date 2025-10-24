@@ -702,10 +702,14 @@ class OrderingUtils {
       // Uniquify an array with duplicates
       int new_size = 0;
       if (size > 0) {
-        new_size = 1;
+        // Copy the first entry
+        cols[rowp[i]] = array[0];
+        new_size++;
+
         for (int read_idx = 1; read_idx < size; read_idx++) {
-          if (array[read_idx] != array[new_size - 1]) {
-            array[new_size++] = array[read_idx];
+          if (array[read_idx] != cols[rowp[i] + new_size - 1]) {
+            cols[rowp[i] + new_size] = array[read_idx];
+            new_size++;
           }
         }
       }

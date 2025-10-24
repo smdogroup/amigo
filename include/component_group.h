@@ -30,15 +30,18 @@ class SerialGroupBackend {
   T lagrangian_kernel(const IndexLayout<ndata>& data_layout,
                       const IndexLayout<ncomp>& layout,
                       const Vector<T>& data_vec, const Vector<T>& vec) const {
-    Data data;
-    Input input;
     T value = 0.0;
-    int num_elems = layout.get_num_elements();
 
-    for (int i = 0; i < num_elems; i++) {
-      data_layout.get_values(i, data_vec, data);
-      layout.get_values(i, vec, input);
-      value += Component::lagrange(data, input);
+    if constexpr (!Component::is_compute_empty) {
+      Data data;
+      Input input;
+      int num_elems = layout.get_num_elements();
+
+      for (int i = 0; i < num_elems; i++) {
+        data_layout.get_values(i, data_vec, data);
+        layout.get_values(i, vec, input);
+        value += Component::lagrange(data, input);
+      }
     }
 
     if constexpr (sizeof...(Remain) > 0) {
@@ -61,14 +64,16 @@ class SerialGroupBackend {
                            const IndexLayout<ncomp>& layout,
                            const Vector<T>& data_vec, const Vector<T>& vec,
                            Vector<T>& res) const {
-    Data data;
-    Input input, gradient;
-    for (int i = 0; i < layout.get_num_elements(); i++) {
-      data_layout.get_values(i, data_vec, data);
-      gradient.zero();
-      layout.get_values(i, vec, input);
-      Component::gradient(data, input, gradient);
-      layout.add_values(i, gradient, res);
+    if constexpr (!Component::is_compute_empty) {
+      Data data;
+      Input input, gradient;
+      for (int i = 0; i < layout.get_num_elements(); i++) {
+        data_layout.get_values(i, data_vec, data);
+        gradient.zero();
+        layout.get_values(i, vec, input);
+        Component::gradient(data, input, gradient);
+        layout.add_values(i, gradient, res);
+      }
     }
 
     if constexpr (sizeof...(Remain) > 0) {
@@ -91,16 +96,18 @@ class SerialGroupBackend {
                                   const Vector<T>& data_vec,
                                   const Vector<T>& vec, const Vector<T>& dir,
                                   Vector<T>& res) const {
-    Data data;
-    Input input, gradient, direction, result;
-    for (int i = 0; i < layout.get_num_elements(); i++) {
-      data_layout.get_values(i, data_vec, data);
-      gradient.zero();
-      result.zero();
-      layout.get_values(i, vec, input);
-      layout.get_values(i, dir, direction);
-      Component::hessian(data, input, direction, gradient, result);
-      layout.add_values(i, result, res);
+    if constexpr (!Component::is_compute_empty) {
+      Data data;
+      Input input, gradient, direction, result;
+      for (int i = 0; i < layout.get_num_elements(); i++) {
+        data_layout.get_values(i, data_vec, data);
+        gradient.zero();
+        result.zero();
+        layout.get_values(i, vec, input);
+        layout.get_values(i, dir, direction);
+        Component::hessian(data, input, direction, gradient, result);
+        layout.add_values(i, result, res);
+      }
     }
 
     if constexpr (sizeof...(Remain) > 0) {
@@ -122,26 +129,28 @@ class SerialGroupBackend {
                           const IndexLayout<ncomp>& layout,
                           const Vector<T>& data_vec, const Vector<T>& vec,
                           const NodeOwners& owners, CSRMat<T>& jac) const {
-    Data data;
-    Input input, gradient, direction, result;
-    for (int i = 0; i < layout.get_num_elements(); i++) {
-      int index[ncomp], index_global[ncomp];
-      layout.get_indices(i, index);
-      owners.local_to_global(ncomp, index, index_global);
+    if constexpr (!Component::is_compute_empty) {
+      Data data;
+      Input input, gradient, direction, result;
+      for (int i = 0; i < layout.get_num_elements(); i++) {
+        int index[ncomp], index_global[ncomp];
+        layout.get_indices(i, index);
+        owners.local_to_global(ncomp, index, index_global);
 
-      data_layout.get_values(i, data_vec, data);
-      layout.get_values(i, vec, input);
+        data_layout.get_values(i, data_vec, data);
+        layout.get_values(i, vec, input);
 
-      for (int j = 0; j < Component::ncomp; j++) {
-        direction.zero();
-        gradient.zero();
-        result.zero();
+        for (int j = 0; j < Component::ncomp; j++) {
+          direction.zero();
+          gradient.zero();
+          result.zero();
 
-        direction[j] = 1.0;
+          direction[j] = 1.0;
 
-        Component::hessian(data, input, direction, gradient, result);
+          Component::hessian(data, input, direction, gradient, result);
 
-        jac.add_row(index[j], Component::ncomp, index_global, result);
+          jac.add_row(index[j], Component::ncomp, index_global, result);
+        }
       }
     }
 
@@ -164,16 +173,18 @@ class SerialGroupBackend {
       const IndexLayout<ndata>& data_layout, const IndexLayout<ncomp>& layout,
       const Vector<T>& data_vec, const Vector<T>& vec, const Vector<T>& dir,
       Vector<T>& res) const {
-    Data data;
-    Input input, gradient, direction, result;
-    for (int i = 0; i < layout.get_num_elements(); i++) {
-      data_layout.get_values(i, data_vec, data);
-      gradient.zero();
-      result.zero();
-      layout.get_values(i, vec, input);
-      layout.get_values(i, dir, direction);
-      Component::hessian(data, input, direction, gradient, result);
-      layout.add_values(i, result, res);
+    if constexpr (!Component::is_compute_empty) {
+      Data data;
+      Input input, gradient, direction, result;
+      for (int i = 0; i < layout.get_num_elements(); i++) {
+        data_layout.get_values(i, data_vec, data);
+        gradient.zero();
+        result.zero();
+        layout.get_values(i, vec, input);
+        layout.get_values(i, dir, direction);
+        Component::hessian(data, input, direction, gradient, result);
+        layout.add_values(i, result, res);
+      }
     }
 
     if constexpr (sizeof...(Remain) > 0) {
@@ -195,16 +206,18 @@ class SerialGroupBackend {
       const IndexLayout<ndata>& data_layout, const IndexLayout<ncomp>& layout,
       const Vector<T>& data_vec, const Vector<T>& vec, const Vector<T>& dir,
       Vector<T>& res) const {
-    Data data;
-    Input input, gradient, direction, result;
-    for (int i = 0; i < layout.get_num_elements(); i++) {
-      data_layout.get_values(i, data_vec, data);
-      gradient.zero();
-      result.zero();
-      layout.get_values(i, vec, input);
-      layout.get_values(i, dir, direction);
-      Component::hessian(data, input, direction, gradient, result);
-      layout.add_values(i, result, res);
+    if constexpr (!Component::is_compute_empty) {
+      Data data;
+      Input input, gradient, direction, result;
+      for (int i = 0; i < layout.get_num_elements(); i++) {
+        data_layout.get_values(i, data_vec, data);
+        gradient.zero();
+        result.zero();
+        layout.get_values(i, vec, input);
+        layout.get_values(i, dir, direction);
+        Component::hessian(data, input, direction, gradient, result);
+        layout.add_values(i, result, res);
+      }
     }
 
     if constexpr (sizeof...(Remain) > 0) {
@@ -230,7 +243,8 @@ class SerialGroupBackend {
                                     const Vector<T>& vec,
                                     const NodeOwners& owners,
                                     CSRMat<T>& jac) const {
-    if constexpr (Component::ndata > 0 && Component::ncomp > 0) {
+    if constexpr (!Component::is_compute_empty && Component::ndata > 0 &&
+                  Component::ncomp > 0) {
       typename Component::template Data<A2D::ADScalar<T, 1>> data;
       typename Component::template Input<A2D::ADScalar<T, 1>> input;
       typename Component::template Input<A2D::ADScalar<T, 1>> gradient;
@@ -256,7 +270,8 @@ class SerialGroupBackend {
 
         int data_indices[ndata], data_indices_global[ndata];
         data_layout.get_indices(i, data_indices);
-        owners.local_to_global(ndata, data_indices, data_indices_global);
+        owners.local_to_global(Component::ndata, data_indices,
+                               data_indices_global);
 
         for (int j = 0; j < ncomp; j++) {
           jac.add_row(input_index[j], Component::ndata, data_indices_global,

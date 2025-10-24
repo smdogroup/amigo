@@ -320,6 +320,39 @@ def create_cart_model(module_name="cart_pole"):
     return model
 
 
+def check_post_optimality_derivative(x, opt, opt_options={}, dh=1e-7):
+    # Set the initial conditions based on the varaibles
+    x[:] = 0.0
+    x["cart.q[:, 0]"] = np.linspace(0, 2.0, num_time_steps + 1)
+    x["cart.q[:, 1]"] = np.linspace(0, np.pi, num_time_steps + 1)
+    x["cart.q[:, 2]"] = 1.0
+    x["cart.q[:, 3]"] = 1.0
+
+    opt.optimize(opt_options)
+    output = opt.compute_output()
+
+    dfdx, of_map, wrt_map = opt.compute_post_opt_derivatives(
+        of="kin.ke[0]", wrt=["cart.m1[0]", "cart.m2[0]", "cart.L[0]"], method="adjoint"
+    )
+
+    # Set the initial conditions based on the varaibles
+    x[:] = 0.0
+    x["cart.q[:, 0]"] = np.linspace(0, 2.0, num_time_steps + 1)
+    x["cart.q[:, 1]"] = np.linspace(0, np.pi, num_time_steps + 1)
+    x["cart.q[:, 2]"] = 1.0
+    x["cart.q[:, 3]"] = 1.0
+
+    # Compute the derivative wrt L
+    data["cart.L[0]"] += dh
+
+    opt.optimize(opt_options)
+    output2 = opt.compute_output()
+
+    ans = dfdx[0, wrt_map["cart.L[0]"]]
+    fd = (output2["kin.ke[0]"] - output["kin.ke[0]"]) / dh
+    print(ans, fd, (ans - fd) / fd)
+
+
 parser = argparse.ArgumentParser()
 parser.add_argument(
     "--build", dest="build", action="store_true", default=False, help="Enable building"
@@ -366,6 +399,14 @@ parser.add_argument(
     default=False,
     help="Distribute the problem",
 )
+parser.add_argument(
+    "--post-optimality",
+    dest="post_optimality",
+    action="store_true",
+    default=False,
+    help="Compute the post-optimality",
+)
+
 args = parser.parse_args()
 
 model = create_cart_model()
@@ -446,31 +487,9 @@ opt_data = opt.optimize(opt_options)
 with open("cart_opt_data.json", "w") as fp:
     json.dump(opt_data, fp, indent=2)
 
-output = opt.compute_output()
+if args.post_optimality:
+    check_post_optimality_derivative(x, opt, opt_options)
 
-dfdx, of_map, wrt_map = opt.compute_post_opt_derivatives(
-    of="kin.ke[0]", wrt=["cart.m1[0]", "cart.m2[0]", "cart.L[0]"], method="adjoint"
-)
-
-# Set the initial conditions based on the varaibles
-x[:] = 0.0
-x["cart.q[:, 0]"] = np.linspace(0, 2.0, num_time_steps + 1)
-x["cart.q[:, 1]"] = np.linspace(0, np.pi, num_time_steps + 1)
-x["cart.q[:, 2]"] = 1.0
-x["cart.q[:, 3]"] = 1.0
-
-dh = 1e-6
-data["cart.L"] += dh
-
-opt_data = opt.optimize(opt_options)
-output2 = opt.compute_output()
-
-print(output["kin.ke[0]"])
-print(output2["kin.ke[0]"])
-
-ans = dfdx[0, wrt_map["cart.L[0]"]]
-fd = (output2["kin.ke[0]"] - output["kin.ke[0]"]) / dh
-print(ans, fd, fd - ans, (ans - fd) / fd)
 
 if comm_rank == 0:
     d = x["cart.q[:, 0]"]
