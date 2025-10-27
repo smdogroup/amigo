@@ -58,7 +58,26 @@ class ComponentGroupBase {
   virtual void get_constraint_csr_data(int* nrows, int* ncols,
                                        const int* rows[], const int* cols[],
                                        const int* rowp[],
-                                       const int* colidx[]) const {}
+                                       const int* colidx[]) const {
+    if (nrows) {
+      *nrows = 0;
+    }
+    if (ncols) {
+      *ncols = 0;
+    }
+    if (rows) {
+      *rows = nullptr;
+    }
+    if (cols) {
+      *cols = nullptr;
+    }
+    if (rowp) {
+      *rowp = nullptr;
+    }
+    if (colidx) {
+      *colidx = nullptr;
+    }
+  }
   virtual void get_data_layout_data(int* num_elements, int* nodes_per_elem,
                                     const int** array) const {
     if (num_elements) {

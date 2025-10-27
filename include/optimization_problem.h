@@ -601,6 +601,43 @@ class OptimizationProblem {
           num_variables, num_variables, num_elements, element_nodes,
           include_diagonal, sort_columns, &rowp, &cols);
 
+      // Now optionally add the components with a non-zero CSR sparsity pattern
+      int num_csr_components = 0;
+      std::vector<int> csr_components(components.size());
+      for (size_t i = 0; i < components.size(); i++) {
+        int nrows;
+        components[i]->get_constraint_csr_data(&nrows, nullptr, nullptr,
+                                               nullptr, nullptr, nullptr);
+        if (nrows > 0) {
+          csr_components.push_back(i);
+          num_csr_components++;
+        }
+      }
+
+      if (num_csr_components > 0) {
+        auto get_csr_component =
+            [&](int index, int* local_nrows, int* local_ncols,
+                const int* local_rows[], const int* local_columns[],
+                const int* local_rowp[], const int* local_cols[]) {
+              int comp_index = csr_components[index];
+              components[comp_index]->get_constraint_csr_data(
+                  local_nrows, local_ncols, local_rows, local_columns,
+                  local_rowp, local_cols);
+              return;
+            };
+
+        int *new_rowp, *new_cols;
+        OrderingUtils::add_constraint_csr_pattern(
+            num_variables, num_variables, rowp, cols, num_csr_components,
+            get_csr_component, &new_rowp, &new_cols);
+
+        delete[] rowp;
+        delete[] cols;
+
+        rowp = new_rowp;
+        cols = new_cols;
+      }
+
       // Distribute the pattern across matrices
       mat_dist =
           new MatrixDistribute(comm, var_owners, var_owners, num_variables,
