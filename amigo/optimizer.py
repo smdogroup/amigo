@@ -915,6 +915,7 @@ class Optimizer:
 
                 dfdx[i, :] = out_wrt_data[idx, wrt_indices] + adjx[wrt_indices]
         elif method == "direct":
+            # Convert to CSC since we will access the columns of this matrix
             grad_wrt_data = grad_wrt_data.tocsc()
 
             for i in range(len(wrt_indices)):

@@ -25,16 +25,16 @@ class BlockAMD {
     return std::string("Success");
   }
 
-  static int amd(int nvars, int *rowp, int *cols, int nmult, int *mult,
-                 int *perm, int use_exact_degree) {
-    int *alen = new int[nvars];  // Number of entries in a row
-    int *elen = new int[nvars];  // Number of elements in a row
-    int *slen = new int[nvars];  // The length of each supernode
+  static int amd(int nvars, int* rowp, int* cols, int nmult, int* mult,
+                 int* perm, int use_exact_degree) {
+    int* alen = new int[nvars];  // Number of entries in a row
+    int* elen = new int[nvars];  // Number of elements in a row
+    int* slen = new int[nvars];  // The length of each supernode
 
-    int *degree = new int[nvars];  // Degree (exact or estimate) of the node
-    int *elem_degree = new int[nvars];  // The degree of the element
-    int *Lp = new int[nvars];           // A set of variables
-    int *state = new int[nvars];        // Are we a variable, or element?
+    int* degree = new int[nvars];  // Degree (exact or estimate) of the node
+    int* elem_degree = new int[nvars];  // The degree of the element
+    int* Lp = new int[nvars];           // A set of variables
+    int* state = new int[nvars];        // Are we a variable, or element?
 
     for (int i = 0; i < nvars; i++) {
       perm[i] = i;
@@ -54,7 +54,7 @@ class BlockAMD {
     nmult = remove_duplicates(nmult, mult);
 
     // Create a list of the multipliers
-    int *is_multiplier = new int[nvars];
+    int* is_multiplier = new int[nvars];
     std::fill(is_multiplier, is_multiplier + nvars, 0);
     for (int i = 0; i < nmult; i++) {
       is_multiplier[mult[i]] = 1;
@@ -448,7 +448,7 @@ class BlockAMD {
     Sort an array of length len, then remove duplicate entries and
     entries with values -1.
   */
-  static int remove_duplicates(int len, int *array) {
+  static int remove_duplicates(int len, int* array) {
     std::sort(array, array + len);
 
     // Remove any negative numbers
@@ -475,8 +475,8 @@ class BlockAMD {
    If there is a problem with one of the rows of the data structure,
    return row+1, otherwise, return 0;
  */
-  static int check_format(int nvars, int *rowp, int *cols, int *elen,
-                          int *alen) {
+  static int check_format(int nvars, int* rowp, int* cols, int* elen,
+                          int* alen) {
     int flag = 0;
     for (int i = 0; i < nvars; i++) {
       for (int j = rowp[i]; j < rowp[i] + elen[i] - 1; j++) {
@@ -520,7 +520,7 @@ class BlockAMD {
    Compress the required number of rows to free up the required amount
    of space.
  */
-  static void add_space(int nvars, int *rowp, int *cols, const int *alen,
+  static void add_space(int nvars, int* rowp, int* cols, const int* alen,
                         const int r, int required_space) {
     // First, try and collect the space required from the rows preceeding r
     int new_space = 0;
@@ -589,9 +589,9 @@ class BlockAMD {
 
     rowp, cols: The quotient graph data structure.
   */
-  static int compare_variables(const int i, const int j, const int *elen,
-                               const int *alen, const int *rowp,
-                               const int *cols) {
+  static int compare_variables(const int i, const int j, const int* elen,
+                               const int* alen, const int* rowp,
+                               const int* cols) {
     // First, check if they are the same length
     if (i == j) {
       return 0;  // The same node, this should be avoided
@@ -626,8 +626,8 @@ class BlockAMD {
 
     This is used when removing an indistinguishable variable.
   */
-  static void remove_variable(int var, int *elen, int *alen, int *rowp,
-                              int *cols, int nvars) {
+  static void remove_variable(int var, int* elen, int* alen, int* rowp,
+                              int* cols, int nvars) {
     int i = rowp[var];
 
     // First, visit all the elements pointed to by var
@@ -673,7 +673,7 @@ class BlockAMD {
   }
 
   /*
-    Data structure for storing updating the minimum or approximate minimum
+    Data structure for storing and updating the minimum or approximate minimum
     degree
   */
   class MinDegreeList {
@@ -785,19 +785,19 @@ class BlockAMD {
     int min_degree;
 
     // The degree associated with each variable
-    int *degree;
+    int* degree;
 
     // For each degree, which is the first variable
-    int *first;
+    int* first;
 
     // For each variable what is the next variable with the same degree
-    int *next;
+    int* next;
 
     // For each variable what is the previous variable with the same degree
-    int *prev;
+    int* prev;
 
     // Const pointer to detect if we have a multiplier or not
-    const int *is_multiplier;
+    const int* is_multiplier;
   };
 };
 

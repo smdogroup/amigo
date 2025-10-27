@@ -54,13 +54,47 @@ class ComponentGroupBase {
                                        const Vector<T>& x,
                                        CSRMat<T>& jac) const {}
 
-  // Ordering information
+  // Get the information about the non-zero pattern
+  virtual void get_constraint_csr_data(int* nrows, int* ncols,
+                                       const int* rows[], const int* cols[],
+                                       const int* rowp[],
+                                       const int* colidx[]) const {}
   virtual void get_data_layout_data(int* num_elements, int* nodes_per_elem,
-                                    const int** array) const {}
+                                    const int** array) const {
+    if (num_elements) {
+      *num_elements = 0;
+    }
+    if (nodes_per_elem) {
+      *nodes_per_elem = 0;
+    }
+    if (array) {
+      *array = nullptr;
+    }
+  }
   virtual void get_layout_data(int* num_elements, int* nodes_per_elem,
-                               const int** array) const {}
+                               const int** array) const {
+    if (num_elements) {
+      *num_elements = 0;
+    }
+    if (nodes_per_elem) {
+      *nodes_per_elem = 0;
+    }
+    if (array) {
+      *array = nullptr;
+    }
+  }
   virtual void get_output_layout_data(int* num_elements, int* outputs_per_elem,
-                                      const int** array) const {}
+                                      const int** array) const {
+    if (num_elements) {
+      *num_elements = 0;
+    }
+    if (outputs_per_elem) {
+      *outputs_per_elem = 0;
+    }
+    if (array) {
+      *array = nullptr;
+    }
+  }
 };
 
 template <typename R, class... Ts>

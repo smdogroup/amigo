@@ -48,26 +48,26 @@ class VectorDistribute {
       delete[] recv_requests;
     }
 
-    void set_buffer_values(int nnodes, const int *nodes, const T *array) {
-      T *b = buffer;
-      const int *n = nodes;
+    void set_buffer_values(int nnodes, const int* nodes, const T* array) {
+      T* b = buffer;
+      const int* n = nodes;
       for (int i = 0; i < nnodes; i++, b++, n++) {
         b[0] = array[*n];
       }
     }
 
-    void add_buffer_values(int nnodes, const int *nodes, T *array) const {
-      const T *b = buffer;
-      const int *n = nodes;
+    void add_buffer_values(int nnodes, const int* nodes, T* array) const {
+      const T* b = buffer;
+      const int* n = nodes;
       for (int i = 0; i < nnodes; i++, b++, n++) {
         array[*n] += b[0];
       }
     }
 
     int tag;
-    T *buffer;
-    MPI_Request *send_requests;
-    MPI_Request *recv_requests;
+    T* buffer;
+    MPI_Request* send_requests;
+    MPI_Request* recv_requests;
   };
 
   /**
@@ -84,17 +84,17 @@ class VectorDistribute {
   VectorDistribute(std::shared_ptr<NodeOwners> owners)
       : comm(owners->get_mpi_comm()), owners(owners) {
     // Get the range of variables that are owned by each processor
-    const int *range = owners->get_range();
+    const int* range = owners->get_range();
 
     // Get the external node numbers
-    const int *ext_nodes;
+    const int* ext_nodes;
     int num_ext_nodes = owners->get_ext_nodes(&ext_nodes);
 
     // Get the processor rank and size
     int mpi_size, mpi_rank;
     MPI_Comm_rank(comm, &mpi_rank);
     MPI_Comm_size(comm, &mpi_size);
-    int *full_recv_ptr = new int[mpi_size + 1];
+    int* full_recv_ptr = new int[mpi_size + 1];
 
     // Set the number of owned nodes
     num_owned_nodes = range[mpi_rank + 1] - range[mpi_rank];
@@ -103,13 +103,13 @@ class VectorDistribute {
     OrderingUtils::match_intervals(mpi_size, range, num_ext_nodes, ext_nodes,
                                    full_recv_ptr);
 
-    int *full_recv_count = new int[mpi_size];
+    int* full_recv_count = new int[mpi_size];
     for (int i = 0; i < mpi_size; i++) {
       full_recv_count[i] = full_recv_ptr[i + 1] - full_recv_ptr[i];
     }
     delete[] full_recv_ptr;
 
-    int *full_send_count = new int[mpi_size];
+    int* full_send_count = new int[mpi_size];
 
     // Do one Alltoall
     MPI_Alltoall(full_recv_count, 1, MPI_INT, full_send_count, 1, MPI_INT,
@@ -164,8 +164,8 @@ class VectorDistribute {
     // Indices of the data that we will send to the processors
     send_indices = new int[send_ptr[num_sends]];
 
-    MPI_Request *send_requests = new MPI_Request[num_sends];
-    MPI_Request *recv_requests = new MPI_Request[num_recvs];
+    MPI_Request* send_requests = new MPI_Request[num_sends];
+    MPI_Request* recv_requests = new MPI_Request[num_recvs];
 
     // Reverse communication from the destination to the source
     int tag = 0;
@@ -214,7 +214,7 @@ class VectorDistribute {
    * @return DistributeContext<T>* New context object
    */
   template <typename T>
-  VecDistributeContext<T> *create_context() {
+  VecDistributeContext<T>* create_context() {
     return new VecDistributeContext<T>(send_ptr[num_sends], num_sends,
                                        num_recvs);
   }
@@ -228,22 +228,22 @@ class VectorDistribute {
    */
   template <typename T>
   void begin_forward(std::shared_ptr<Vector<T>> vars,
-                     VecDistributeContext<T> *ctx) {
-    T *array = vars->get_array();
+                     VecDistributeContext<T>* ctx) {
+    T* array = vars->get_array();
 
     // Copy the data to the buffer
     ctx->set_buffer_values(send_ptr[num_sends], send_indices, array);
 
     // Post the sends
     for (int i = 0; i < num_sends; i++) {
-      T *ptr = ctx->buffer + send_ptr[i];
+      T* ptr = ctx->buffer + send_ptr[i];
       MPI_Isend(ptr, send_count[i], get_mpi_type<T>(), send_procs[i], ctx->tag,
                 comm, &ctx->send_requests[i]);
     }
 
     // Post the recvs
     for (int i = 0; i < num_recvs; i++) {
-      T *ptr = array + (recv_ptr[i] + num_owned_nodes);
+      T* ptr = array + (recv_ptr[i] + num_owned_nodes);
       MPI_Irecv(ptr, recv_count[i], get_mpi_type<T>(), recv_procs[i], ctx->tag,
                 comm, &ctx->recv_requests[i]);
     }
@@ -258,7 +258,7 @@ class VectorDistribute {
    */
   template <typename T>
   void end_forward(std::shared_ptr<Vector<T>> vars,
-                   VecDistributeContext<T> *ctx) {
+                   VecDistributeContext<T>* ctx) {
     MPI_Waitall(num_sends, ctx->send_requests, MPI_STATUSES_IGNORE);
     MPI_Waitall(num_recvs, ctx->recv_requests, MPI_STATUSES_IGNORE);
   }
@@ -273,19 +273,19 @@ class VectorDistribute {
    */
   template <typename T>
   void begin_reverse_add(std::shared_ptr<Vector<T>> vars,
-                         VecDistributeContext<T> *ctx) {
-    T *array = vars->get_array();
+                         VecDistributeContext<T>* ctx) {
+    T* array = vars->get_array();
 
     // Post the sends
     for (int i = 0; i < num_sends; i++) {
-      T *ptr = ctx->buffer + send_ptr[i];
+      T* ptr = ctx->buffer + send_ptr[i];
       MPI_Irecv(ptr, send_count[i], get_mpi_type<T>(), send_procs[i], ctx->tag,
                 comm, &ctx->send_requests[i]);
     }
 
     // Post the recvs
     for (int i = 0; i < num_recvs; i++) {
-      T *ptr = array + (recv_ptr[i] + num_owned_nodes);
+      T* ptr = array + (recv_ptr[i] + num_owned_nodes);
       MPI_Isend(ptr, recv_count[i], get_mpi_type<T>(), recv_procs[i], ctx->tag,
                 comm, &ctx->recv_requests[i]);
     }
@@ -301,12 +301,12 @@ class VectorDistribute {
    */
   template <typename T>
   void end_reverse_add(std::shared_ptr<Vector<T>> vars,
-                       VecDistributeContext<T> *ctx) {
+                       VecDistributeContext<T>* ctx) {
     MPI_Waitall(num_sends, ctx->send_requests, MPI_STATUSES_IGNORE);
     MPI_Waitall(num_recvs, ctx->recv_requests, MPI_STATUSES_IGNORE);
 
     // Add the data to the buffer
-    T *array = vars->get_array();
+    T* array = vars->get_array();
     ctx->add_buffer_values(send_ptr[num_sends], send_indices, array);
   }
 
@@ -317,16 +317,16 @@ class VectorDistribute {
 
   // Data that will be sent to other processors
   int num_sends;
-  int *send_count;
-  int *send_ptr;
-  int *send_procs;
-  int *send_indices;  // Indices of the data from this proc
+  int* send_count;
+  int* send_ptr;
+  int* send_procs;
+  int* send_indices;  // Indices of the data from this proc
 
   // Data that will be recieved by this processor
   int num_recvs;
-  int *recv_count;
-  int *recv_ptr;
-  int *recv_procs;
+  int* recv_count;
+  int* recv_ptr;
+  int* recv_procs;
 };
 
 }  // namespace amigo

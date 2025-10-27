@@ -47,7 +47,7 @@ class NodeOwners {
   /**
    * Get the range of nodes owned by each processor
    */
-  const int *get_range() const { return range; }
+  const int* get_range() const { return range; }
 
   /**
    * @brief Get the number of local variables
@@ -62,7 +62,7 @@ class NodeOwners {
   /**
    * @brief Get the external nodes
    */
-  int get_ext_nodes(const int *nodes[]) const {
+  int get_ext_nodes(const int* nodes[]) const {
     if (nodes) {
       *nodes = ext_nodes;
     }
@@ -90,12 +90,12 @@ class NodeOwners {
 
  private:
   MPI_Comm comm;
-  int *range;
+  int* range;
   int num_local_nodes;
 
   // Store mapping of the local node numbers
   int num_ext_nodes;
-  int *ext_nodes;
+  int* ext_nodes;
 };
 
 }  // namespace amigo

@@ -15,7 +15,8 @@ class MatrixDistribute {
   class MatDistributeContext {
    public:
     MatDistributeContext(int tag, int num_ext_procs, int num_in_procs,
-                         int num_in_entries) : tag(tag) {
+                         int num_in_entries)
+        : tag(tag) {
       in_A = new T[num_in_entries];
       in_requests = new MPI_Request[num_in_procs];
       ext_requests = new MPI_Request[num_ext_procs];
@@ -27,9 +28,9 @@ class MatrixDistribute {
     }
 
     int tag;                    // MPI tag value
-    T *in_A;                    // Storage for the incoming entries
-    MPI_Request *in_requests;   // Requests for recving data
-    MPI_Request *ext_requests;  // Requests for sending info
+    T* in_A;                    // Storage for the incoming entries
+    MPI_Request* in_requests;   // Requests for recving data
+    MPI_Request* ext_requests;  // Requests for sending info
   };
 
   /**
@@ -44,23 +45,23 @@ class MatrixDistribute {
   template <typename T>
   MatrixDistribute(MPI_Comm comm, std::shared_ptr<NodeOwners> row_owners,
                    std::shared_ptr<NodeOwners> col_owners, int nrows, int ncols,
-                   const int *rowp, const int *cols,
-                   std::shared_ptr<CSRMat<T>> &csr)
+                   const int* rowp, const int* cols,
+                   std::shared_ptr<CSRMat<T>>& csr)
       : comm(comm), row_owners(row_owners), col_owners(col_owners) {
     int mpi_size, mpi_rank;
     MPI_Comm_rank(comm, &mpi_rank);
     MPI_Comm_size(comm, &mpi_size);
 
     // Get how the rows are distributed between processors
-    const int *row_ranges = row_owners->get_range();
-    const int *ext_rows;
+    const int* row_ranges = row_owners->get_range();
+    const int* ext_rows;
     int num_ext_rows = row_owners->get_ext_nodes(&ext_rows);
 
     // Set the number of local rows
     int num_local_rows = row_ranges[mpi_rank + 1] - row_ranges[mpi_rank];
 
     // Get the processor rank and size
-    int *full_ext_ptr = new int[mpi_size + 1];
+    int* full_ext_ptr = new int[mpi_size + 1];
 
     // Figure out where stuff should go by matching the intervals in the sorted
     // ext_rows array
@@ -68,7 +69,7 @@ class MatrixDistribute {
                                    full_ext_ptr);
 
     // Count up the number of entries
-    int *full_ext_count = new int[2 * mpi_size];
+    int* full_ext_count = new int[2 * mpi_size];
     for (int i = 0; i < mpi_size; i++) {
       // Set the number of rows that will be sent
       full_ext_count[2 * i] = full_ext_ptr[i + 1] - full_ext_ptr[i];
@@ -81,7 +82,7 @@ class MatrixDistribute {
     delete[] full_ext_ptr;
 
     // Allocate space to store the number of in or out rows
-    int *full_in_count = new int[2 * mpi_size];
+    int* full_in_count = new int[2 * mpi_size];
 
     // Do one Alltoall
     MPI_Alltoall(full_ext_count, 2, MPI_INT, full_in_count, 2, MPI_INT, comm);
@@ -102,12 +103,12 @@ class MatrixDistribute {
     // variable values
     in_procs = new int[num_in_procs];
     in_entry_count = new int[num_in_procs];
-    int *in_row_count = new int[num_in_procs];
+    int* in_row_count = new int[num_in_procs];
 
     // Number of processors to which we are sending data
     ext_procs = new int[num_ext_procs];
     ext_entry_count = new int[num_ext_procs];
-    int *ext_row_count = new int[num_ext_procs];
+    int* ext_row_count = new int[num_ext_procs];
 
     // Count up the rows to send first
     num_in_rows = 0;
@@ -135,8 +136,8 @@ class MatrixDistribute {
     // Indices of the data that we will send to the processors
     in_rows = new int[num_in_rows];
 
-    MPI_Request *in_requests = new MPI_Request[num_in_procs];
-    MPI_Request *ext_requests = new MPI_Request[num_ext_procs];
+    MPI_Request* in_requests = new MPI_Request[num_in_procs];
+    MPI_Request* ext_requests = new MPI_Request[num_ext_procs];
 
     // Transmit the rows from the source to the destination processors
     int tag = 0;
@@ -160,7 +161,7 @@ class MatrixDistribute {
     }
 
     // Now send the row sizes
-    int *ext_row_sizes = new int[num_ext_rows];
+    int* ext_row_sizes = new int[num_ext_rows];
     for (int i = 0; i < num_ext_rows; i++) {
       ext_row_sizes[i] =
           rowp[i + 1 + num_local_rows] - rowp[i + num_local_rows];
@@ -191,17 +192,17 @@ class MatrixDistribute {
     }
 
     // Convert the column indices from local to global and sort them in each row
-    const int *col_ranges = col_owners->get_range();
-    const int *ext_cols;
+    const int* col_ranges = col_owners->get_range();
+    const int* ext_cols;
     col_owners->get_ext_nodes(&ext_cols);
 
     int num_local_cols = col_ranges[mpi_rank + 1] - col_ranges[mpi_rank];
 
     // Set up the column indices that will be sent
     int ext_size = rowp[nrows] - rowp[num_local_rows];
-    int *ext_global_cols = new int[ext_size];
+    int* ext_global_cols = new int[ext_size];
 
-    const int *c = &cols[rowp[num_local_rows]];
+    const int* c = &cols[rowp[num_local_rows]];
     for (int i = 0; i < ext_size; i++, c++) {
       if (c[0] < num_local_cols) {
         ext_global_cols[i] = c[0] + col_ranges[mpi_rank];
@@ -239,8 +240,8 @@ class MatrixDistribute {
     delete[] ext_requests;
 
     // Set the pointer into the off-proc parts of the matrix
-    int *ptr_to_rows = new int[num_in_procs + 1];
-    int *index_to_rows = new int[num_in_procs];
+    int* ptr_to_rows = new int[num_in_procs + 1];
+    int* index_to_rows = new int[num_in_procs];
     ptr_to_rows[0] = 0;
     for (int i = 0; i < num_in_procs; i++) {
       index_to_rows[i] = ptr_to_rows[i];
@@ -253,11 +254,11 @@ class MatrixDistribute {
 
     // Now that everything is on the root processor, assemble it all together
     // into a CSR matrix data structure. Include the local and external rows
-    int *assembled_rowp = new int[nrows + 1];
+    int* assembled_rowp = new int[nrows + 1];
 
     // Allocate the maximum size of the rows
     int max_cols_size = rowp[nrows] + in_row_ptr[num_in_rows];
-    int *assembled_cols = new int[max_cols_size];
+    int* assembled_cols = new int[max_cols_size];
 
     // Merge the data to form a larger CSR matrix structure
     int nnz = 0;
@@ -336,7 +337,7 @@ class MatrixDistribute {
    * @return MatDistributeContext<T>* The matrix distribution context
    */
   template <typename T>
-  MatrixDistribute::MatDistributeContext<T> *create_context() {
+  MatrixDistribute::MatDistributeContext<T>* create_context() {
     return new MatrixDistribute::MatDistributeContext<T>(
         0, num_ext_procs, num_in_procs, num_in_entries);
   }
@@ -351,12 +352,12 @@ class MatrixDistribute {
    */
   template <typename T>
   void begin_assembly(std::shared_ptr<CSRMat<T>> mat,
-                      MatDistributeContext<T> *ctx) {
+                      MatDistributeContext<T>* ctx) {
     // Get the pointer to the external part of A
     int num_local_rows = row_owners->get_local_size();
 
-    const int *rowp;
-    T *A;
+    const int* rowp;
+    T* A;
     mat->get_data(nullptr, nullptr, nullptr, &rowp, nullptr, &A);
 
     // Send the data to the receiving processors
@@ -383,7 +384,7 @@ class MatrixDistribute {
    */
   template <typename T>
   void end_assembly(std::shared_ptr<CSRMat<T>> mat,
-                    MatDistributeContext<T> *ctx) {
+                    MatDistributeContext<T>* ctx) {
     MPI_Waitall(num_in_procs, ctx->in_requests, MPI_STATUSES_IGNORE);
     MPI_Waitall(num_ext_procs, ctx->ext_requests, MPI_STATUSES_IGNORE);
 
@@ -406,19 +407,19 @@ class MatrixDistribute {
   // Data destined for other processes
   // ---------------------------------
   int num_ext_procs;     // Number of processors that will be sent data
-  int *ext_procs;        // External proc numbers
-  int *ext_entry_count;  // Number of entries sent to each proc
+  int* ext_procs;        // External proc numbers
+  int* ext_entry_count;  // Number of entries sent to each proc
 
   // Data received from other processors
   // -----------------------------------
   int num_in_procs;     // Number of processors that give contributions
   int num_in_rows;      // Total number of rows from other procs
   int num_in_entries;   // Total number of entries from other procs
-  int *in_procs;        // Ranks of processors that send to this proc
-  int *in_entry_count;  // Number of entries sent to this proc
-  int *in_rows;         // Row indices received (converted to local row index)
-  int *in_row_ptr;      // Pointer into the columns object of each row received
-  int *in_cols;         // Global column indices
+  int* in_procs;        // Ranks of processors that send to this proc
+  int* in_entry_count;  // Number of entries sent to this proc
+  int* in_rows;         // Row indices received (converted to local row index)
+  int* in_row_ptr;      // Pointer into the columns object of each row received
+  int* in_cols;         // Global column indices
 };
 
 }  // namespace amigo

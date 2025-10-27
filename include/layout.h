@@ -19,33 +19,33 @@ class IndexLayout {
   int get_num_elements() const { return num_elements; }
 
   template <typename T, class ArrayType>
-  void get_values(int index, const Vector<T> &vec, ArrayType &values) const {
-    const int *indx = indices->get_array();
-    const T *vec_values = vec.get_array();
+  void get_values(int index, const Vector<T>& vec, ArrayType& values) const {
+    const int* indx = indices->get_array();
+    const T* vec_values = vec.get_array();
     for (int i = 0; i < nodes_per_elem; i++) {
       values[i] = vec_values[indx[nodes_per_elem * index + i]];
     }
   }
 
   template <typename T, class ArrayType>
-  void add_values(int index, const ArrayType &values, Vector<T> &vec) const {
-    const int *indx = indices->get_array();
-    T *vec_values = vec.get_array();
+  void add_values(int index, const ArrayType& values, Vector<T>& vec) const {
+    const int* indx = indices->get_array();
+    T* vec_values = vec.get_array();
     for (int i = 0; i < nodes_per_elem; i++) {
       vec_values[indx[nodes_per_elem * index + i]] += values[i];
     }
   }
 
   template <class ArrayType>
-  void get_indices(int index, ArrayType &idx) const {
-    const int *indx = indices->get_array();
+  void get_indices(int index, ArrayType& idx) const {
+    const int* indx = indices->get_array();
     for (int i = 0; i < nodes_per_elem; i++) {
       idx[i] = indx[nodes_per_elem * index + i];
     }
   }
 
-  void get_data(int *num_elements_, int *nodes_per_elem_,
-                const int **array_) const {
+  void get_data(int* num_elements_, int* nodes_per_elem_,
+                const int** array_) const {
     *num_elements_ = num_elements;
     *nodes_per_elem_ = nodes_per_elem;
     *array_ = indices->get_array();
@@ -62,13 +62,13 @@ class IndexLayout {
    *
    * @param elem_by_color Order of the elements by color
    */
-  void reorder(const int *elem_by_color) {
+  void reorder(const int* elem_by_color) {
     // Make a new vector that will contain the re-ordered elements
     std::shared_ptr<Vector<int>> new_indices =
         std::make_shared<Vector<int>>(indices->get_size());
 
-    int *new_idx = new_indices->get_array();
-    int *old_idx = indices->get_array();
+    int* new_idx = new_indices->get_array();
+    int* old_idx = indices->get_array();
 
     // Set the values
     for (int i = 0; i < num_elements; i++) {

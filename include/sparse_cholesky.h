@@ -7,49 +7,49 @@
 
 extern "C" {
 // Compute C := alpha*A*A**T + beta*C or C := alpha*A**T*A + beta*C
-extern void dsyrk_(const char *uplo, const char *trans, int *n, int *k,
-                   double *alpha, double *a, int *lda, double *beta, double *c,
-                   int *ldc);
+extern void dsyrk_(const char* uplo, const char* trans, int* n, int* k,
+                   double* alpha, double* a, int* lda, double* beta, double* c,
+                   int* ldc);
 
 // Compute C := alpha*op( A )*op( B ) + beta*C,
-extern void dgemm_(const char *ta, const char *tb, int *m, int *n, int *k,
-                   double *alpha, double *a, int *lda, double *b, int *ldb,
-                   double *beta, double *c, int *ldc);
+extern void dgemm_(const char* ta, const char* tb, int* m, int* n, int* k,
+                   double* alpha, double* a, int* lda, double* b, int* ldb,
+                   double* beta, double* c, int* ldc);
 
 // Solve A*x = b or A^T*x = b where A is in packed format
-extern void dtpsv_(const char *uplo, const char *transa, const char *diag,
-                   int *n, double *a, double *x, int *incx);
+extern void dtpsv_(const char* uplo, const char* transa, const char* diag,
+                   int* n, double* a, double* x, int* incx);
 
 // Factorization of packed storage matrices
-extern void dpptrf_(const char *c, int *n, double *ap, int *info);
+extern void dpptrf_(const char* c, int* n, double* ap, int* info);
 
 // Compute C := alpha*A*A**T + beta*C or C := alpha*A**T*A + beta*C
-extern void zsyrk_(const char *uplo, const char *trans, int *n, int *k,
-                   std::complex<double> *alpha, std::complex<double> *a,
-                   int *lda, std::complex<double> *beta,
-                   std::complex<double> *c, int *ldc);
+extern void zsyrk_(const char* uplo, const char* trans, int* n, int* k,
+                   std::complex<double>* alpha, std::complex<double>* a,
+                   int* lda, std::complex<double>* beta,
+                   std::complex<double>* c, int* ldc);
 
 // Compute C := alpha*op( A )*op( B ) + beta*C,
-extern void zgemm_(const char *ta, const char *tb, int *m, int *n, int *k,
-                   std::complex<double> *alpha, std::complex<double> *a,
-                   int *lda, std::complex<double> *b, int *ldb,
-                   std::complex<double> *beta, std::complex<double> *c,
-                   int *ldc);
+extern void zgemm_(const char* ta, const char* tb, int* m, int* n, int* k,
+                   std::complex<double>* alpha, std::complex<double>* a,
+                   int* lda, std::complex<double>* b, int* ldb,
+                   std::complex<double>* beta, std::complex<double>* c,
+                   int* ldc);
 
 // Solve A*x = b or A^T*x = b where A is in packed format
-extern void ztpsv_(const char *uplo, const char *transa, const char *diag,
-                   int *n, std::complex<double> *a, std::complex<double> *x,
-                   int *incx);
+extern void ztpsv_(const char* uplo, const char* transa, const char* diag,
+                   int* n, std::complex<double>* a, std::complex<double>* x,
+                   int* incx);
 
 // Factorization of packed storage matrices
-extern void zpptrf_(const char *c, int *n, std::complex<double> *ap, int *info);
+extern void zpptrf_(const char* c, int* n, std::complex<double>* ap, int* info);
 }
 
 namespace amigo {
 
 template <typename T>
-void blas_syrk(const char *uplo, const char *trans, int *n, int *k, T *alpha,
-               T *a, int *lda, T *beta, T *c, int *ldc) {
+void blas_syrk(const char* uplo, const char* trans, int* n, int* k, T* alpha,
+               T* a, int* lda, T* beta, T* c, int* ldc) {
   if constexpr (std::is_same<T, double>::value) {
     dsyrk_(uplo, trans, n, k, alpha, a, lda, beta, c, ldc);
   } else if constexpr (std::is_same<T, std::complex<double>>::value) {
@@ -62,8 +62,8 @@ void blas_syrk(const char *uplo, const char *trans, int *n, int *k, T *alpha,
 }
 
 template <typename T>
-void blas_gemm(const char *ta, const char *tb, int *m, int *n, int *k, T *alpha,
-               T *a, int *lda, T *b, int *ldb, T *beta, T *c, int *ldc) {
+void blas_gemm(const char* ta, const char* tb, int* m, int* n, int* k, T* alpha,
+               T* a, int* lda, T* b, int* ldb, T* beta, T* c, int* ldc) {
   if constexpr (std::is_same<T, double>::value) {
     dgemm_(ta, tb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
   } else if constexpr (std::is_same<T, std::complex<double>>::value) {
@@ -76,8 +76,8 @@ void blas_gemm(const char *ta, const char *tb, int *m, int *n, int *k, T *alpha,
 }
 
 template <typename T>
-void blas_tpsv(const char *uplo, const char *transa, const char *diag, int *n,
-               T *a, T *x, int *incx) {
+void blas_tpsv(const char* uplo, const char* transa, const char* diag, int* n,
+               T* a, T* x, int* incx) {
   if constexpr (std::is_same<T, double>::value) {
     dtpsv_(uplo, transa, diag, n, a, x, incx);
   } else if constexpr (std::is_same<T, std::complex<double>>::value) {
@@ -90,7 +90,7 @@ void blas_tpsv(const char *uplo, const char *transa, const char *diag, int *n,
 }
 
 template <typename T>
-void lapack_pptrf(const char *c, int *n, T *ap, int *info) {
+void lapack_pptrf(const char* c, int* n, T* ap, int* info) {
   if constexpr (std::is_same<T, double>::value) {
     dpptrf_(c, n, ap, info);
   } else if constexpr (std::is_same<T, std::complex<double>>::value) {
@@ -172,8 +172,8 @@ class SparseCholesky {
     }
 
     // Perform a symbolic analysis to determine the size of the factorization
-    int *parent = new int[size];  // Space for the etree
-    int *Lnz = new int[size];     // Nonzeros below the diagonal
+    int* parent = new int[size];  // Space for the etree
+    int* Lnz = new int[size];     // Nonzeros below the diagonal
     build_tree(mat_rowp, mat_cols, parent, Lnz);
 
     // Find the supernodes in the matrix
@@ -275,17 +275,17 @@ class SparseCholesky {
   int factor() {
     // Set values from the matrix
     const int *mat_rowp, *mat_cols;
-    T *mat_data;
+    T* mat_data;
     mat->get_data(&size, nullptr, nullptr, &mat_rowp, &mat_cols, &mat_data);
 
     set_values(mat_rowp, mat_cols, mat_data);
 
     int rflag = 0;
-    int *list = new int[num_snodes];  // List pointer
-    int *first = new int[num_snodes];
+    int* list = new int[num_snodes];  // List pointer
+    int* first = new int[num_snodes];
 
     // Temporary numeric workspace for stuff
-    T *work_temp = new T[work_size];
+    T* work_temp = new T[work_size];
 
     // Initialize the linked list and copy the diagonal values
     for (int j = 0; j < num_snodes; j++) {
@@ -295,14 +295,14 @@ class SparseCholesky {
     for (int j = 0; j < num_snodes; j++) {
       // Keep track of the size of the supernode on the diagonal
       int diag_size = snode_size[j];
-      T *diag = get_diag_pointer(j);
+      T* diag = get_diag_pointer(j);
 
       // First variable associated with this supernode
       int jfirst_var = snode_to_first_var[j];
 
       // Set the pointer to the current column indices
-      const int *jrows = &rows[colp[j]];
-      T *jptr = get_factor_pointer(j, diag_size);
+      const int* jrows = &rows[colp[j]];
+      T* jptr = get_factor_pointer(j, diag_size);
 
       // Go through the linked list of supernodes to find the super node columns
       // k with non-zero entries in row j
@@ -338,8 +338,8 @@ class SparseCholesky {
 
         // The number of rows in L21
         int nkrows = ip_next - ip_start;
-        const int *krows = &rows[ip_start];
-        T *kvals = get_factor_pointer(k, ksize, ip_start);
+        const int* krows = &rows[ip_start];
+        T* kvals = get_factor_pointer(k, ksize, ip_start);
 
         if (jfirst_var >= sqdef_index && kfirst_var < sqdef_index) {
           // We are factoring C and adding a contribution from L so we need to
@@ -403,21 +403,21 @@ class SparseCholesky {
   /*
     Solve the system of equations with the Cholesky factorization
   */
-  void solve(Vector<T> *x) {
-    T *xt = x->get_array();
+  void solve(Vector<T>* x) {
+    T* xt = x->get_array();
 
     // Solve L * x = x
     for (int j = 0; j < num_snodes; j++) {
       const int jsize = snode_size[j];
-      T *D = get_diag_pointer(j);
+      T* D = get_diag_pointer(j);
       int jvar = snode_to_first_var[j];
-      T *y = &xt[jvar];
+      T* y = &xt[jvar];
 
       if (jvar < sqdef_index) {
         solve_diag(jsize, D, 1, y);
 
         // Apply the update from the whole column
-        const T *L = get_factor_pointer(j, jsize);
+        const T* L = get_factor_pointer(j, jsize);
 
         int ip_end = colp[j + 1];
         for (int ip = colp[j]; ip < ip_end; ip++) {
@@ -436,7 +436,7 @@ class SparseCholesky {
         }
 
         // Apply the update from the whole column
-        const T *L = get_factor_pointer(j, jsize);
+        const T* L = get_factor_pointer(j, jsize);
 
         int ip_end = colp[j + 1];
         for (int ip = colp[j]; ip < ip_end; ip++) {
@@ -453,8 +453,8 @@ class SparseCholesky {
     // Solve L^{T} * x = x
     for (int j = num_snodes - 1; j >= 0; j--) {
       const int jsize = snode_size[j];
-      T *y = &xt[snode_to_first_var[j]];
-      T *L = get_factor_pointer(j, jsize);
+      T* y = &xt[snode_to_first_var[j]];
+      T* L = get_factor_pointer(j, jsize);
 
       int ip_end = colp[j + 1];
       for (int ip = colp[j]; ip < ip_end; ip++) {
@@ -464,7 +464,7 @@ class SparseCholesky {
         L += jsize;
       }
 
-      T *D = get_diag_pointer(j);
+      T* D = get_diag_pointer(j);
       solve_diag_transpose(jsize, D, 1, y);
     }
   }
@@ -499,7 +499,7 @@ class SparseCholesky {
               int jj = j - jfirst;
               int ii = i - jfirst;
 
-              T *D = get_diag_pointer(sj);
+              T* D = get_diag_pointer(sj);
               D[get_diag_index(ii, jj)] -= Avals[ip];
             } else {
               int jj = j - jfirst;
@@ -507,7 +507,7 @@ class SparseCholesky {
               // Look for the row
               for (int kp = colp[sj]; kp < colp[sj + 1]; kp++) {
                 if (rows[kp] == i) {
-                  T *L = get_factor_pointer(sj, jsize, kp);
+                  T* L = get_factor_pointer(sj, jsize, kp);
                   L[jj] -= Avals[ip];
 
                   break;
@@ -521,7 +521,7 @@ class SparseCholesky {
               int jj = j - jfirst;
               int ii = i - jfirst;
 
-              T *D = get_diag_pointer(sj);
+              T* D = get_diag_pointer(sj);
               D[get_diag_index(ii, jj)] += Avals[ip];
             } else {
               int jj = j - jfirst;
@@ -529,7 +529,7 @@ class SparseCholesky {
               // Look for the row
               for (int kp = colp[sj]; kp < colp[sj + 1]; kp++) {
                 if (rows[kp] == i) {
-                  T *L = get_factor_pointer(sj, jsize, kp);
+                  T* L = get_factor_pointer(sj, jsize, kp);
                   L[jj] += Avals[ip];
 
                   break;
@@ -553,7 +553,7 @@ class SparseCholesky {
   */
   void build_tree(const int Acolp[], const int Arows[], int parent[],
                   int Lnz[]) {
-    int *flag = new int[size];
+    int* flag = new int[size];
 
     for (int k = 0; k < size; k++) {
       parent[k] = -1;
@@ -638,7 +638,7 @@ class SparseCholesky {
   */
   void build_nonzero_pattern(const int Acolp[], const int Arows[],
                              const int parent[], int Lnz[]) {
-    int *flag = new int[size];
+    int* flag = new int[size];
 
     for (int k = 0; k < size; k++) {
       flag[k] = k;
@@ -679,8 +679,8 @@ class SparseCholesky {
     D <- D - L * L^{T}
   */
   void sub_diag_update(const int lsize, const int nlrows, const int lfirst_var,
-                       const int *lrows, T *L, const int diag_size, T *diag,
-                       T *work) {
+                       const int* lrows, T* L, const int diag_size, T* diag,
+                       T* work) {
     // Compute L * L^{T}
     int n = nlrows;
     int k = lsize;
@@ -705,8 +705,8 @@ class SparseCholesky {
     D <- D + L * L^{T}
   */
   void add_diag_update(const int lsize, const int nlrows, const int lfirst_var,
-                       const int *lrows, T *L, const int diag_size, T *diag,
-                       T *work) {
+                       const int* lrows, T* L, const int diag_size, T* diag,
+                       T* work) {
     // Compute L * L^{T}
     int n = nlrows;
     int k = lsize;
@@ -746,8 +746,8 @@ class SparseCholesky {
     @param L31 The numerical values of L32 in row-major order
     @param Tmp The temporary vector
   */
-  void compute_work_update(int lwidth, int n21rows, T *L21, int n31rows, T *L31,
-                           T *Tmp) {
+  void compute_work_update(int lwidth, int n21rows, T* L21, int n31rows, T* L31,
+                           T* Tmp) {
     // These matrices are stored in row-major order. To compute the result we
     // use LAPACK with the computation: Tmp^{T} = L21 * L31^{T}
     // dimension of Tmp^{T} is n21rows X n32rows
@@ -775,8 +775,8 @@ class SparseCholesky {
     @param B The B values of the column
   */
   void sub_column_update(const int lwidth, const int nlcols,
-                         const int lfirst_var, const int *lrows, int nrows,
-                         const int *arows, const T *A, const int *brows, T *B) {
+                         const int lfirst_var, const int* lrows, int nrows,
+                         const int* arows, const T* A, const int* brows, T* B) {
     for (int i = 0, bi = 0; i < nrows; i++) {
       while (brows[bi] < arows[i]) {
         bi++;
@@ -808,8 +808,8 @@ class SparseCholesky {
     @param B The B values of the column
   */
   void add_column_update(const int lwidth, const int nlcols,
-                         const int lfirst_var, const int *lrows, int nrows,
-                         const int *arows, const T *A, const int *brows, T *B) {
+                         const int lfirst_var, const int* lrows, int nrows,
+                         const int* arows, const T* A, const int* brows, T* B) {
     for (int i = 0, bi = 0; i < nrows; i++) {
       while (brows[bi] < arows[i]) {
         bi++;
@@ -827,7 +827,7 @@ class SparseCholesky {
   /*
     Perform the dense Cholesky factorization of the diagonal components
   */
-  int factor_diag(const int diag_size, T *D) {
+  int factor_diag(const int diag_size, T* D) {
     int n = diag_size, info;
     lapack_pptrf<T>("U", &n, D, &info);
     return info;
@@ -836,7 +836,7 @@ class SparseCholesky {
   /*
     Solve L * y = x and output x = y
   */
-  void solve_diag(int diag_size, T *L, int nrhs, T *x) {
+  void solve_diag(int diag_size, T* L, int nrhs, T* x) {
     int incr = 1;
     for (int k = 0; k < nrhs; k++) {
       blas_tpsv<T>("U", "T", "N", &diag_size, L, x, &incr);
@@ -847,7 +847,7 @@ class SparseCholesky {
   /*
     Solve L^{T} * y = x and output x = y
   */
-  void solve_diag_transpose(int diag_size, T *L, int nrhs, T *x) {
+  void solve_diag_transpose(int diag_size, T* L, int nrhs, T* x) {
     int incr = 1;
     for (int k = 0; k < nrhs; k++) {
       blas_tpsv<T>("U", "N", "N", &diag_size, L, x, &incr);
@@ -865,11 +865,11 @@ class SparseCholesky {
   }
 
   // Given the supernode index, return the pointer to the diagonal matrix
-  inline T *get_diag_pointer(const int i) { return &data[data_ptr[i]]; }
+  inline T* get_diag_pointer(const int i) { return &data[data_ptr[i]]; }
 
   // Given the supernode index, the supernode size and the index into the rows
   // data, return the pointer to the lower factor
-  inline T *get_factor_pointer(const int i, const int node_size,
+  inline T* get_factor_pointer(const int i, const int node_size,
                                const int index) {
     const int dsize = node_size * (node_size + 1) / 2;
     const int offset = index - colp[i];
@@ -878,7 +878,7 @@ class SparseCholesky {
 
   // Given the supernode index, the supernode size and the index into the rows
   // data, return the pointer to the lower factor
-  inline T *get_factor_pointer(const int i, const int node_size) {
+  inline T* get_factor_pointer(const int i, const int node_size) {
     const int dsize = node_size * (node_size + 1) / 2;
     return &data[data_ptr[i] + dsize];
   }
@@ -895,37 +895,37 @@ class SparseCholesky {
   // The row indices for the strict lower-diagonal entries of each super node.
   // This does not contain the row indices for the supernode itself. Only
   // entries below the supernode.
-  int *rows;
+  int* rows;
 
   // Pointer into the row indices for the strict lower block of the
   // matrix. This does not include the row indices for the supernode.
-  int *colp;
+  int* colp;
 
   // Number of supernodes
   int num_snodes;
 
   // Supernode sizes - How many consecutive variables belong to this
   // supernode? sum_{i=1}^{num_snodes} snode_size = size
-  int *snode_size;
+  int* snode_size;
 
   // Given the variable index, what is the corresponding supernode?
-  int *var_to_snode;
+  int* var_to_snode;
 
   // Given the supernode, what is the first variable in the node?
-  int *snode_to_first_var;
+  int* snode_to_first_var;
 
   // Given the supernode index, a pointer into the supernode data
   // This is computed as the following for k = 0 ... num_snodes
   // data_ptr[k] = sum_{i = 0}^{k} snode_size[i] * ((snode_size[i] + 1)/2 +
   // colp[i + 1] - colp[i])
-  int *data_ptr;
+  int* data_ptr;
 
   // Work_size = max(max_{i} (snode_size[i] * (colp[i+1] - colp[i]))
   //                 max_{i} snode_size[i]**2)
   int work_size;
 
   // The numerical data for all entries size = data_ptr[num_snodes]
-  T *data;
+  T* data;
 };
 
 }  // namespace amigo
