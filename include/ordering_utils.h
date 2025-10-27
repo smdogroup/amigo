@@ -642,6 +642,43 @@ class OrderingUtils {
   }
 
   /**
+   * Sort the rows of the CSR matrix and make sure that the rows are unique
+   *
+   * The operation is performed in place
+   *
+   * @param nrows Number of rows in the matrix
+   * @param rowp Pointer into the rows (modified during the call)
+   * @param cols Column indices for each row (sorted on exit)
+   */
+  static void sort_and_uniquify_csr(int nrows, int rowp[], int cols[]) {
+    // Sort and uniquify the csr structure
+    int start = rowp[0];
+    for (int i = 0; i < nrows; i++) {
+      int size = rowp[i + 1] - start;
+      int* array = &cols[start];
+      std::sort(array, array + size);
+
+      // Uniquify an array with duplicates
+      int new_size = 0;
+      if (size > 0) {
+        // Copy the first entry
+        cols[rowp[i]] = array[0];
+        new_size++;
+
+        for (int read_idx = 1; read_idx < size; read_idx++) {
+          if (array[read_idx] != cols[rowp[i] + new_size - 1]) {
+            cols[rowp[i] + new_size] = array[read_idx];
+            new_size++;
+          }
+        }
+      }
+
+      start = rowp[i + 1];
+      rowp[i + 1] = rowp[i] + new_size;
+    }
+  }
+
+  /**
    * Create a CSR matrix structure from the input/output relationships
    *
    * @param nrows Number of outputs
@@ -692,34 +729,117 @@ class OrderingUtils {
     }
     rowp[0] = 0;
 
-    // Sort and uniquify the csr structure
-    int start = rowp[0];
-    for (int i = 0; i < nrows; i++) {
-      int size = rowp[i + 1] - start;
-      int* array = &cols[start];
-      std::sort(array, array + size);
-
-      // Uniquify an array with duplicates
-      int new_size = 0;
-      if (size > 0) {
-        // Copy the first entry
-        cols[rowp[i]] = array[0];
-        new_size++;
-
-        for (int read_idx = 1; read_idx < size; read_idx++) {
-          if (array[read_idx] != cols[rowp[i] + new_size - 1]) {
-            cols[rowp[i] + new_size] = array[read_idx];
-            new_size++;
-          }
-        }
-      }
-
-      start = rowp[i + 1];
-      rowp[i + 1] = rowp[i] + new_size;
-    }
+    sort_and_uniquify_csr(nrows, rowp, cols);
 
     *rowp_ = rowp;
     *cols_ = cols;
+  }
+
+  /**
+   * Add the constraint CSR pattern to the existing non-zero pattern for the
+   * matrix
+   *
+   * @tparam Functor Class type for the functor
+   * @param nrows Number of rows in the non-zero pattern
+   * @param ncols Number of columns in the non-zero pattern
+   * @param rowp Input pointer into the rows for this matrix
+   * @param cols Input column indices
+   * @param num_comps Number of components that contribute constraints
+   * @param get_component_csr Get the component compressed sparse matrix
+   * @param _new_rowp Output pointer into the columns array
+   * @param _new_cols Array of column indices
+   */
+  template <class Functor>
+  static void add_constraint_csr_pattern(int nrows, int ncols, const int rowp[],
+                                         const int cols[], int num_comps,
+                                         const Functor& get_component_csr,
+                                         int** _new_rowp, int** _new_cols) {
+    int* new_rowp = new int[nrows + 1];
+
+    new_rowp[nrows] = 0;
+    for (int i = 0; i < nrows; i++) {
+      new_rowp[i] = rowp[i + 1] - rowp[i];
+    }
+
+    for (int comp = 0; comp < num_comps; comp++) {
+      int local_nrows, local_ncols;
+      const int *local_rows, *local_columns;
+      const int *local_rowp, *local_cols;
+      get_component_csr(comp, &local_nrows, &local_ncols, &local_rows,
+                        &local_columns, &local_rowp, &local_cols);
+
+      // Add the row
+      for (int i = 0; i < local_nrows; i++) {
+        int row = local_rows[i];
+        new_rowp[row] += local_rowp[i + 1] - local_rowp[i];
+      }
+
+      // Add the result from the transpose
+      for (int i = 0; i < local_nrows; i++) {
+        for (int jp = local_rowp[i]; jp < local_rowp[i + 1]; jp++) {
+          int j = local_cols[jp];
+          int col = local_columns[j];
+          new_rowp[col]++;
+        }
+      }
+    }
+
+    // Now, count up enough space for everything
+    int count = 0;
+    for (int i = 0; i < nrows; i++) {
+      int temp = new_rowp[i];
+      new_rowp[i] = count;
+      count += temp;
+    }
+    new_rowp[nrows] = count;
+
+    // Allocate enough space to store everything
+    int* new_cols = new int[count];
+
+    // Copy over the original non-zero pattern
+    for (int i = 0; i < nrows; i++) {
+      for (int jp = rowp[i]; jp < rowp[i + 1]; jp++) {
+        new_cols[new_rowp[i]] = cols[jp];
+        new_rowp[i]++;
+      }
+    }
+
+    // Add the non-zeros from the new pattern
+    for (int comp = 0; comp < num_comps; comp++) {
+      int local_nrows, local_ncols;
+      const int *local_rows, *local_columns;
+      const int *local_rowp, *local_cols;
+      get_component_csr(comp, &local_nrows, &local_ncols, &local_rows,
+                        &local_columns, &local_rowp, &local_cols);
+
+      // Add the new rows
+      for (int i = 0; i < local_nrows; i++) {
+        int row = local_rows[i];
+        for (int jp = local_rowp[i]; jp < local_rowp[i + 1]; jp++) {
+          int j = local_cols[jp];
+          int col = local_columns[j];
+
+          // Add the contribution from the Jacobian
+          new_cols[new_rowp[row]] = col;
+          new_rowp[row]++;
+
+          // Add the contribution from the transpose Jacobian
+          new_cols[new_rowp[col]] = row;
+          new_rowp[col]++;
+        }
+      }
+    }
+
+    // Reset the new_rowp pointer
+    for (int i = nrows; i > 0; i--) {
+      new_rowp[i] = new_rowp[i - 1];
+    }
+    new_rowp[0] = 0;
+
+    sort_and_uniquify_csr(nrows, new_rowp, new_cols);
+
+    *_new_rowp = new_rowp;
+    *_new_cols = new_cols;
   }
 
   /**
