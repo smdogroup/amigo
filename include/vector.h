@@ -166,6 +166,12 @@ class Vector {
     }
   }
 
+  void copy(const T* src) {
+    if (array) {
+      std::copy(src, src + size, array);
+    }
+  }
+
   void copy(const Vector<T>& src) {
     if (array) {
       std::copy(src.array, src.array + size, array);

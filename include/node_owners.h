@@ -10,8 +10,6 @@ namespace amigo {
  * the local indices to the global indices
  *
  * The global node numbers on each processor are mapped to local indices.
- *
- *
  */
 class NodeOwners {
  public:

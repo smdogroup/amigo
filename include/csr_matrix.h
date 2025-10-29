@@ -41,8 +41,8 @@ class CSRMat {
    * @brief Construct a new CSRMat object
    *
    * Build a general CSR-based data structure directly from the non-zero
-   * pattern. Since we assume that the rows are sorted for assembly, we sort
-   * them here.
+   * pattern. Since we assume that the rows are sorted during the assembly
+   * process, we do not sort them here.
    *
    * @param nrows Number of rows
    * @param ncols Number of columns
@@ -56,8 +56,8 @@ class CSRMat {
   template <class ArrayType>
   static std::shared_ptr<CSRMat<T>> create_from_csr_data(
       int nrows, int ncols, int nnz, const ArrayType rowp_,
-      const ArrayType cols_, std::shared_ptr<NodeOwners> row_owners,
-      std::shared_ptr<NodeOwners> col_owners, int sqdef_index = -1) {
+      const ArrayType cols_, std::shared_ptr<NodeOwners> row_owners = nullptr,
+      std::shared_ptr<NodeOwners> col_owners = nullptr, int sqdef_index = -1) {
     int* rowp = new int[nrows + 1];
     int* cols = new int[nnz];
     std::copy(rowp_, rowp_ + (nrows + 1), rowp);
@@ -91,8 +91,8 @@ class CSRMat {
   template <class Functor>
   static std::shared_ptr<CSRMat<T>> create_from_element_conn(
       int nrows, int ncols, int nelems, const Functor& element_nodes,
-      std::shared_ptr<NodeOwners> row_owners,
-      std::shared_ptr<NodeOwners> col_owners, int sqdef_index = -1) {
+      std::shared_ptr<NodeOwners> row_owners = nullptr,
+      std::shared_ptr<NodeOwners> col_owners = nullptr, int sqdef_index = -1) {
     // Create the CSR structure
     bool include_diagonal = true;
     bool sort_columns = true;
@@ -118,8 +118,8 @@ class CSRMat {
   template <class Functor>
   static std::shared_ptr<CSRMat<T>> create_from_output_data(
       int nrows, int ncols, int nelems, const Functor& elements,
-      std::shared_ptr<NodeOwners> row_owners,
-      std::shared_ptr<NodeOwners> col_owners) {
+      std::shared_ptr<NodeOwners> row_owners = nullptr,
+      std::shared_ptr<NodeOwners> col_owners = nullptr) {
     int *rowp, *cols;
     OrderingUtils::create_csr_from_output_data(nrows, ncols, nelems, elements,
                                                &rowp, &cols);
@@ -561,6 +561,38 @@ class CSRMat {
   }
 
   /**
+   * @brief Get the data from the CSR object
+   *
+   * @param nrows Number of rows
+   * @param ncols Number of columns
+   * @param nnz Number of nonzero entries
+   * @param rowp Pointer into each row
+   * @param cols Column indices
+   * @param data Numerical entries
+   */
+  void get_data(int* nrows_, int* ncols_, int* nnz_, const int* rowp_[],
+                const int* cols_[], const T* data_[]) const {
+    if (nrows_) {
+      *nrows_ = nrows;
+    }
+    if (ncols_) {
+      *ncols_ = ncols;
+    }
+    if (nnz_) {
+      *nnz_ = nnz;
+    }
+    if (rowp_) {
+      *rowp_ = rowp;
+    }
+    if (cols_) {
+      *cols_ = cols;
+    }
+    if (data_) {
+      *data_ = data;
+    }
+  }
+
+  /**
    * @brief Get the index of the first sqdef element
    *
    */
@@ -581,8 +613,8 @@ class CSRMat {
   std::shared_ptr<NodeOwners> get_column_owners() { return col_owners; }
 
   CSRMat(int nrows, int ncols, int nnz, int* rowp, int* cols,
-         std::shared_ptr<NodeOwners> row_owners,
-         std::shared_ptr<NodeOwners> col_owners, int sqdef_index = -1)
+         std::shared_ptr<NodeOwners> row_owners = nullptr,
+         std::shared_ptr<NodeOwners> col_owners = nullptr, int sqdef_index = -1)
       : nrows(nrows),
         ncols(ncols),
         nnz(nnz),
@@ -593,17 +625,23 @@ class CSRMat {
         sqdef_index(sqdef_index) {
     diag = new int[nrows];
 
-    // Set the diagonal based on the
-    int rank;
-    MPI_Comm_rank(row_owners->get_mpi_comm(), &rank);
-    const int* row_ranges = row_owners->get_range();
-    int nrows_local = row_owners->get_local_size();
+    int nrows_local = nrows;
+    int offset = 0;
+
+    if (row_owners) {
+      // Set the diagonal
+      int rank;
+      MPI_Comm_rank(row_owners->get_mpi_comm(), &rank);
+      const int* row_ranges = row_owners->get_range();
+      nrows_local = row_owners->get_local_size();
+      offset = row_ranges[rank];
+    }
 
     for (int i = 0; i < nrows_local; i++) {
       int size = rowp[i + 1] - rowp[i];
       int* start = &cols[rowp[i]];
       int* end = start + size;
-      int row = row_ranges[rank] + i;
+      int row = offset + i;
 
       // Set the diagonal elements of the matrix
       auto* it = std::lower_bound(start, end, row);

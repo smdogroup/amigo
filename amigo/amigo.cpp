@@ -11,11 +11,33 @@ typedef SSIZE_T ssize_t;
 #include "alias_tracker.h"
 #include "amigo_include_paths.h"
 #include "csr_matrix.h"
+#include "external_component.h"
 #include "optimization_problem.h"
 #include "optimizer.h"
 #include "sparse_cholesky.h"
 
 namespace py = pybind11;
+
+// template <typename T>
+// class ExternalCallback : public ExternalComponentEvaluation<T> {
+//  public:
+//   ExternalCallback(py::array_t<int> rows, py::array_t<int> cols);
+
+//   // Set the callback
+//   void set_callback(py::object cb) { callback = std::move(cb); }
+
+//   void evaluate_constraints(const std::shared_ptr<Vector<T>> x,
+//                             std::shared_ptr<Vector<T>> constraints,
+//                             std::shared_ptr<CSRMat<T>> jacobian) {
+//     if (!callback.is_none()) {
+//       py::gil_scoped_acquire gil;
+//       callback(x, constraints, jacobian);
+//     }
+//   }
+
+//  private:
+//   py::object callback;
+// };
 
 // Templated wrapper function
 template <typename T>
