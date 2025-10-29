@@ -18,26 +18,58 @@ typedef SSIZE_T ssize_t;
 
 namespace py = pybind11;
 
-// template <typename T>
-// class ExternalCallback : public ExternalComponentEvaluation<T> {
-//  public:
-//   ExternalCallback(py::array_t<int> rows, py::array_t<int> cols);
+template <typename T>
+class ExternalCallback : public amigo::ExternalComponentEvaluation<T>,
+                         std::enable_shared_from_this<ExternalCallback<T>> {
+ public:
+  ExternalCallback(int ncon, const int cons[], int nvars, const int vars[],
+                   const int rowp[], const int cols[], py::object cb)
+      : amigo::ExternalComponentEvaluation<T>(ncon, cons, nvars, vars, rowp,
+                                              cols) {
+    // Set the callback
+    callback = std::move(cb);
+  }
 
-//   // Set the callback
-//   void set_callback(py::object cb) { callback = std::move(cb); }
+  void evaluate(const std::shared_ptr<amigo::Vector<T>> x) {
+    if (!callback.is_none()) {
+      py::gil_scoped_acquire gil;
 
-//   void evaluate_constraints(const std::shared_ptr<Vector<T>> x,
-//                             std::shared_ptr<Vector<T>> constraints,
-//                             std::shared_ptr<CSRMat<T>> jacobian) {
-//     if (!callback.is_none()) {
-//       py::gil_scoped_acquire gil;
-//       callback(x, constraints, jacobian);
-//     }
-//   }
+      py::object base = py::cast(this->shared_from_this());
 
-//  private:
-//   py::object callback;
-// };
+      const T* x_array = x->get_array();
+      int x_size = x->get_size();
+      py::array x_np(py::buffer_info(
+                         x_array, sizeof(T), py::format_descriptor<T>::format(),
+                         1, {x_size}, {static_cast<ssize_t>(sizeof(T))}),
+                     base);
+
+      T* con_array = this->constraints->get_array();
+      int con_size = this->constraints->get_size();
+
+      py::array con_np(
+          py::buffer_info(con_array, sizeof(T),
+                          py::format_descriptor<T>::format(), 1, {con_size},
+                          {static_cast<ssize_t>(sizeof(T))}),
+          base);
+
+      int nnz;
+      T* data_array;
+      this->jacobian->get_data(nullptr, nullptr, &nnz, nullptr, nullptr,
+                               &data_array);
+
+      py::array data_np(
+          py::buffer_info(data_array, sizeof(T),
+                          py::format_descriptor<T>::format(), 1, {nnz},
+                          {static_cast<ssize_t>(sizeof(T))}),
+          base);
+
+      callback(x_np, con_np, data_np);
+    }
+  }
+
+ private:
+  py::object callback;
+};
 
 // Templated wrapper function
 template <typename T>

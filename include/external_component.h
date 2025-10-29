@@ -28,6 +28,7 @@ class ExternalComponentEvaluation {
     int nnz = cols[ncon];
     jacobian = CSRMat<T>::create_from_csr_data(ncon, nvars, nnz, rowp, cols);
   }
+  virtual ~ExternalComponentEvaluation() {}
 
   int get_num_constraints() const { return ncon; }
   int get_num_variables() const { return nvars; }
