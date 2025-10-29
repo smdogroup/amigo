@@ -43,7 +43,7 @@ class ExternalComponentEvaluation {
   }
   const std::shared_ptr<CSRMat<T>> get_jacobian() const { return jacobian; }
 
-  virtual void evaluate(const std::shared_ptr<Vector<T>> x) = 0;
+  virtual void evaluate(const Vector<T>& x) = 0;
 
  protected:
   int ncon, nvars;
@@ -65,6 +65,16 @@ class ExternalComponent : public ComponentGroupBase<T> {
       : extrn(extrn) {
     const std::shared_ptr<CSRMat<T>> jacobian = extrn->get_jacobian();
     jacobian_transpose = jacobian->transpose();
+  }
+
+  /**
+   * @brief This is not a clone-able derived class
+   */
+  std::shared_ptr<ComponentGroupBase<T>> clone(
+      int num_elements, std::shared_ptr<Vector<int>> data_idx,
+      std::shared_ptr<Vector<int>> layout_idx,
+      std::shared_ptr<Vector<int>> output_idx) const {
+    return nullptr;
   }
 
   /**
@@ -173,9 +183,13 @@ class ExternalComponent : public ComponentGroupBase<T> {
                    const NodeOwners& owners, CSRMat<T>& mat) const {
     // Add the contributions to the Hessian matrix...
     const std::shared_ptr<CSRMat<T>> jacobian = extrn->get_jacobian();
+    const Vector<int>& con_indices = *extrn->get_constraint_indices();
+    const Vector<int>& var_indices = *extrn->get_variable_indices();
 
-    mat->add_submatrix(con_indices, var_indices, jacobian);
-    mat->add_submatrix(var_indices, con_indices, jacobian_transpose);
+    mat.add_submatrix(con_indices.get_array(), var_indices.get_array(),
+                      jacobian);
+    mat.add_submatrix(var_indices.get_array(), con_indices.get_array(),
+                      jacobian_transpose);
   }
 
   /**
@@ -194,9 +208,9 @@ class ExternalComponent : public ComponentGroupBase<T> {
                                const int* cols[]) const {
     const std::shared_ptr<CSRMat<T>> jacobian = extrn->get_jacobian();
     const std::shared_ptr<Vector<int>> con_indices =
-        *extrn->get_constraint_indices();
+        extrn->get_constraint_indices();
     const std::shared_ptr<Vector<int>> var_indices =
-        *extrn->get_variable_indices();
+        extrn->get_variable_indices();
 
     if (rows) {
       *rows = con_indices->get_array();
@@ -204,7 +218,7 @@ class ExternalComponent : public ComponentGroupBase<T> {
     if (columns) {
       *columns = var_indices->get_array();
     }
-    jacobian->get_data(nrows, ncols, rowp, cols);
+    jacobian->get_data(nrows, ncols, nullptr, rowp, cols, nullptr);
   }
 
  private:

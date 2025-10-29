@@ -374,8 +374,7 @@ class CSRMat {
    * @param columns Column indices for each column in mat
    * @param mat The submatrix that will be added
    */
-  void add_submatrix(const std::shared_ptr<Vector<int>> rows,
-                     const std::shared_ptr<Vector<int>> columns,
+  void add_submatrix(const int rows[], const int columns[],
                      const std::shared_ptr<CSRMat<T>> mat) {
     // Find the maximum row size
     int max_size = 0;
@@ -385,10 +384,6 @@ class CSRMat {
         max_size = size;
       }
     }
-
-    // Extract the arrays
-    const int* rows_array = rows->get_array();
-    const int* columns_array = columns->get_array();
 
     // Allocate space to store the indices
     int* col_indices = new int[max_size];
@@ -402,10 +397,10 @@ class CSRMat {
 
       for (int index = 0; jp < jp_end; jp++, index++) {
         int j = mat->cols[jp];
-        col_indices[index] = columns_array[j];
+        col_indices[index] = columns[j];
       }
 
-      add_row(rows_array[i], row_size, col_indices, row_data);
+      add_row(rows[i], row_size, col_indices, row_data);
     }
 
     delete[] col_indices;

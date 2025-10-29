@@ -19,33 +19,39 @@ typedef SSIZE_T ssize_t;
 namespace py = pybind11;
 
 template <typename T>
-class ExternalCallback : public amigo::ExternalComponentEvaluation<T>,
-                         std::enable_shared_from_this<ExternalCallback<T>> {
+class PyExternalCallback : public amigo::ExternalComponentEvaluation<T>,
+                           std::enable_shared_from_this<PyExternalCallback<T>> {
  public:
-  ExternalCallback(int ncon, const int cons[], int nvars, const int vars[],
-                   const int rowp[], const int cols[], py::object cb)
+  PyExternalCallback(int ncon, const int cons[], int nvars, const int vars[],
+                     const int rowp[], const int cols[], py::object cb)
       : amigo::ExternalComponentEvaluation<T>(ncon, cons, nvars, vars, rowp,
                                               cols) {
     // Set the callback
     callback = std::move(cb);
   }
 
-  void evaluate(const std::shared_ptr<amigo::Vector<T>> x) {
+  void evaluate(const amigo::Vector<T>& x) {
     if (!callback.is_none()) {
       py::gil_scoped_acquire gil;
 
       py::object base = py::cast(this->shared_from_this());
 
-      const T* x_array = x->get_array();
-      int x_size = x->get_size();
-      py::array x_np(py::buffer_info(
-                         x_array, sizeof(T), py::format_descriptor<T>::format(),
-                         1, {x_size}, {static_cast<ssize_t>(sizeof(T))}),
-                     base);
+      const T* x_array = x.get_array();
+      int x_size = x.get_size();
+      // bool readonly = true;
+      // py::array x_np(
+      //     py::buffer_info(x_array, sizeof(T),
+      //                     py::format_descriptor<T>::format(), 1, {x_size},
+      //                     {static_cast<ssize_t>(sizeof(T))}, readonly),
+      //     base);
+      py::array_t<const T> x_np({x_size},              // shape
+                                {ssize_t(sizeof(T))},  // strides
+                                x_array,               // const T*
+                                base                   // owner
+      );
 
       T* con_array = this->constraints->get_array();
       int con_size = this->constraints->get_size();
-
       py::array con_np(
           py::buffer_info(con_array, sizeof(T),
                           py::format_descriptor<T>::format(), 1, {con_size},
@@ -316,6 +322,20 @@ PYBIND11_MODULE(amigo, mod) {
   py::class_<amigo::ComponentGroupBase<double>,
              std::shared_ptr<amigo::ComponentGroupBase<double>>>(
       mod, "ComponentGroupBase");
+
+  py::class_<amigo::ExternalComponent<double>,
+             amigo::ComponentGroupBase<double>,
+             std::shared_ptr<amigo::ExternalComponent<double>>>(
+      mod, "ExternalComponent")
+      .def(py::init([](py::array_t<int> cons, py::array_t<int> vars,
+                       py::array_t<int> rowp, py::array_t<int> cols,
+                       py::object cb) {
+        auto extrn = std::make_shared<PyExternalCallback<double>>(
+            cons.size(), cons.data(), vars.size(), vars.data(), rowp.data(),
+            cols.data(), cb);
+
+        return std::make_shared<amigo::ExternalComponent<double>>(extrn);
+      }));
 
   py::class_<amigo::NodeOwners, std::shared_ptr<amigo::NodeOwners>>(
       mod, "NodeOwners")
