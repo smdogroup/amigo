@@ -17,6 +17,9 @@ class ComponentGroupBase {
       std::shared_ptr<Vector<int>> layout_idx,
       std::shared_ptr<Vector<int>> output_idx) const = 0;
 
+  // Update any externally stored values
+  virtual void update(const Vector<T>& x) {}
+
   // Group analysis functions
   virtual T lagrangian(const Vector<T>& data, const Vector<T>& x) const {
     return T(0.0);

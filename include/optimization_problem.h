@@ -652,6 +652,21 @@ class OptimizationProblem {
   }
 
   /**
+   * @brief Update the design variables - needed for external components that
+   * evaluate their terms independently
+   *
+   * @param x The design variable values
+   */
+  void update(std::shared_ptr<Vector<T>> x) {
+    var_dist.begin_forward(x, var_ctx);
+    var_dist.end_forward(x, var_ctx);
+
+    for (size_t i = 0; i < components.size(); i++) {
+      components[i]->update(*data_vec, *x);
+    }
+  }
+
+  /**
    * @brief Compute the value of the Lagrangian
    *
    * @param x The design variable values

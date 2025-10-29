@@ -290,6 +290,128 @@ class CSRMat {
   }
 
   /**
+   * @brief Compute the transpose of the given CSR matrix - this includes both
+   * symbolic and numeric values
+   *
+   * @return std::shared_ptr<CSRMat<T>>
+   */
+  std::shared_ptr<CSRMat<T>> transpose() const {
+    int new_nrows = ncols;
+    int new_ncols = nrows;
+    int new_nnz = nnz;
+    int* new_rowp = new int[new_nrows + 1];
+    int* new_cols = new int[nnz];
+    T* new_data = new T[nnz];
+
+    std::fill(new_rowp, new_rowp + new_nrows + 1, 0);
+
+    // Count up the number of times the entries appear
+    for (int i = 0; i < nrows; i++) {
+      for (int jp = rowp[i]; jp < rowp[i + 1]; jp++) {
+        new_rowp[cols[jp]]++;
+      }
+    }
+
+    // Set the offsets into the new rows
+    int count = 0;
+    for (int i = 0; i < new_nrows; i++) {
+      int temp = new_rowp[i];
+      new_rowp[i] = count;
+      count += temp;
+    }
+    new_rowp[new_nrows] = count;
+
+    // Note that the column indices in new_cols will be sorted
+    for (int i = 0; i < nrows; i++) {
+      for (int jp = rowp[i]; jp < rowp[i + 1]; jp++) {
+        int j = cols[jp];
+
+        new_cols[new_rowp[j]] = i;
+        new_data[new_rowp[j]] = data[jp];
+        new_rowp[j]++;
+      }
+    }
+
+    // Set the offsets into the new rows
+    count = 0;
+    for (int i = 0; i < new_nrows; i++) {
+      int temp = new_rowp[i];
+      new_rowp[i] = count;
+      count += temp;
+    }
+    new_rowp[new_nrows] = count;
+
+    return std::make_shared<CSRMat<T>>(new_nrows, new_ncols, new_nnz, new_rowp,
+                                       new_cols, row_owners, col_owners,
+                                       sqdef_index);
+  }
+
+  /**
+   * @brief Copy the numerical values from this matrix to the input matrix
+   *
+   * @param mat The transpose matrix (often created with a call to transpose())
+   */
+  void copy_transpose(std::shared_ptr<CSRMat<T>> mat) const {
+    int* temp_rowp = new int[mat->nrows];
+    std::copy(mat->rowp, mat->rowp + mat->nrows, temp_rowp);
+
+    for (int i = 0; i < nrows; i++) {
+      for (int jp = rowp[i]; jp < rowp[i + 1]; jp++) {
+        int j = cols[jp];
+
+        mat->data[temp_rowp[j]] = data[jp];
+        temp_rowp[j]++;
+      }
+    }
+
+    delete[] temp_rowp;
+  }
+
+  /**
+   * @brief Add the given submatrix of values to this matrix
+   *
+   * @param rows Row indices for each row in mat
+   * @param columns Column indices for each column in mat
+   * @param mat The submatrix that will be added
+   */
+  void add_submatrix(const std::shared_ptr<Vector<int>> rows,
+                     const std::shared_ptr<Vector<int>> columns,
+                     const std::shared_ptr<CSRMat<T>> mat) {
+    // Find the maximum row size
+    int max_size = 0;
+    for (int i = 0; i < mat->nrows; i++) {
+      int size = mat->rowp[i + 1] - mat->rowp[i];
+      if (size > max_size) {
+        max_size = size;
+      }
+    }
+
+    // Extract the arrays
+    const int* rows_array = rows->get_array();
+    const int* columns_array = columns->get_array();
+
+    // Allocate space to store the indices
+    int* col_indices = new int[max_size];
+
+    // Add the entries into the rows
+    for (int i = 0; i < mat->nrows; i++) {
+      int jp = mat->rowp[i];
+      int jp_end = mat->rowp[i + 1];
+      int row_size = jp_end - jp;
+      const T* row_data = &mat->data[jp];
+
+      for (int index = 0; jp < jp_end; jp++, index++) {
+        int j = mat->cols[jp];
+        col_indices[index] = columns_array[j];
+      }
+
+      add_row(rows_array[i], row_size, col_indices, row_data);
+    }
+
+    delete[] col_indices;
+  }
+
+  /**
    * @brief Perform an iteration of Gauss Seidel
    *
    * @param y The right-hand-side
