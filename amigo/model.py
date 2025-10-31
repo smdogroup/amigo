@@ -731,7 +731,10 @@ class Model:
             idx_list = []
             for name_ in name:
                 idx_list.append(self.get_indices(name_).ravel())
-            indices = np.concatenate(idx_list)
+            if len(idx_list) > 0:
+                indices = np.concatenate(idx_list)
+            else:
+                indices = []
 
             return indices
         else:

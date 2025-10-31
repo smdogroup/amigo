@@ -49,6 +49,13 @@ class PyExternalCallback
       py::array_t<T> con({con_size}, {ssize_t(sizeof(T))}, con_array,
                          py::cast(constraints));
 
+      // Wrap the objective gradient
+      std::shared_ptr<amigo::Vector<T>> grad = this->get_objective_gradient();
+      T* grad_array = grad->get_array();
+      int grad_size = grad->get_size();
+      py::array_t<T> g({grad_size}, {ssize_t(sizeof(T))}, grad_array,
+                       py::cast(grad));
+
       // Wrap the constraint Jacobian
       std::shared_ptr<amigo::CSRMat<T>> jacobian = this->get_jacobian();
       int nnz;
@@ -57,7 +64,11 @@ class PyExternalCallback
       py::array_t<T> data({nnz}, {ssize_t(sizeof(T))}, data_array,
                           py::cast(jacobian));
 
-      callback(xarr, con, data);
+      py::object out = callback(xarr, con, g, data);
+
+      if (!out.is_none()) {
+        this->get_objective() = py::cast<T>(out);
+      }
     }
   }
 

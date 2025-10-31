@@ -35,14 +35,14 @@ class Objective(am.Component):
 
 class ExternalQuadratic:
     def get_constraint_jacobian_csr(self):
-        nrows = 2
-        ncols = 3
+        ncon = 2
+        nvars = 3
         rowp = np.array([0, 3, 6])
         cols = np.array([0, 1, 2, 0, 1, 2])
 
-        return nrows, ncols, rowp, cols
+        return ncon, nvars, rowp, cols
 
-    def evaluate(self, x, con, jac):
+    def evaluate(self, x, con, grad, jac):
         con[0] = x[0] ** 2 + x[1] ** 2 + x[2] ** 2 - 1.0
         con[1] = x[0] + x[1] + 2.0 * x[2] - 2.0
 
