@@ -750,50 +750,10 @@ using DefaultGroupBackend =
     OmpGroupBackend<T, ncomp, Input, ndata, Data, Components...>;
 
 #elif defined(AMIGO_USE_CUDA)
+#include "cuda/component_group_backend.cuh"
 
-template <typename T, class Component>
-AMIGO_KERNEL T lagrange_kernel() {}
-
-template <typename T, class Component>
-AMIGO_KERNEL void add_gradient_kernel() {}
-
-template <typename T, class Component>
-AMIGO_KERNEL void add_hessian_product_kernel() {}
-
-template <typename T, class Component>
-AMIGO_KERNEL void add_hessian_kernel() {}
-
-template <typename T, class Component>
-class CudaGroupBackend {
- public:
-  static constexpr int ncomp = Component::ncomp;
-  static constexpr int ndata = Component::ncomp;
-  using Input = typename Component::Input;
-  using Data = typename Component::Data;
-
-  CudaGroupBackend(IndexLayout<ndata>& data_layout,
-                   IndexLayout<ncomp>& layout) {
-    data_layout.copy_host_to_device();
-    layout.copy_host_to_device();
-  }
-  T lagrangian_kernel(const IndexLayout<ndata>& data_layout,
-                      const IndexLayout<ncomp>& layout,
-                      const Vector<T>& data_vec, const Vector<T>& vec) const {}
-
-  void add_gradient_kernel(const IndexLayout<ndata>& data_layout,
-                           const IndexLayout<ncomp>& layout,
-                           const Vector<T>& data_vec, const Vector<T>& vec,
-                           Vector<T>& res) const {}
-  void add_hessian_product_kernel(const IndexLayout<ndata>& data_layout,
-                                  const IndexLayout<ncomp>& layout,
-                                  const Vector<T>& data_vec,
-                                  const Vector<T>& vec, const Vector<T>& dir,
-                                  Vector<T>& res) const {}
-  void add_hessian_kernel(const IndexLayout<ndata>& data_layout,
-                          const IndexLayout<ncomp>& layout,
-                          const Vector<T>& data_vec, const Vector<T>& vec,
-                          CSRMat<T>& jac) const {}
-};
+using DefaultGroupBackend =
+    CudaGroupBackend<T, ncomp, Input, ndata, Data, Components...>;
 
 #else  // Default to serial implementation
 template <typename T, int ncomp, class Input, int ndata, class Data,
