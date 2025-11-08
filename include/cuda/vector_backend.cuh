@@ -22,7 +22,7 @@ class CudaVecBackend {
       cudaFree(device_ptr);
     }
     size = size_;
-    cudaMalloc(&device_ptr, size);
+    cudaMalloc(&device_ptr, size * sizeof(T));
   }
 
   void copy_host_to_device(T* host_ptr) {
