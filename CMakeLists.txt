@@ -6,9 +6,14 @@ option(AMIGO_ENABLE_CUDA   "Build with CUDA (nvcc) support" OFF)
 option(AMIGO_ENABLE_OPENMP "Build with OpenMP support"     ON)
 option(AMIGO_USE_MPI4PY_CAPI "Use mpi4py C API in the Python module" ON)
 
+# Ask CMake to locate BLAS and LAPACK.
+find_package(BLAS REQUIRED)
+find_package(LAPACK REQUIRED)
+
 # ---------- Toolchains / languages ----------
 if(AMIGO_ENABLE_CUDA)
   enable_language(CUDA)
+  find_package(CUDAToolkit REQUIRED)
   if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
     # Pick something your nvcc supports; adjust or version-gate if needed
     set(CMAKE_CUDA_ARCHITECTURES 80)
@@ -83,6 +88,16 @@ pybind11_add_module(amigo MODULE
   ${CMAKE_CURRENT_SOURCE_DIR}/amigo/amigo.cpp
 )
 
+# Link the CUDA runtime (shared)
+if(AMIGO_ENABLE_CUDA)
+  target_link_libraries(amigo PRIVATE CUDA::cudart)
+  # If you use driver API (cuMemAlloc, etc.), also:
+  # target_link_libraries(amigo PRIVATE CUDA::cuda_driver)
+endif()
+
+# Add LAPACK and BLAS
+target_link_libraries(amigo PRIVATE LAPACK::LAPACK BLAS::BLAS)
+
 # Link the header-only lib (brings MPI/OpenMP), and Python module lib
 target_link_libraries(amigo PRIVATE
   amigo::headers
@@ -93,3 +108,6 @@ target_link_libraries(amigo PRIVATE
 if(AMIGO_USE_MPI4PY_CAPI)
   target_include_directories(amigo PRIVATE "${MPI4PY_INCLUDE_DIR}")
 endif()
+
+# Install amigo
+install(TARGETS amigo LIBRARY DESTINATION amigo)

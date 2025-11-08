@@ -25,10 +25,7 @@ openmdao = ["openmdao>=3.29"]
 
 [tool.scikit-build]
 cmake.minimum-version = "3.25"
-# wheel.packages defaults are fine if your Python sources are under a package dir;
-# if they're under "python/", uncomment:
-# [tool.scikit-build.build]
-# wheel.packages = ["python"]
+wheel.packages = ["amigo"]
 
 # [tool.scikit-build.cmake]
 # Prefer passing args via pip (see below). Keep this table present only once.

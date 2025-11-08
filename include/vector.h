@@ -6,6 +6,10 @@
 
 #include "amigo.h"
 
+#ifdef AMIGO_USE_CUDA
+#include "cuda/vector_backend.cuh"
+#endif
+
 namespace amigo {
 
 template <typename T>
@@ -22,9 +26,8 @@ class SerialVecBackend {
 };
 
 #ifdef AMIGO_USE_CUDA
-#include "cuda/vector_backend.cuh"
 template <typename T>
-using DefaultVecBackend = amigo::CudaVecBackend<T>;
+using DefaultVecBackend = CudaVecBackend<T>;
 #else
 template <typename T>
 using DefaultVecBackend = SerialVecBackend<T>;
