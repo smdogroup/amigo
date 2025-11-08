@@ -27,8 +27,9 @@ class CudaGroupBackend {
   }
 
   void initialize(IndexLayout<ndata>& data_layout, IndexLayout<ncomp>& layout,
-                  IndexLayout<noutputs>& outputs, CSRMat<T>& mat) {
-    layout->get_ int num_elements;
+                  IndexLayout<noutputs>& outputs, 
+                  const NodeOwners& owners, CSRMat<T>& mat) {
+    int num_elements;
     const int* vec_indices;
     layout->get_data(&num_elements, nullptr, &vec_indices);
 
@@ -41,18 +42,23 @@ class CudaGroupBackend {
 
     // Locate the positions within the CSRMatrix
     for (int i = 0; i < num_elements; i++) {
-      for (int j = 0; j < ncomp; j++) {
-        int row = vec_indices[ncomp * index + j];
+      int rows[ncomp], columns[ncomp];
+      for (int j = 0; j < ncomp; j++ ){
+        rows[j] = vec_indices[ncomp * index + j];
+      }
 
+      owners.local_to_global(ncomp, rows, columns);
+
+      for (int j = 0; j < ncomp; j++) {
+        int row = rows[j];
         int row_size = rowp[row + 1] - rowp[row];
         int* start = &cols[rowp[row]];
         int* end = start + row_size;
 
         for (int k = 0; k < ncomp; k++) {
-          int col = vec_indices[ncomp * index + k];
-          auto* it = std::lower_bound(start, end, col);
+          auto* it = std::lower_bound(start, end, columns[k]);
 
-          if (it != end && *it == col) {
+          if (it != end && *it == columns[k]) {
             hess_pos[ncomp * (ncomp * index + j) + k] = it - cols;
           }
         }

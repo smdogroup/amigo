@@ -1,13 +1,49 @@
 #ifndef AMIGO_CSR_MATRIX_H
 #define AMIGO_CSR_MATRIX_H
 
+#include "amigo.h"
 #include "node_owners.h"
 #include "ordering_utils.h"
 #include "vector.h"
 
+#ifdef AMIGO_USE_CUDA
+#include "cuda/csr_matrix_backend.cuh"
+#endif
+
 namespace amigo {
 
 template <typename T>
+class SerialCSRMatBackend {
+ public:
+  SerialCSRMatBackend() {}
+  ~SerialCSRMatBackend() {}
+
+  void allocate(int nrows_, int ncols_, int nnz_) {}
+  void copy_pattern_host_to_device(const int *rowp, const int *cols) {}
+  void copy_data_device_to_host(T* data) {}
+  void get_device_data(const int *rowp[], const int *cols[], T *data[]) {
+    if (rowp){
+      *rowp = nullptr;
+    }
+    if (cols){
+      *cols = nullptr;
+    }
+    if (data){
+      *data = nullptr;
+    }
+
+  }
+};
+
+#ifdef AMIGO_USE_CUDA
+template <typename T>
+using DefaultCSRMatBackend = CudaCSRMatBackend<T>;
+#else
+template <typename T>
+using DefaultCSRMatBackend = SerialCSRMatBackend<T>;
+#endif  // AMIGO_USE_CUDA
+
+template <typename T, class Backend = DefaultCSRMatBackend<T>>
 class CSRMat {
  public:
   /**
@@ -604,6 +640,20 @@ class CSRMat {
    */
   std::shared_ptr<NodeOwners> get_column_owners() { return col_owners; }
 
+  /**
+   * @brief Copy the non-zero pattern to the device
+   */
+  void copy_pattern_host_to_device(){
+    backend.copy_pattern_host_to_device(rowp, cols);
+  }
+
+  /**
+   * @brief Get data computed on the host
+   */
+  void copy_data_device_to_host() {
+    backend.copy_data_device_to_host(data);
+  }
+
   CSRMat(int nrows, int ncols, int nnz, int* rowp, int* cols,
          std::shared_ptr<NodeOwners> row_owners = nullptr,
          std::shared_ptr<NodeOwners> col_owners = nullptr, int sqdef_index = -1)
@@ -650,6 +700,9 @@ class CSRMat {
     // Don't forget to allocate the space
     data = new T[nnz];
     std::fill(data, data + nnz, 0.0);
+
+    // Allocate space on the GPU
+    backend.allocate(nrows, ncols, nnz);
   }
 
  private:
@@ -671,6 +724,9 @@ class CSRMat {
   //     [ B   -C    ]
   int sqdef_index;  // Index at which C starts. Negative value indicates
   // that the matrix is not SQD.
+
+  // Backend for the GPU
+  Backend backend;
 };
 
 }  // namespace amigo

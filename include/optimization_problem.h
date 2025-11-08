@@ -583,7 +583,9 @@ class OptimizationProblem {
    */
   std::shared_ptr<CSRMat<T>> create_matrix() {
     if (mat) {
-      return mat->duplicate();
+      std::shared_ptr<CSRMat<T>> dup = mat->duplicate();
+      dup->copy_pattern_host_to_device();
+      return dup;
     } else {
       std::vector<int> intervals;
       auto element_nodes = get_element_nodes(intervals);
@@ -648,6 +650,8 @@ class OptimizationProblem {
 
       delete[] rowp;
       delete[] cols;
+
+      mat->copy_pattern_host_to_device();
 
       return mat;
     }
@@ -776,6 +780,7 @@ class OptimizationProblem {
       }
     }
 
+    matrix->copy_data_device_to_host();
     mat_dist->begin_assembly(matrix, mat_dist_ctx);
     mat_dist->end_assembly(matrix, mat_dist_ctx);
   }
@@ -798,6 +803,7 @@ class OptimizationProblem {
       components[i]->add_grad_jac_wrt_data(*data_vec, *x, *data_owners, *jac);
     }
 
+    jac->copy_data_device_to_host();
     grad_jac_dist->begin_assembly(jac, grad_jac_dist_ctx);
     grad_jac_dist->end_assembly(jac, grad_jac_dist_ctx);
   }
@@ -903,6 +909,7 @@ class OptimizationProblem {
       components[i]->add_output_jac_wrt_input(*data_vec, *x, *jacobian);
     }
 
+    jacobian->copy_data_device_to_host();
     input_jac_dist->begin_assembly(jacobian, input_jac_dist_ctx);
     input_jac_dist->end_assembly(jacobian, input_jac_dist_ctx);
   }
@@ -924,6 +931,7 @@ class OptimizationProblem {
       components[i]->add_output_jac_wrt_data(*data_vec, *x, *jacobian);
     }
 
+    jacobian->copy_data_device_to_host();
     data_jac_dist->begin_assembly(jacobian, data_jac_dist_ctx);
     data_jac_dist->end_assembly(jacobian, data_jac_dist_ctx);
   }
@@ -935,7 +943,9 @@ class OptimizationProblem {
    */
   std::shared_ptr<CSRMat<T>> create_output_jacobian_wrt_input() {
     if (input_jac) {
-      return input_jac->duplicate();
+      std::shared_ptr<CSRMat<T>> dup = input_jac->duplicate();
+      dup->copy_pattern_host_to_device();
+      return dup;
     } else {
       std::vector<int> intervals(components.size() + 1);
       intervals[0] = 0;
@@ -987,6 +997,8 @@ class OptimizationProblem {
 
       delete[] rowp;
       delete[] cols;
+
+      input_jac->copy_pattern_host_to_device();
 
       return input_jac;
     }
@@ -1051,6 +1063,8 @@ class OptimizationProblem {
 
       delete[] rowp;
       delete[] cols;
+
+      data_jac->copy_pattern_host_to_device();
 
       return data_jac;
     }
