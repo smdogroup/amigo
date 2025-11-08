@@ -20,17 +20,15 @@ class CudaGroupBackend {
 
     d_hess_pos = nullptr;
   }
-  ~CudaGroupBackend(){
-    if (d_hess_pos){
+  ~CudaGroupBackend() {
+    if (d_hess_pos) {
       cudaFree(d_hess_pos);
     }
   }
 
   void initialize(IndexLayout<ndata>& data_layout, IndexLayout<ncomp>& layout,
-                   IndexLayout<noutputs>& outputs,
-                   CSRMat<T> &mat) {
-                    layout->get_
-    int num_elements;
+                  IndexLayout<noutputs>& outputs, CSRMat<T>& mat) {
+    layout->get_ int num_elements;
     const int* vec_indices;
     layout->get_data(&num_elements, nullptr, &vec_indices);
 
@@ -39,18 +37,18 @@ class CudaGroupBackend {
 
     // Allocate space for the positions of the Hessian entries
     int size = num_elements * ncomp * ncomp;
-    int *hess_pos = new int[ size ];
+    int* hess_pos = new int[size];
 
     // Locate the positions within the CSRMatrix
-    for ( int i = 0; i < num_elements; i++ ){
-      for ( int j = 0; j < ncomp; j++ ){
+    for (int i = 0; i < num_elements; i++) {
+      for (int j = 0; j < ncomp; j++) {
         int row = vec_indices[ncomp * index + j];
 
         int row_size = rowp[row + 1] - rowp[row];
         int* start = &cols[rowp[row]];
         int* end = start + row_size;
 
-        for ( int k = 0; k < ncomp; k++ ){
+        for (int k = 0; k < ncomp; k++) {
           int col = vec_indices[ncomp * index + k];
           auto* it = std::lower_bound(start, end, col);
 
@@ -63,10 +61,11 @@ class CudaGroupBackend {
 
     // Copy the result to the device
     cudaMalloc(&d_hess_pos, size * sizeof(int));
-    cudaMemcpy(d_hess_pos, hess_pos, size * sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_hess_pos, hess_pos, size * sizeof(int),
+               cudaMemcpyHostToDevice);
 
     // This is not needed on the host
-    delete [] hess_pos;
+    delete[] hess_pos;
   }
 
   // This isn't handled properly yet...
@@ -95,7 +94,7 @@ class CudaGroupBackend {
     dim3 block(TPB);
 
     gradient_kernel_atomic<<<grid, block>>>(num_elements, data_indices,
-                                            data_values, vec_indices,
+                                            vec_indices, data_values,
                                             vec_values, res_values);
   }
 
@@ -115,7 +114,7 @@ class CudaGroupBackend {
     dim3 block(TPB);
 
     hessian_product_kernel_atomic<<<grid, block>>>(num_elements, data_indices,
-                                                   data_values, vec_indices,
+                                                   vec_indices, data_values,
                                                    vec_values, res_values);
   }
 
@@ -134,16 +133,17 @@ class CudaGroupBackend {
     dim3 grid((num_elements + TPB - 1) / TPB, ncomp);
     dim3 block(TPB);
 
-    T *csr_data;
-    mat->get_device_data(nullptr, nullptr, nullptr, nullptr, nullptr, &csr_data);
+    T* csr_data;
+    mat->get_device_data(nullptr, nullptr, nullptr, nullptr, nullptr,
+                         &csr_data);
 
     hessian_kernel_atomic<<<grid, block>>>(num_elements, data_indices,
-                                                   data_values, vec_indices,
-                                                   vec_values, res_values);
+                                           vec_indices, d_hess_pos, data_values,
+                                           vec_values, csr_data);
   }
 
  private:
-  int *d_hess_pos;
+  int* d_hess_pos;
   // int *d_jac_pos;
 
   static AMIGO_KERNEL void gradient_kernel_atomic(
@@ -222,10 +222,10 @@ class CudaGroupBackend {
     }
   }
 
-  static AMIGO_KERNEL void hessian_kernel_atomic(int num_elements,
-     const int* data_indices, const int* vec_indices, const int* csr_pos,
-     const T* data_values, const T* vec_values, T *csr_data) {
-
+  static AMIGO_KERNEL void hessian_kernel_atomic(
+      int num_elements, const int* data_indices, const int* vec_indices,
+      const int* csr_pos, const T* data_values, const T* vec_values,
+      T* csr_data) {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     if (index > num_elements) {
       return;
@@ -245,9 +245,9 @@ class CudaGroupBackend {
     add_hessian_product<Data, Input, Components...>(data, input, dir, h);
 
     // Now add the Hessian contribution
-    for (int i = 0; i < ncomp; i++ ){
+    for (int i = 0; i < ncomp; i++) {
       int pos = csr_pos[(index * ncomp + local_row) * ncomp + i];
-      if (pos >= 0){
+      if (pos >= 0) {
         atomicAdd(&csr_data[pos], h[i]);
       }
     }
