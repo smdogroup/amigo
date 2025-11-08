@@ -13,7 +13,6 @@ class RoeFlux(am.Component):
         super().__init__()
 
         # Add the constants
-        self.add_constant("gamma", value=gamma)
         self.add_constant("gam1", value=(gamma - 1.0))
         self.add_constant("ggam1", value=gamma / (gamma - 1.0))
 
@@ -564,7 +563,7 @@ p_outlet = p_back
 nctrl = 10
 
 # Create the model
-model = am.Model("nozzle")
+model = am.Model("nozzle_module")
 
 # Add the flux computations at the interior points
 model.add_component("flux", num_cells - 1, RoeFlux(gamma=gamma))

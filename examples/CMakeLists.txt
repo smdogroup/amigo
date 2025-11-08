@@ -42,25 +42,24 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../include)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../../a2d/include)
 
 # A helper function to define one generated example module
-function(add_amigo_example MODULE_NAME)
-  set(EX_DIR  ${CMAKE_CURRENT_SOURCE_DIR}/${MODULE_NAME})
-  set(EX_PY   ${EX_DIR}/${MODULE_NAME}.py)
+function(add_amigo_example MODULE_DIR MODULE_NAME)
+  set(EX_DIR  ${CMAKE_CURRENT_SOURCE_DIR}/${MODULE_DIR})
 
   # Generated outputs
   set(GEN_HDR ${EX_DIR}/${MODULE_NAME}.h)
   set(GEN_CPP ${EX_DIR}/${MODULE_NAME}.cpp)
 
-  add_custom_command(
-    OUTPUT  ${GEN_HDR} ${GEN_CPP}
-    # Ensure the gen dir exists (safe if already exists)
-    COMMAND ${CMAKE_COMMAND} -E make_directory ${BLD_GEN_DIR}
-    # Run the example script to generate C++/header
-    COMMAND ${Python3_EXECUTABLE} ${EX_PY} --generate
-    BYPRODUCTS ${GEN_HDR} ${GEN_CPP}
-    WORKING_DIRECTORY ${EX_DIR}
-    COMMENT "Generating ${MODULE_NAME}.h/.cpp from ${MODULE_NAME}.py"
-    VERBATIM
-  )
+  # add_custom_command(
+  #   OUTPUT  ${GEN_HDR} ${GEN_CPP}
+  #   # Ensure the gen dir exists (safe if already exists)
+  #   COMMAND ${CMAKE_COMMAND} -E make_directory ${BLD_GEN_DIR}
+  #   # Run the example script to generate C++/header
+  #   COMMAND ${Python3_EXECUTABLE} ${EX_PY} --generate
+  #   BYPRODUCTS ${GEN_HDR} ${GEN_CPP}
+  #   WORKING_DIRECTORY ${EX_DIR}
+  #   COMMENT "Generating ${MODULE_NAME}.h/.cpp from ${MODULE_NAME}.py"
+  #   VERBATIM
+  # )
 
   # Build the pybind11 module from generated C++
   pybind11_add_module(${MODULE_NAME} MODULE ${GEN_CPP})
@@ -116,5 +115,5 @@ function(add_amigo_example MODULE_NAME)
 endfunction()
 
 # === Add your examples here ===
-add_amigo_example(nozzle)
+add_amigo_example(nozzle nozzle_module)
 # add_amigo_example(other_example_name)
