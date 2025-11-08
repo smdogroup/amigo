@@ -27,8 +27,8 @@ class CudaGroupBackend {
   }
 
   void initialize(IndexLayout<ndata>& data_layout, IndexLayout<ncomp>& layout,
-                  IndexLayout<noutputs>& outputs, 
-                  const NodeOwners& owners, CSRMat<T>& mat) {
+                  IndexLayout<noutputs>& outputs, const NodeOwners& owners,
+                  CSRMat<T>& mat) {
     int num_elements;
     const int* vec_indices;
     layout->get_data(&num_elements, nullptr, &vec_indices);
@@ -43,7 +43,7 @@ class CudaGroupBackend {
     // Locate the positions within the CSRMatrix
     for (int i = 0; i < num_elements; i++) {
       int rows[ncomp], columns[ncomp];
-      for (int j = 0; j < ncomp; j++ ){
+      for (int j = 0; j < ncomp; j++) {
         rows[j] = vec_indices[ncomp * index + j];
       }
 
