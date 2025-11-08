@@ -41,6 +41,6 @@ class CudaVecBackend {
   T* device_ptr;
 };
 
-}
+}  // namespace amigo
 
-#endif // AMIGO_CUDA_VECTOR_BACKEND_H
+#endif  // AMIGO_CUDA_VECTOR_BACKEND_H
