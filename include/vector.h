@@ -153,7 +153,7 @@ class Vector {
   int ext_size;    // Size of externally owned nodes referenced on this proc
   int size;        // Total size of the vector
   VectorLocation vtype;  // Location of the data
-  T* array;                    // Host array
+  T* array;              // Host array
 
   // Backend for the GPU implementation
   Backend backend;

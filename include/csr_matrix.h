@@ -19,19 +19,18 @@ class SerialCSRMatBackend {
   ~SerialCSRMatBackend() {}
 
   void allocate(int nrows_, int ncols_, int nnz_) {}
-  void copy_pattern_host_to_device(const int *rowp, const int *cols) {}
+  void copy_pattern_host_to_device(const int* rowp, const int* cols) {}
   void copy_data_device_to_host(T* data) {}
-  void get_device_data(const int *rowp[], const int *cols[], T *data[]) {
-    if (rowp){
+  void get_device_data(const int* rowp[], const int* cols[], T* data[]) {
+    if (rowp) {
       *rowp = nullptr;
     }
-    if (cols){
+    if (cols) {
       *cols = nullptr;
     }
-    if (data){
+    if (data) {
       *data = nullptr;
     }
-
   }
 };
 
@@ -627,7 +626,7 @@ class CSRMat {
    * @param cols Column indices
    * @param data Numerical entries
    */
-  void get_device_data(const int *rowp_[], const int *cols_[], T *data_[]){
+  void get_device_data(const int* rowp_[], const int* cols_[], T* data_[]) {
     backend.get_device_data(rowp_, cols_, data_);
   }
 
@@ -654,16 +653,14 @@ class CSRMat {
   /**
    * @brief Copy the non-zero pattern to the device
    */
-  void copy_pattern_host_to_device(){
+  void copy_pattern_host_to_device() {
     backend.copy_pattern_host_to_device(rowp, cols);
   }
 
   /**
    * @brief Get data computed on the host
    */
-  void copy_data_device_to_host() {
-    backend.copy_data_device_to_host(data);
-  }
+  void copy_data_device_to_host() { backend.copy_data_device_to_host(data); }
 
   CSRMat(int nrows, int ncols, int nnz, int* rowp, int* cols,
          std::shared_ptr<NodeOwners> row_owners = nullptr,

@@ -121,7 +121,8 @@ class SerialGroupBackend {
   }
 
   void initialize_hessian_pattern(const IndexLayout<ncomp>& layout,
-    const NodeOwners& owners, CSRMat<T>& mat) const {}
+                                  const NodeOwners& owners,
+                                  CSRMat<T>& mat) const {}
 
   void add_hessian_kernel(const IndexLayout<ndata>& data_layout,
                           const IndexLayout<ncomp>& layout,
@@ -587,8 +588,8 @@ class OmpGroupBackend {
     }
   }
 
-  void initialize_hessian_pattern(const IndexLayout<ncomp>& layout, 
-    const NodeOwners& owners, CSRMat<T>& mat) {}
+  void initialize_hessian_pattern(const IndexLayout<ncomp>& layout,
+                                  const NodeOwners& owners, CSRMat<T>& mat) {}
 
   void add_hessian_kernel(const IndexLayout<ndata>& data_layout,
                           const IndexLayout<ncomp>& layout,

@@ -28,7 +28,8 @@ class ComponentGroupBase {
                             Vector<T>& g) const {}
   virtual void add_hessian_product(const Vector<T>& data, const Vector<T>& x,
                                    const Vector<T>& p, Vector<T>& h) const {}
-  virtual void initialize_hessian_pattern(const NodeOwners& owners, CSRMat<T>& mat) {}
+  virtual void initialize_hessian_pattern(const NodeOwners& owners,
+                                          CSRMat<T>& mat) {}
   virtual void add_hessian(const Vector<T>& data, const Vector<T>& x,
                            const NodeOwners& owners, CSRMat<T>& mat) const {}
 

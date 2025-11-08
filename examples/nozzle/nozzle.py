@@ -493,7 +493,11 @@ parser.add_argument(
     "--build", dest="build", action="store_true", default=False, help="Enable building"
 )
 parser.add_argument(
-    "--generate", dest="generate", action="store_true", default=False, help="Generate the code"
+    "--generate",
+    dest="generate",
+    action="store_true",
+    default=False,
+    help="Generate the code",
 )
 parser.add_argument(
     "--with-openmp",
@@ -637,7 +641,7 @@ model.link("inlet.M_inlet", "calc.M_inlet")
 if args.generate:
     model.generate_cpp()
     exit(0)
-    
+
 elif args.build:
     compile_args = []
     link_args = []

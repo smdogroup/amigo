@@ -49,62 +49,62 @@ class IndexLayout {
 
   void get_data(int* num_elements_, int* nodes_per_elem_,
                 const int** array_) const {
-    if (num_elements_){
+    if (num_elements_) {
       *num_elements_ = num_elements;
     }
-    if (nodes_per_elem_){
+    if (nodes_per_elem_) {
       *nodes_per_elem_ = nodes_per_elem;
     }
-    if (array_){
+    if (array_) {
       *array_ = indices->get_array();
     }
   }
 
-  void copy_host_to_device() {
-    indices->copy_host_to_device();
-  }
+  void copy_host_to_device() { indices->copy_host_to_device(); }
 
   void get_device_data(int* num_elements_, int* nodes_per_elem_,
                        const int** array_) const {
-    if (num_elements_){
+    if (num_elements_) {
       *num_elements_ = num_elements;
     }
-    if (nodes_per_elem_){
+    if (nodes_per_elem_) {
       *nodes_per_elem_ = nodes_per_elem;
     }
-    if (array_){
+    if (array_) {
       *array_ = indices->get_device_array();
     }
   }
 
 #ifdef AMIGO_USE_CUDA
   template <typename T, class ArrayType>
-  static AMIGO_DEVICE void get_values_device(int index, 
-    const int* indx, const T* AMIGO_RESTRICT global, ArrayType& values) {
-
+  static AMIGO_DEVICE void get_values_device(int index, const int* indx,
+                                             const T* AMIGO_RESTRICT global,
+                                             ArrayType& values) {
     const int base = nodes_per_elem * index;
-    #pragma unroll
-    for (int i = 0; i < nodes_per_elem; i++ ){
+#pragma unroll
+    for (int i = 0; i < nodes_per_elem; i++) {
       values[i] = global[indx[base + i]];
     }
   }
 
   template <typename T, class ArrayType>
-  static AMIGO_DEVICE void add_values_atomic(int index,
-    const int* indx, const ArrayType& values, T* AMIGO_RESTRICT global) {
+  static AMIGO_DEVICE void add_values_atomic(int index, const int* indx,
+                                             const ArrayType& values,
+                                             T* AMIGO_RESTRICT global) {
     const int base = nodes_per_elem * index;
-    #pragma unroll
-    for (int i = 0; i < nodes_per_elem; i++ ){
+#pragma unroll
+    for (int i = 0; i < nodes_per_elem; i++) {
       atomicAdd(&global[indx[base + i]], values[i]);
     }
   }
 
   template <typename T, class ArrayType>
-  static AMIGO_DEVICE void add_values(int index, 
-    const int* indx, const ArrayType& values, T* AMIGO_RESTRICT global) {
+  static AMIGO_DEVICE void add_values(int index, const int* indx,
+                                      const ArrayType& values,
+                                      T* AMIGO_RESTRICT global) {
     const int base = nodes_per_elem * index;
-    #pragma unroll
-    for (int i = 0; i < nodes_per_elem; i++ ){
+#pragma unroll
+    for (int i = 0; i < nodes_per_elem; i++) {
       global[indx[base + i]] += values[i];
     }
   }

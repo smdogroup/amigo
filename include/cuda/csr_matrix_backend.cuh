@@ -10,15 +10,21 @@ namespace amigo {
 template <typename T>
 class CudaCSRMatBackend {
  public:
-  CudaCSRMatBackend() : nrows(0), ncols(0), nnz(0), d_rowp(nullptr), d_cols(nullptr), d_data(nullptr) {}
+  CudaCSRMatBackend()
+      : nrows(0),
+        ncols(0),
+        nnz(0),
+        d_rowp(nullptr),
+        d_cols(nullptr),
+        d_data(nullptr) {}
   ~CudaCSRMatBackend() {
     if (d_rowp) {
       cudaFree(d_rowp);
     }
-    if (d_cols){
+    if (d_cols) {
       cudaFree(d_cols);
     }
-    if (d_data){
+    if (d_data) {
       cudaFree(d_data);
     }
   }
@@ -27,22 +33,22 @@ class CudaCSRMatBackend {
     if (d_rowp) {
       cudaFree(d_rowp);
     }
-    if (d_cols){
+    if (d_cols) {
       cudaFree(d_cols);
     }
-    if (d_data){
+    if (d_data) {
       cudaFree(d_data);
     }
     nrows = nrows_;
     ncols = ncols_;
     nnz = nnz_;
-    
+
     cudaMalloc(&d_rowp, (nrows + 1) * sizeof(int));
     cudaMalloc(&d_cols, nnz * sizeof(int));
     cudaMalloc(&d_data, nnz * sizeof(T));
   }
 
-  void copy_pattern_host_to_device(const int *rowp, const int *cols) {
+  void copy_pattern_host_to_device(const int* rowp, const int* cols) {
     cudaMemcpy(d_rowp, rowp, (nrows + 1) * sizeof(int), cudaMemcpyHostToDevice);
     cudaMemcpy(d_cols, cols, nnz * sizeof(int), cudaMemcpyHostToDevice);
   }
@@ -51,14 +57,14 @@ class CudaCSRMatBackend {
     cudaMemcpy(data, d_data, nnz * sizeof(T), cudaMemcpyDeviceToHost);
   }
 
-  void get_device_data(const int *rowp[], const int *cols[], T *data[]) { 
-    if (rowp){
+  void get_device_data(const int* rowp[], const int* cols[], T* data[]) {
+    if (rowp) {
       *rowp = d_rowp;
     }
-    if (cols){
+    if (cols) {
       *cols = d_cols;
     }
-    if (data){
+    if (data) {
       *data = d_data;
     }
   }
@@ -66,7 +72,7 @@ class CudaCSRMatBackend {
  private:
   int nrows, ncols, nnz;
   int *d_rowp, *d_cols;
-  T *d_data;
+  T* d_data;
 };
 
 }  // namespace amigo
