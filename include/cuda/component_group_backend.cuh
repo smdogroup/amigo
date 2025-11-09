@@ -41,7 +41,7 @@ AMIGO_KERNEL void gradient_kernel_atomic(int num_elements,
                                          const T* data_values,
                                          const T* vec_values, T* grad_values) {
   int index = blockIdx.x * blockDim.x + threadIdx.x;
-  if (index > num_elements) {
+  if (index >= num_elements) {
     return;
   }
 
@@ -92,10 +92,10 @@ AMIGO_KERNEL void hessian_kernel_atomic(int num_elements,
                                         const T* data_values,
                                         const T* vec_values, T* csr_data) {
   int index = blockIdx.x * blockDim.x + threadIdx.x;
-  if (index > num_elements) {
+  int row = blockIdx.y;
+  if (index >= num_elements) {
     return;
   }
-  int row = blockIdx.y;
 
   Input input, dir, h;
   Data data;
@@ -257,9 +257,6 @@ class CudaGroupBackend {
 
     const T* data_values = data_vec.get_device_array();
     const T* vec_values = vec.get_device_array();
-
-    int nnz;
-    mat.get_data(nullptr, nullptr, &nnz, nullptr, nullptr, nullptr);
 
     T* csr_data;
     mat.get_device_data(nullptr, nullptr, &csr_data);

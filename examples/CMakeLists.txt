@@ -125,4 +125,6 @@ endfunction()
 
 # === Add your examples here ===
 add_amigo_example(nozzle nozzle_module)
+add_amigo_example(cart cart_pole)
+
 # add_amigo_example(other_example_name)
