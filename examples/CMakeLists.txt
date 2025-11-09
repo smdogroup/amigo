@@ -41,6 +41,13 @@ find_package(pybind11 CONFIG REQUIRED)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../include)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../../a2d/include)
 
+# Ask Python for the exact extension suffix
+execute_process(
+  COMMAND "${Python3_EXECUTABLE}" -c "import sysconfig; print(sysconfig.get_config_var('EXT_SUFFIX') or '')"
+  OUTPUT_VARIABLE PY_EXT_SUFFIX
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+
 # A helper function to define one generated example module
 function(add_amigo_example MODULE_DIR MODULE_NAME)
   set(EX_DIR  ${CMAKE_CURRENT_SOURCE_DIR}/${MODULE_DIR})
@@ -64,7 +71,9 @@ function(add_amigo_example MODULE_DIR MODULE_NAME)
   # Build the pybind11 module from generated C++
   pybind11_add_module(${MODULE_NAME} MODULE ${GEN_CPP})
 
-  set_source_files_properties(${GEN_CPP} PROPERTIES LANGUAGE CUDA)
+  if(AMIGO_ENABLE_CUDA)
+    set_source_files_properties(${GEN_CPP} PROPERTIES LANGUAGE CUDA)
+  endif()
 
   target_compile_features(${MODULE_NAME} PRIVATE cxx_std_17)
   target_include_directories(${MODULE_NAME}
@@ -94,7 +103,7 @@ function(add_amigo_example MODULE_DIR MODULE_NAME)
   # Proper Python extension naming and no 'lib' prefix
   set_target_properties(${MODULE_NAME} PROPERTIES
     PREFIX ""
-    SUFFIX "${Python3_EXTENSION_MODULE_SUFFIX}"
+    SUFFIX "${PY_EXT_SUFFIX}"
   )
 
   # Put built extension in a neat per-example binary dir

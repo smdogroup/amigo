@@ -21,6 +21,7 @@ class SerialCSRMatBackend {
   void allocate(int nrows_, int ncols_, int nnz_) {}
   void copy_pattern_host_to_device(const int* rowp, const int* cols) {}
   void copy_data_device_to_host(T* data) {}
+  void zero() {}
   void get_device_data(const int* rowp[], const int* cols[], T* data[]) {
     if (rowp) {
       *rowp = nullptr;
@@ -182,7 +183,10 @@ class CSRMat {
   /**
    * @brief Zero the numerical values
    */
-  void zero() { std::fill(data, data + nnz, 0.0); }
+  void zero() {
+    std::fill(data, data + nnz, 0.0);
+    backend.zero();
+  }
 
   /**
    * @brief Extract a submatrix from the CSRMat class given the row and column

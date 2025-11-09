@@ -21,6 +21,7 @@ class SerialVecBackend {
   void allocate(int size_) {}
   void copy_host_to_device(T* host_dest) {}
   void copy_device_to_host(T* host_src) {}
+  void zero() {}
   T* get_device_ptr() { return nullptr; }
   const T* get_device_ptr() const { return nullptr; }
 };
@@ -97,6 +98,7 @@ class Vector {
     if (array) {
       std::fill(array, array + size, T(0.0));
     }
+    backend.zero();
   }
 
   void set_random(T low = -1.0, T high = 1.0) {

@@ -57,6 +57,10 @@ class CudaCSRMatBackend {
     cudaMemcpy(data, d_data, nnz * sizeof(T), cudaMemcpyDeviceToHost);
   }
 
+  void zero(){
+    cudaMemset(d_data, 0, nnz * sizeof(T));
+  }
+
   void get_device_data(const int* rowp[], const int* cols[], T* data[]) {
     if (rowp) {
       *rowp = d_rowp;

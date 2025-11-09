@@ -21,8 +21,8 @@ AMIGO_DEVICE void add_gradient(Data& data, Input& input, Input& grad) {
 }
 
 template <class Input, class Data, class Component, class... Remain>
-static AMIGO_DEVICE void add_hessian_product(Data& data, Input& input,
-                                             Input& dir, Input& h) {
+AMIGO_DEVICE void add_hessian_product(Data& data, Input& input,
+                                      Input& dir, Input& h) {
   if constexpr (!Component::is_compute_empty) {
     Input grad;
     Component::hessian(data, input, dir, grad, h);
@@ -109,7 +109,7 @@ AMIGO_KERNEL void hessian_kernel_atomic(int num_elements,
 
   // Now add the Hessian contribution
   for (int i = 0; i < ncomp; i++) {
-    int pos = csr_pos[(index * ncomp + row) * ncomp + i];
+    int pos = csr_pos[ncomp * (ncomp * index + row) + i];
     if (pos >= 0) {
       atomicAdd(&csr_data[pos], h[i]);
     }
@@ -209,9 +209,6 @@ class CudaGroupBackend {
     dim3 grid((num_elements + TPB - 1) / TPB);
     dim3 block(TPB);
 
-    int size = res.get_size();
-    cudaMemset(res_values, 0, size * sizeof(T));
-
     detail::gradient_kernel_atomic<T, ncomp, Input, ndata, Data, Components...>
         <<<grid, block>>>(num_elements, data_indices, vec_indices, data_values,
                           vec_values, res_values);
@@ -236,9 +233,6 @@ class CudaGroupBackend {
     const T* vec_values = vec.get_device_array();
     const T* dir_values = dir.get_device_array();
     T* res_values = res.get_device_array();
-
-    int size = res.get_size();
-    cudaMemset(res_values, 0, size * sizeof(T));
 
     detail::hessian_product_kernel_atomic<T, ncomp, Input, ndata, Data,
                                           Components...>
@@ -269,8 +263,6 @@ class CudaGroupBackend {
 
     T* csr_data;
     mat.get_device_data(nullptr, nullptr, &csr_data);
-
-    cudaMemset(csr_data, 0, nnz * sizeof(T));
 
     detail::hessian_kernel_atomic<T, ncomp, Input, ndata, Data, Components...>
         <<<grid, block>>>(num_elements, data_indices, vec_indices, d_hess_pos,

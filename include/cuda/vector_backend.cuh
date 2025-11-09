@@ -33,6 +33,10 @@ class CudaVecBackend {
     cudaMemcpy(host_ptr, device_ptr, size * sizeof(T), cudaMemcpyDeviceToHost);
   }
 
+  void zero(){
+    cudaMemset(device_ptr, 0, size * sizeof(T));
+  }
+
   T* get_device_ptr() { return device_ptr; }
   const T* get_device_ptr() const { return device_ptr; }
 
