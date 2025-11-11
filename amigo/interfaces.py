@@ -104,6 +104,35 @@ def ExternalOpenMDAOComponent(om_problem, am_model):
     return _ExternalOpenMDAOComponent(om_problem, am_model)
 
 
+def AmigoIndepVarComp(amigo_model, data_names):
+    """
+    Create an IndepVarComp that automatically uses defaults from Amigo metadata.
+
+    Args:
+        amigo_model: The Amigo Model instance
+        data_names: List of Amigo data field names
+
+    Returns:
+        om.IndepVarComp with outputs set to Amigo metadata defaults
+
+    """
+    om = _import_openmdao()
+
+    indeps = om.IndepVarComp()
+
+    for name in data_names:
+        # Get shape and default value from Amigo metadata
+        indices = amigo_model.get_indices(name)
+        meta = amigo_model.get_meta(name)
+        val = np.full(indices.shape, meta["value"])
+
+        # Correct name for OpenMDAO
+        sanitized = name.replace(".", "_")
+        indeps.add_output(sanitized, val=val)
+
+    return indeps
+
+
 def ExplicitOpenMDAOPostOptComponent(**kwargs):
     om = _import_openmdao()
 
@@ -140,13 +169,17 @@ def ExplicitOpenMDAOPostOptComponent(**kwargs):
             self.out_mapping = self._map_names(self.output)
 
             for name in self.data:
+                indices = self.model.get_indices(name)
                 meta = self.model.get_meta(name)
                 open_name = self.data_mapping[name]
-                self.add_input(open_name, val=meta["value"])
+                # Use Amigo metadata default value
+                default_val = np.full(indices.shape, meta["value"])
+                self.add_input(open_name, shape=indices.shape, val=default_val)
 
             for name in self.output:
+                indices = self.model.get_indices(name)
                 open_name = self.out_mapping[name]
-                self.add_output(open_name)  # , val=meta["value"])
+                self.add_output(open_name, shape=indices.shape)
 
             self.declare_partials(of="*", wrt="*")
 
@@ -165,11 +198,36 @@ def ExplicitOpenMDAOPostOptComponent(**kwargs):
                 open_name = self.out_mapping[name]
                 outputs[open_name] = out[name]
 
+            # Cache inputs
+            self._last_inputs = {
+                name: inputs[self.data_mapping[name]].copy() for name in self.data
+            }
+
+        def compute_partials(self, inputs, partials):
+            # Re-optimize if inputs changed since compute()
+            inputs_changed = not hasattr(self, "_last_inputs")
+            if not inputs_changed:
+                for name in self.data:
+                    open_name = self.data_mapping[name]
+                    if not np.array_equal(inputs[open_name], self._last_inputs[name]):
+                        inputs_changed = True
+                        break
+
+            if inputs_changed:
+                data = self.model.get_data_vector()
+                for name in self.data:
+                    open_name = self.data_mapping[name]
+                    data[name] = inputs[open_name]
+                self.opt.optimize(self.opt_options)
+                self._last_inputs = {
+                    name: inputs[self.data_mapping[name]].copy() for name in self.data
+                }
+
+            # Compute derivatives only when needed
             self.dfdx, self.of_map, self.wrt_map = (
                 self.opt.compute_post_opt_derivatives(of=self.output, wrt=self.data)
             )
 
-        def compute_partials(self, inputs, partials):
             for of in self.of_map:
                 open_of = self.out_mapping[of]
                 for wrt in self.wrt_map:
