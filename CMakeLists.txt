@@ -86,9 +86,7 @@ pybind11_add_module(amigo MODULE
 
 # Link the CUDA runtime (shared)
 if(AMIGO_ENABLE_CUDA)
-  target_link_libraries(amigo PRIVATE CUDA::cudart)
-  # If you use driver API (cuMemAlloc, etc.), also:
-  # target_link_libraries(amigo PRIVATE CUDA::cuda_driver)
+  target_link_libraries(amigo PRIVATE CUDA::cudart CUDA::cudss)
 endif()
 
 # Add LAPACK and BLAS

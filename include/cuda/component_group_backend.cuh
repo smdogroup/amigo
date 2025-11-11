@@ -1,6 +1,7 @@
 #ifndef AMIGO_CUDA_COMPONENT_GROUP_H
 #define AMIGO_CUDA_COMPONENT_GROUP_H
 
+#include "amigo.h"
 #include "csr_matrix.h"
 #include "layout.h"
 #include "vector.h"
@@ -21,8 +22,8 @@ AMIGO_DEVICE void add_gradient(Data& data, Input& input, Input& grad) {
 }
 
 template <class Input, class Data, class Component, class... Remain>
-AMIGO_DEVICE void add_hessian_product(Data& data, Input& input,
-                                      Input& dir, Input& h) {
+AMIGO_DEVICE void add_hessian_product(Data& data, Input& input, Input& dir,
+                                      Input& h) {
   if constexpr (!Component::is_compute_empty) {
     Input grad;
     Component::hessian(data, input, dir, grad, h);

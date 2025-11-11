@@ -11,6 +11,7 @@ typedef SSIZE_T ssize_t;
 #include "alias_tracker.h"
 #include "amigo_include_paths.h"
 #include "csr_matrix.h"
+#include "cuda/csr_factor_cuda.h"
 #include "external_component.h"
 #include "optimization_problem.h"
 #include "optimizer.h"
@@ -267,6 +268,12 @@ PYBIND11_MODULE(amigo, mod) {
       .value("NATURAL", amigo::OrderingType::NATURAL)
       .export_values();
 
+  py::enum_<amigo::MemoryLocation>(mod, "MemoryLocation")
+      .value("HOST_AND_DEVICE", amigo::MemoryLocation::HOST_AND_DEVICE)
+      .value("HOST_ONLY", amigo::MemoryLocation::HOST_ONLY)
+      .value("DEVICE_ONLY", amigo::MemoryLocation::DEVICE_ONLY)
+      .export_values();
+
   mod.def("reorder_model", &reorder_model, py::arg("order_type"),
           py::arg("arrays"), py::arg("output_indices") = py::none());
 
@@ -362,7 +369,7 @@ PYBIND11_MODULE(amigo, mod) {
   py::class_<amigo::OptimizationProblem<double>,
              std::shared_ptr<amigo::OptimizationProblem<double>>>(
       mod, "OptimizationProblem")
-      .def(py::init([](py::object pyobj,
+      .def(py::init([](py::object pyobj, amigo::MemoryLocation mem_loc,
                        std::shared_ptr<amigo::NodeOwners> data_owners,
                        std::shared_ptr<amigo::NodeOwners> var_owners,
                        std::shared_ptr<amigo::NodeOwners> output_owners,
@@ -374,8 +381,8 @@ PYBIND11_MODULE(amigo, mod) {
           comm = *PyMPIComm_Get(pyobj.ptr());
         }
         return std::make_shared<amigo::OptimizationProblem<double>>(
-            comm, data_owners, var_owners, output_owners, is_multiplier,
-            components);
+            comm, mem_loc, data_owners, var_owners, output_owners,
+            is_multiplier, components);
       }))
       .def("get_num_variables",
            &amigo::OptimizationProblem<double>::get_num_variables)
@@ -453,6 +460,14 @@ PYBIND11_MODULE(amigo, mod) {
       .def(py::init<std::shared_ptr<amigo::CSRMat<double>>>())
       .def("factor", &amigo::SparseCholesky<double>::factor)
       .def("solve", &amigo::SparseCholesky<double>::solve);
+
+#ifdef AMIGO_USE_CUDA
+  py::class_<amigo::CSRMatFactorCuda, std::shared_ptr<amigo::CSRMatFactorCuda>>(
+      mod, "CSRMatFactorCuda")
+      .def(py::init<std::shared_ptr<amigo::CSRMat<double>>>())
+      .def("factor", &amigo::CSRMatFactorCuda::factor)
+      .def("solve", &amigo::CSRMatFactorCuda::solve);
+#endif
 
   py::class_<amigo::OptVector<double>,
              std::shared_ptr<amigo::OptVector<double>>>(mod, "OptVector")

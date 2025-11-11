@@ -20,6 +20,7 @@ class OptimizationProblem {
    * @brief Construct a new Optimization Problem object
    *
    * @param comm The MPI communicator
+   * @param mem_loc Memory location for the problem
    * @param data_owners The owners of the data
    * @param var_owners The owners for the variables (inputs/multipliers)
    * @param output_owners The owners for the outputs
@@ -27,12 +28,14 @@ class OptimizationProblem {
    * @param components The component groups for the model
    */
   OptimizationProblem(
-      MPI_Comm comm, std::shared_ptr<NodeOwners> data_owners,
+      MPI_Comm comm, MemoryLocation mem_loc,
+      std::shared_ptr<NodeOwners> data_owners,
       std::shared_ptr<NodeOwners> var_owners,
       std::shared_ptr<NodeOwners> output_owners,
       std::shared_ptr<Vector<int>> is_multiplier_,
       const std::vector<std::shared_ptr<ComponentGroupBase<T>>>& components)
       : comm(comm),
+        mem_loc(mem_loc),
         data_owners(data_owners),
         var_owners(var_owners),
         output_owners(output_owners),
@@ -127,9 +130,10 @@ class OptimizationProblem {
    *
    * @return std::shared_ptr<Vector<T>> The vector object
    */
-  std::shared_ptr<Vector<T>> create_vector() const {
+  std::shared_ptr<Vector<T>> create_vector(
+      MemoryLocation loc = MemoryLocation::HOST_AND_DEVICE) const {
     return std::make_shared<Vector<T>>(var_owners->get_local_size(),
-                                       var_owners->get_ext_size());
+                                       var_owners->get_ext_size(), loc);
   }
 
   /**
@@ -137,9 +141,10 @@ class OptimizationProblem {
    *
    * @return std::shared_ptr<Vector<T>> The output vector object
    */
-  std::shared_ptr<Vector<T>> create_output_vector() const {
+  std::shared_ptr<Vector<T>> create_output_vector(
+      MemoryLocation loc = MemoryLocation::HOST_AND_DEVICE) const {
     return std::make_shared<Vector<T>>(output_owners->get_local_size(),
-                                       output_owners->get_ext_size());
+                                       output_owners->get_ext_size(), loc);
   }
 
   /**
@@ -161,9 +166,10 @@ class OptimizationProblem {
    *
    * @return std::shared_ptr<Vector<T>> The data vector object
    */
-  std::shared_ptr<Vector<T>> create_data_vector() const {
+  std::shared_ptr<Vector<T>> create_data_vector(
+      MemoryLocation loc = MemoryLocation::HOST_AND_DEVICE) const {
     return std::make_shared<Vector<T>>(data_owners->get_local_size(),
-                                       data_owners->get_ext_size());
+                                       data_owners->get_ext_size(), loc);
   }
 
   /**
@@ -382,8 +388,8 @@ class OptimizationProblem {
 
     std::shared_ptr<OptimizationProblem<T>> opt =
         std::make_shared<OptimizationProblem<T>>(
-            comm, new_data_owners, new_var_owners, new_output_owners, nullptr,
-            new_comps);
+            comm, mem_loc, new_data_owners, new_var_owners, new_output_owners,
+            nullptr, new_comps);
 
     bool distribute = true;
     scatter_vector(is_multiplier, opt, opt->is_multiplier, root, distribute);
@@ -583,9 +589,7 @@ class OptimizationProblem {
    */
   std::shared_ptr<CSRMat<T>> create_matrix() {
     if (mat) {
-      std::shared_ptr<CSRMat<T>> dup = mat->duplicate();
-      dup->copy_pattern_host_to_device();
-      return dup;
+      return mat->duplicate();
     } else {
       std::vector<int> intervals;
       auto element_nodes = get_element_nodes(intervals);
@@ -644,15 +648,12 @@ class OptimizationProblem {
 
       // Distribute the pattern across matrices
       mat_dist =
-          new MatrixDistribute(comm, var_owners, var_owners, num_variables,
-                               num_variables, rowp, cols, mat);
+          new MatrixDistribute(comm, mem_loc, var_owners, var_owners,
+                               num_variables, num_variables, rowp, cols, mat);
       mat_dist_ctx = mat_dist->create_context<T>();
 
       delete[] rowp;
       delete[] cols;
-
-      // Copy the non-zero pattern to the device (if applicable)
-      mat->copy_pattern_host_to_device();
 
       // Perform any component group initializations with the Hessian matrix
       for (size_t i = 0; i < components.size(); i++) {
@@ -765,11 +766,18 @@ class OptimizationProblem {
     x->copy_host_to_device();
     data_vec->copy_host_to_device();
 
+    // Compute the Hessian matrix entries
     matrix->zero();
     for (size_t i = 0; i < components.size(); i++) {
       components[i]->add_hessian(*data_vec, *x, *var_owners, *matrix);
     }
-    matrix->copy_data_device_to_host();
+
+    // If the host and device need the values, copy them back
+    if (mem_loc == MemoryLocation::HOST_AND_DEVICE) {
+      matrix->copy_data_device_to_host();
+    } else if (mem_loc == MemoryLocation::DEVICE_ONLY) {
+      matrix->copy_ext_data_device_to_host();
+    }
 
     if (zero_design_contrib) {
       int nrows, ncols, nnz;
@@ -822,9 +830,7 @@ class OptimizationProblem {
    */
   std::shared_ptr<CSRMat<T>> create_gradient_jacobian_wrt_data() {
     if (grad_jac) {
-      std::shared_ptr<CSRMat<T>> dup = grad_jac->duplicate();
-      dup->copy_pattern_host_to_device();
-      return dup;
+      return grad_jac->duplicate();
     } else {
       std::vector<int> intervals(components.size() + 1);
       intervals[0] = 0;
@@ -869,14 +875,12 @@ class OptimizationProblem {
 
       // Distribute the pattern across matrices
       grad_jac_dist =
-          new MatrixDistribute(comm, var_owners, data_owners, num_variables,
-                               num_data, rowp, cols, grad_jac);
+          new MatrixDistribute(comm, mem_loc, var_owners, data_owners,
+                               num_variables, num_data, rowp, cols, grad_jac);
       grad_jac_dist_ctx = grad_jac_dist->create_context<T>();
 
       delete[] rowp;
       delete[] cols;
-
-      grad_jac->copy_pattern_host_to_device();
 
       return grad_jac;
     }
@@ -955,9 +959,7 @@ class OptimizationProblem {
    */
   std::shared_ptr<CSRMat<T>> create_output_jacobian_wrt_input() {
     if (input_jac) {
-      std::shared_ptr<CSRMat<T>> dup = input_jac->duplicate();
-      dup->copy_pattern_host_to_device();
-      return dup;
+      return input_jac->duplicate();
     } else {
       std::vector<int> intervals(components.size() + 1);
       intervals[0] = 0;
@@ -1002,15 +1004,13 @@ class OptimizationProblem {
                                                  element_output, &rowp, &cols);
 
       // Distribute the pattern across matrices
-      input_jac_dist =
-          new MatrixDistribute(comm, output_owners, var_owners, num_outputs,
-                               num_variables, rowp, cols, input_jac);
+      input_jac_dist = new MatrixDistribute(
+          comm, mem_loc, output_owners, var_owners, num_outputs, num_variables,
+          rowp, cols, input_jac);
       input_jac_dist_ctx = input_jac_dist->create_context<T>();
 
       delete[] rowp;
       delete[] cols;
-
-      input_jac->copy_pattern_host_to_device();
 
       return input_jac;
     }
@@ -1023,9 +1023,7 @@ class OptimizationProblem {
    */
   std::shared_ptr<CSRMat<T>> create_output_jacobian_wrt_data() {
     if (data_jac) {
-      std::shared_ptr<CSRMat<T>> dup = data_jac->duplicate();
-      dup->copy_pattern_host_to_device();
-      return dup;
+      return data_jac->duplicate();
     } else {
       std::vector<int> intervals(components.size() + 1);
       intervals[0] = 0;
@@ -1071,14 +1069,12 @@ class OptimizationProblem {
 
       // Distribute the pattern across matrices
       data_jac_dist =
-          new MatrixDistribute(comm, output_owners, data_owners, num_outputs,
-                               num_data, rowp, cols, data_jac);
+          new MatrixDistribute(comm, mem_loc, output_owners, data_owners,
+                               num_outputs, num_data, rowp, cols, data_jac);
       data_jac_dist_ctx = data_jac_dist->create_context<T>();
 
       delete[] rowp;
       delete[] cols;
-
-      data_jac->copy_pattern_host_to_device();
 
       return data_jac;
     }
@@ -1286,6 +1282,9 @@ class OptimizationProblem {
 
   // The MPI communicator
   MPI_Comm comm;
+
+  // The memory location
+  MemoryLocation mem_loc;
 
   // Node owner data for the data and variables
   std::shared_ptr<NodeOwners> data_owners;

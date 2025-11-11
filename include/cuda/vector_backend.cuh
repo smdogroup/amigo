@@ -22,20 +22,20 @@ class CudaVecBackend {
       cudaFree(device_ptr);
     }
     size = size_;
-    cudaMalloc(&device_ptr, size * sizeof(T));
+    AMIGO_CHECK_CUDA(cudaMalloc(&device_ptr, size * sizeof(T)));
   }
 
   void copy_host_to_device(T* host_ptr) {
-    cudaMemcpy(device_ptr, host_ptr, size * sizeof(T), cudaMemcpyHostToDevice);
+    AMIGO_CHECK_CUDA(cudaMemcpy(device_ptr, host_ptr, size * sizeof(T),
+                                cudaMemcpyHostToDevice));
   }
 
   void copy_device_to_host(T* host_ptr) {
-    cudaMemcpy(host_ptr, device_ptr, size * sizeof(T), cudaMemcpyDeviceToHost);
+    AMIGO_CHECK_CUDA(cudaMemcpy(host_ptr, device_ptr, size * sizeof(T),
+                                cudaMemcpyDeviceToHost));
   }
 
-  void zero(){
-    cudaMemset(device_ptr, 0, size * sizeof(T));
-  }
+  void zero() { AMIGO_CHECK_CUDA(cudaMemset(device_ptr, 0, size * sizeof(T))); }
 
   T* get_device_ptr() { return device_ptr; }
   const T* get_device_ptr() const { return device_ptr; }

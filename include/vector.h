@@ -34,24 +34,22 @@ template <typename T>
 using DefaultVecBackend = SerialVecBackend<T>;
 #endif  // AMIGO_USE_CUDA
 
-enum class VectorLocation { HOST_ONLY, DEVICE_ONLY, HOST_AND_DEVICE };
-
 template <typename T, class Backend = DefaultVecBackend<T>>
 class Vector {
  public:
   Vector(int local_size, int ext_size = 0,
-         VectorLocation vtype = VectorLocation::HOST_AND_DEVICE)
+         MemoryLocation mem_loc = MemoryLocation::HOST_AND_DEVICE)
       : local_size(local_size),
         ext_size(ext_size),
         size(local_size + ext_size),
-        vtype(vtype) {
-    if (vtype == VectorLocation::HOST_AND_DEVICE ||
-        vtype == VectorLocation::HOST_ONLY) {
+        mem_loc(mem_loc) {
+    if (mem_loc == MemoryLocation::HOST_AND_DEVICE ||
+        mem_loc == MemoryLocation::HOST_ONLY) {
       array = new T[size];
       std::fill(array, array + size, T(0.0));
     }
-    if (vtype == VectorLocation::HOST_AND_DEVICE ||
-        vtype == VectorLocation::DEVICE_ONLY) {
+    if (mem_loc == MemoryLocation::HOST_AND_DEVICE ||
+        mem_loc == MemoryLocation::DEVICE_ONLY) {
       backend.allocate(size);
     }
   }
@@ -59,7 +57,7 @@ class Vector {
       : local_size(local_size),
         ext_size(ext_size),
         size(local_size + ext_size),
-        vtype(VectorLocation::HOST_ONLY) {
+        mem_loc(MemoryLocation::HOST_ONLY) {
     array = *array_;
     *array_ = nullptr;
   }
@@ -71,13 +69,13 @@ class Vector {
   }
 
   void copy_host_to_device() {
-    if (vtype == VectorLocation::HOST_AND_DEVICE) {
+    if (mem_loc == MemoryLocation::HOST_AND_DEVICE) {
       backend.copy_host_to_device(array);
     }
   }
 
   void copy_device_to_host() {
-    if (vtype == VectorLocation::HOST_AND_DEVICE) {
+    if (mem_loc == MemoryLocation::HOST_AND_DEVICE) {
       backend.copy_device_to_host(array);
     }
   }
@@ -154,7 +152,7 @@ class Vector {
   int local_size;  // The locally owned nodes
   int ext_size;    // Size of externally owned nodes referenced on this proc
   int size;        // Total size of the vector
-  VectorLocation vtype;  // Location of the data
+  MemoryLocation mem_loc;  // Location of the data
   T* array;              // Host array
 
   // Backend for the GPU implementation

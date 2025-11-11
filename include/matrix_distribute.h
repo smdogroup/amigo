@@ -3,6 +3,7 @@
 
 #include <mpi.h>
 
+#include "amigo.h"
 #include "node_owners.h"
 #include "ordering_utils.h"
 #include "vector_distribute.h"
@@ -43,11 +44,15 @@ class MatrixDistribute {
    * @param cols
    */
   template <typename T>
-  MatrixDistribute(MPI_Comm comm, std::shared_ptr<NodeOwners> row_owners,
+  MatrixDistribute(MPI_Comm comm, MemoryLocation mem_loc,
+                   std::shared_ptr<NodeOwners> row_owners,
                    std::shared_ptr<NodeOwners> col_owners, int nrows, int ncols,
                    const int* rowp, const int* cols,
                    std::shared_ptr<CSRMat<T>>& csr)
-      : comm(comm), row_owners(row_owners), col_owners(col_owners) {
+      : comm(comm),
+        mem_loc(mem_loc),
+        row_owners(row_owners),
+        col_owners(col_owners) {
     int mpi_size, mpi_rank;
     MPI_Comm_rank(comm, &mpi_rank);
     MPI_Comm_size(comm, &mpi_size);
@@ -310,7 +315,7 @@ class MatrixDistribute {
     // Create the CSR data structure
     csr = CSRMat<T>::create_from_csr_data(nrows, col_ranges[mpi_size], nnz,
                                           assembled_rowp, assembled_cols,
-                                          row_owners, col_owners);
+                                          mem_loc, row_owners, col_owners);
 
     delete[] ptr_to_rows;
     delete[] index_to_rows;
@@ -353,15 +358,15 @@ class MatrixDistribute {
   template <typename T>
   void begin_assembly(std::shared_ptr<CSRMat<T>> mat,
                       MatDistributeContext<T>* ctx) {
-    // Get the pointer to the external part of A
-    int num_local_rows = row_owners->get_local_size();
+    // Copy the external values from the device to host
+    mat->copy_ext_data_device_to_host();
 
-    const int* rowp;
-    T* A;
-    mat->get_data(nullptr, nullptr, nullptr, &rowp, nullptr, &A);
+    // Get the pointer to the external part of A
+    const T* A = mat->get_ext_data();
 
     // Send the data to the receiving processors
-    for (int i = 0, offset = rowp[num_local_rows]; i < num_ext_procs; i++) {
+    // for (int i = 0, offset = rowp[num_local_rows]; i < num_ext_procs; i++) {
+    for (int i = 0, offset = 0; i < num_ext_procs; i++) {
       MPI_Isend(&A[offset], ext_entry_count[i], get_mpi_type<T>(), ext_procs[i],
                 ctx->tag, comm, &ctx->ext_requests[i]);
       offset += ext_entry_count[i];
@@ -379,8 +384,7 @@ class MatrixDistribute {
    *
    * @tparam T type
    * @param mat The matrix (or a duplicate) created at initialization
-   * @param ctx The
-   *  matrix distribution context
+   * @param ctx The matrix distribution context
    */
   template <typename T>
   void end_assembly(std::shared_ptr<CSRMat<T>> mat,
@@ -398,7 +402,8 @@ class MatrixDistribute {
   }
 
  private:
-  MPI_Comm comm;
+  MPI_Comm comm;           // MPI Communicator
+  MemoryLocation mem_loc;  // Memory location
 
   // Row and column indices
   std::shared_ptr<NodeOwners> row_owners;
