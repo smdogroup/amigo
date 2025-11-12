@@ -461,7 +461,7 @@ PYBIND11_MODULE(amigo, mod) {
       .def("factor", &amigo::SparseCholesky<double>::factor)
       .def("solve", &amigo::SparseCholesky<double>::solve);
 
-#ifdef AMIGO_USE_CUDA
+#ifdef AMIGO_USE_CUDSS
   py::class_<amigo::CSRMatFactorCuda, std::shared_ptr<amigo::CSRMatFactorCuda>>(
       mod, "CSRMatFactorCuda")
       .def(py::init<std::shared_ptr<amigo::CSRMat<double>>>())

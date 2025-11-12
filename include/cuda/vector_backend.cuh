@@ -10,39 +10,44 @@ namespace amigo {
 template <typename T>
 class CudaVecBackend {
  public:
-  CudaVecBackend() : size(0), device_ptr(nullptr) {}
+  CudaVecBackend() : size(0), d_ptr(nullptr) {}
   ~CudaVecBackend() {
-    if (device_ptr) {
-      cudaFree(device_ptr);
+    if (d_ptr) {
+      cudaFree(d_ptr);
     }
   }
 
   void allocate(int size_) {
-    if (device_ptr) {
-      cudaFree(device_ptr);
+    if (d_ptr) {
+      cudaFree(d_ptr);
     }
     size = size_;
-    AMIGO_CHECK_CUDA(cudaMalloc(&device_ptr, size * sizeof(T)));
+    AMIGO_CHECK_CUDA(cudaMalloc(&d_ptr, size * sizeof(T)));
   }
 
-  void copy_host_to_device(T* host_ptr) {
-    AMIGO_CHECK_CUDA(cudaMemcpy(device_ptr, host_ptr, size * sizeof(T),
-                                cudaMemcpyHostToDevice));
+  void copy_host_to_device(const T* h_ptr) {
+    AMIGO_CHECK_CUDA(
+        cudaMemcpy(d_ptr, h_ptr, size * sizeof(T), cudaMemcpyHostToDevice));
   }
 
-  void copy_device_to_host(T* host_ptr) {
-    AMIGO_CHECK_CUDA(cudaMemcpy(host_ptr, device_ptr, size * sizeof(T),
-                                cudaMemcpyDeviceToHost));
+  void copy_device_to_host(T* h_ptr) {
+    AMIGO_CHECK_CUDA(
+        cudaMemcpy(h_ptr, d_ptr, size * sizeof(T), cudaMemcpyDeviceToHost));
   }
 
-  void zero() { AMIGO_CHECK_CUDA(cudaMemset(device_ptr, 0, size * sizeof(T))); }
+  void copy(const T* d_src) {
+    AMIGO_CHECK_CUDA(
+        cudaMemcpy(d_ptr, d_src, size * sizeof(T), cudaMemcpyDeviceToDevice));
+  }
 
-  T* get_device_ptr() { return device_ptr; }
-  const T* get_device_ptr() const { return device_ptr; }
+  void zero() { AMIGO_CHECK_CUDA(cudaMemset(d_ptr, 0, size * sizeof(T))); }
+
+  T* get_device_ptr() { return d_ptr; }
+  const T* get_device_ptr() const { return d_ptr; }
 
  private:
   int size;
-  T* device_ptr;
+  T* d_ptr;
 };
 
 }  // namespace amigo

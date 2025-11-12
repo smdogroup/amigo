@@ -5,7 +5,7 @@
 #include "csr_matrix.h"
 #include "vector.h"
 
-// #ifdef AMIGO_USE_CUDA
+#ifdef AMIGO_USE_CUDSS
 
 namespace amigo {
 
@@ -120,6 +120,6 @@ class CSRMatFactorCuda {
 
 }  // namespace amigo
 
-#endif
+#endif  // AMIGO_USE_CUDSS
 
 #endif  // AMIGO_CUDA_MATRIX_FACTOR_H

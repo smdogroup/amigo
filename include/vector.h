@@ -19,8 +19,9 @@ class SerialVecBackend {
   ~SerialVecBackend() {}
 
   void allocate(int size_) {}
-  void copy_host_to_device(T* host_dest) {}
-  void copy_device_to_host(T* host_src) {}
+  void copy_host_to_device(T* h_dest) {}
+  void copy_device_to_host(T* h_src) {}
+  void copy(T* d_src) {}
   void zero() {}
   T* get_device_ptr() { return nullptr; }
   const T* get_device_ptr() const { return nullptr; }
@@ -68,6 +69,8 @@ class Vector {
     }
   }
 
+  MemoryLocation get_memory_location() const { return mem_loc; }
+
   void copy_host_to_device() {
     if (mem_loc == MemoryLocation::HOST_AND_DEVICE) {
       backend.copy_host_to_device(array);
@@ -90,6 +93,7 @@ class Vector {
     if (array) {
       std::copy(src.array, src.array + size, array);
     }
+    backend.copy(src.get_device_array());
   }
 
   void zero() {
@@ -153,7 +157,7 @@ class Vector {
   int ext_size;    // Size of externally owned nodes referenced on this proc
   int size;        // Total size of the vector
   MemoryLocation mem_loc;  // Location of the data
-  T* array;              // Host array
+  T* array;                // Host array
 
   // Backend for the GPU implementation
   Backend backend;
