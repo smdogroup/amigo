@@ -223,10 +223,10 @@ def ExplicitOpenMDAOPostOptComponent(**kwargs):
                     name: inputs[self.data_mapping[name]].copy() for name in self.data
                 }
 
-            # Compute derivatives only when needed
-            self.dfdx, self.of_map, self.wrt_map = (
-                self.opt.compute_post_opt_derivatives(of=self.output, wrt=self.data)
-            )
+                # Compute derivatives only when inputs change
+                self.dfdx, self.of_map, self.wrt_map = (
+                    self.opt.compute_post_opt_derivatives(of=self.output, wrt=self.data)
+                )
 
             for of in self.of_map:
                 open_of = self.out_mapping[of]
