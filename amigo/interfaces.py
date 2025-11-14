@@ -213,7 +213,8 @@ def ExplicitOpenMDAOPostOptComponent(**kwargs):
                         inputs_changed = True
                         break
 
-            if inputs_changed:
+            # Also compute derivatives if they haven't been computed yet
+            if inputs_changed or not hasattr(self, "of_map"):
                 data = self.model.get_data_vector()
                 for name in self.data:
                     open_name = self.data_mapping[name]
@@ -232,8 +233,23 @@ def ExplicitOpenMDAOPostOptComponent(**kwargs):
                 open_of = self.out_mapping[of]
                 for wrt in self.wrt_map:
                     open_wrt = self.data_mapping[wrt]
-                    partials[open_of, open_wrt] = self.dfdx[
-                        self.of_map[of], self.wrt_map[wrt]
-                    ]
+                    # Use np.ix_ for proper 2D submatrix extraction
+                    of_indices = self.of_map[of]
+                    wrt_indices = self.wrt_map[wrt]
+                    
+                    # Handle both scalar and array indices
+                    if np.isscalar(of_indices):
+                        of_indices = [of_indices]
+                    if np.isscalar(wrt_indices):
+                        wrt_indices = [wrt_indices]
+                    
+                    # Extract submatrix and reshape if needed
+                    subjac = self.dfdx[np.ix_(of_indices, wrt_indices)]
+                    
+                    # Flatten if both dimensions are arrays (for proper shape)
+                    if len(of_indices) > 1 or len(wrt_indices) > 1:
+                        partials[open_of, open_wrt] = subjac.flatten()
+                    else:
+                        partials[open_of, open_wrt] = subjac
 
     return _ExplicitOpenMDAOPostOptComponent(**kwargs)
