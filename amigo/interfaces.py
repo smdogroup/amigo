@@ -236,16 +236,16 @@ def ExplicitOpenMDAOPostOptComponent(**kwargs):
                     # Use np.ix_ for proper 2D submatrix extraction
                     of_indices = self.of_map[of]
                     wrt_indices = self.wrt_map[wrt]
-                    
+
                     # Handle both scalar and array indices
                     if np.isscalar(of_indices):
                         of_indices = [of_indices]
                     if np.isscalar(wrt_indices):
                         wrt_indices = [wrt_indices]
-                    
+
                     # Extract submatrix and reshape if needed
                     subjac = self.dfdx[np.ix_(of_indices, wrt_indices)]
-                    
+
                     # Flatten if both dimensions are arrays (for proper shape)
                     if len(of_indices) > 1 or len(wrt_indices) > 1:
                         partials[open_of, open_wrt] = subjac.flatten()
