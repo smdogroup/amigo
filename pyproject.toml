@@ -8,7 +8,7 @@ version = "0.0.1"
 description = "A friendly library for multidisciplinary analysis and optimization."
 readme = "README.md"
 authors = [{name = "Graeme J. Kennedy", email = "graeme.kennedy@aerospace.gatech.edu"}]
-dependencies = ["black>=25.1.0", "pre-commit>=3.5.0", "numpy", "scipy", "pybind11", "matplotlib", "niceplots", "setuptools", "mpi4py"]
+dependencies = ["black>=25.1.0", "pre-commit>=3.5.0", "numpy", "scipy", "pybind11", "matplotlib", "niceplots", "setuptools", "mpi4py", "networkx", "pyvis", "tabulate", "gmsh", "icecream"]
 
 [tool.setuptools.packages.find]
 where = ["."]
