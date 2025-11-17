@@ -87,10 +87,11 @@ class Vector {
     if (array) {
       std::copy(src, src + size, array);
     }
+    backend.copy(src.get_device_array());
   }
 
   void copy(const Vector<T>& src) {
-    if (array) {
+    if (array && src.array) {
       std::copy(src.array, src.array + size, array);
     }
     backend.copy(src.get_device_array());
@@ -121,6 +122,7 @@ class Vector {
         array[i] += alpha * x.array[i];
       }
     }
+    backend.axpy(alpha, x.get_device_array());
   }
 
   T dot(const Vector<T>& x) const {
@@ -130,6 +132,7 @@ class Vector {
         value += array[i] * x.array[i];
       }
     }
+    value = backend.dot(x.get_device_array());
     return value;
   }
 
@@ -138,6 +141,26 @@ class Vector {
       for (int i = 0; i < size; i++) {
         array[i] *= alpha;
       }
+    }
+    backend.scale(alpha);
+  }
+
+  template <ExecPolicy policy>
+  T* get_array() {
+    if constexpr (policy == ExecPolicy::SERIAL ||
+                  policy == ExecPolicy::OPENMP) {
+      return array;
+    } else {
+      return backend.get_device_ptr();
+    }
+  }
+  template <ExecPolicy policy>
+  const T* get_array() const {
+    if constexpr (policy == ExecPolicy::SERIAL ||
+                  policy == ExecPolicy::OPENMP) {
+      return array;
+    } else {
+      return backend.get_device_ptr();
     }
   }
 

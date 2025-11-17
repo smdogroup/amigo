@@ -755,27 +755,10 @@ class OmpGroupBackend {
   int* elem_per_color;
 };
 
-template <typename T, int ncomp, class Input, int ndata, class Data,
-          class... Components>
-using DefaultGroupBackend =
-    OmpGroupBackend<T, ncomp, Input, ndata, Data, Components...>;
-
-#elif defined(AMIGO_USE_CUDA)
-
-template <typename T, int ncomp, class Input, int ndata, class Data,
-          class... Components>
-using DefaultGroupBackend =
-    CudaGroupBackend<T, ncomp, Input, ndata, Data, Components...>;
-
-#else  // Default to serial implementation
-template <typename T, int ncomp, class Input, int ndata, class Data,
-          class... Components>
-using DefaultGroupBackend =
-    SerialGroupBackend<T, ncomp, Input, ndata, Data, Components...>;
 #endif
 
-template <typename T, class... Components>
-class ComponentGroup : public ComponentGroupBase<T> {
+template <typename T, ExecPolicy policy, class... Components>
+class ComponentGroup : public ComponentGroupBase<T, policy> {
  public:
   static constexpr int num_components = sizeof...(Components);
 
@@ -788,8 +771,13 @@ class ComponentGroup : public ComponentGroupBase<T> {
       __get_collection_noutputs<Components...>::value;
 
   // Use whatever class is defined as the default backend
-  using Backend =
-      DefaultGroupBackend<T, ncomp, Input, ndata, Data, Components...>;
+  using Backend = std::conditional_t<
+      policy == ExecPolicy::SERIAL,
+      SerialGroupBackend<T, ncomp, Input, ndata, Data, Components...>,
+      std::conditional_t<
+          policy == ExecPolicy::OPENMP,
+          OmpGroupBackend<T, ncomp, Input, ndata, Data, Components...>,
+          CudaGroupBackend<T, ncomp, Input, ndata, Data, Components...>>>;
 
   using OutputBackend =
       DefaultOutputBackend<T, ncomp, ndata, noutputs, Components...>;
@@ -802,11 +790,11 @@ class ComponentGroup : public ComponentGroupBase<T> {
         output_layout(num_elements, output_indices),
         backend(data_layout, layout, output_layout) {}
 
-  std::shared_ptr<ComponentGroupBase<T>> clone(
+  std::shared_ptr<ComponentGroupBase<T, policy>> clone(
       int num_elements, std::shared_ptr<Vector<int>> data_idx,
       std::shared_ptr<Vector<int>> layout_idx,
       std::shared_ptr<Vector<int>> output_idx) const {
-    return std::make_shared<ComponentGroup<T, Components...>>(
+    return std::make_shared<ComponentGroup<T, policy, Components...>>(
         num_elements, data_idx, layout_idx, output_idx);
   }
 

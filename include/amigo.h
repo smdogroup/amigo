@@ -3,9 +3,17 @@
 
 namespace amigo {
 
+/**
+ * @brief Tag where the memory is located host, device or both
+ */
 enum class MemoryLocation { HOST_ONLY, DEVICE_ONLY, HOST_AND_DEVICE };
 
-}
+/**
+ * @brief Tag where to execute the code: host or device
+ */
+enum class ExecPolicy { SERIAL, OPENMP, CUDA };
+
+}  // namespace amigo
 
 #ifdef AMIGO_USE_CUDA
 #define AMIGO_KERNEL __global__

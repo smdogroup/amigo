@@ -7,12 +7,12 @@
 
 namespace amigo {
 
-template <typename T>
+template <typename T, ExecPolicy policy>
 class ComponentGroupBase {
  public:
   virtual ~ComponentGroupBase() {}
 
-  virtual std::shared_ptr<ComponentGroupBase<T>> clone(
+  virtual std::shared_ptr<ComponentGroupBase<T, policy>> clone(
       int num_elements, std::shared_ptr<Vector<int>> data_idx,
       std::shared_ptr<Vector<int>> layout_idx,
       std::shared_ptr<Vector<int>> output_idx) const = 0;

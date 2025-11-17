@@ -1,19 +1,16 @@
 #ifndef AMIGO_OPTIMIZATION_PROBLEM_H
 #define AMIGO_OPTIMIZATION_PROBLEM_H
 
-// #ifdef AMIGO_USE_MPI
 #include <mpi.h>
 
-#include "matrix_distribute.h"
-#include "vector_distribute.h"
-// #endif
-
 #include "component_group_base.h"
+#include "matrix_distribute.h"
 #include "node_owners.h"
+#include "vector_distribute.h"
 
 namespace amigo {
 
-template <typename T>
+template <typename T, ExecPolicy policy>
 class OptimizationProblem {
  public:
   /**
@@ -28,14 +25,12 @@ class OptimizationProblem {
    * @param components The component groups for the model
    */
   OptimizationProblem(
-      MPI_Comm comm, MemoryLocation mem_loc,
-      std::shared_ptr<NodeOwners> data_owners,
+      MPI_Comm comm, std::shared_ptr<NodeOwners> data_owners,
       std::shared_ptr<NodeOwners> var_owners,
       std::shared_ptr<NodeOwners> output_owners,
       std::shared_ptr<Vector<int>> is_multiplier_,
       const std::vector<std::shared_ptr<ComponentGroupBase<T>>>& components)
       : comm(comm),
-        mem_loc(mem_loc),
         data_owners(data_owners),
         var_owners(var_owners),
         output_owners(output_owners),
@@ -388,8 +383,8 @@ class OptimizationProblem {
 
     std::shared_ptr<OptimizationProblem<T>> opt =
         std::make_shared<OptimizationProblem<T>>(
-            comm, mem_loc, new_data_owners, new_var_owners, new_output_owners,
-            nullptr, new_comps);
+            comm, new_data_owners, new_var_owners, new_output_owners, nullptr,
+            new_comps);
 
     bool distribute = true;
     scatter_vector(is_multiplier, opt, opt->is_multiplier, root, distribute);
@@ -1283,9 +1278,6 @@ class OptimizationProblem {
   // The MPI communicator
   MPI_Comm comm;
 
-  // The memory location
-  MemoryLocation mem_loc;
-
   // Node owner data for the data and variables
   std::shared_ptr<NodeOwners> data_owners;
   std::shared_ptr<NodeOwners> var_owners;
@@ -1295,7 +1287,7 @@ class OptimizationProblem {
   std::shared_ptr<Vector<int>> is_multiplier;
 
   // Component groups for the optimization problem
-  std::vector<std::shared_ptr<ComponentGroupBase<T>>> components;
+  std::vector<std::shared_ptr<ComponentGroupBase<T, policy>>> components;
 
   // Variable information
   VectorDistribute data_dist;
