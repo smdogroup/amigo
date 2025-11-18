@@ -3,6 +3,7 @@
 
 #include <cmath>
 
+#include "a2dcore.h"
 #include "amigo.h"
 #include "optimizer_backend.h"
 
@@ -74,7 +75,7 @@ template <typename T>
 void initialize_multipliers_and_slacks_cuda(T barrier_param,
                                             const OptInfo<T>& info,
                                             const T* d_g, OptStateData<T>& pt,
-                                            cudaStream_t stream = 0) {
+                                            cudaStream_t stream) {
   constexpr int TPB = 256;
 
   // Variables
@@ -199,7 +200,7 @@ AMIGO_KERNEL void add_residual_ineq_kernel(int num_inequalities,
 template <typename T>
 void add_residual_cuda(T barrier_param, T gamma, const OptInfo<T>& info,
                        OptStateData<const T>& pt, const T* g, T* r,
-                       cudaStream_t stream = 0) {
+                       cudaStream_t stream) {
   constexpr int TPB = 256;
   int gv = (info.num_variables + TPB - 1) / TPB;
   int ge = (info.num_equalities + TPB - 1) / TPB;
@@ -318,7 +319,7 @@ AMIGO_KERNEL void compute_update_ineq_kernel(int num_inequalities,
 template <typename T>
 void compute_update_cuda(T barrier_param, T gamma, const OptInfo<T>& info,
                          OptStateData<const T>& pt, OptStateData<T>& up,
-                         cudaStream_t stream = 0) {
+                         cudaStream_t stream) {
   constexpr int TPB = 256;
   int gv = (info.num_variables + TPB - 1) / TPB;
   int gi = (info.num_inequalities + TPB - 1) / TPB;
@@ -384,7 +385,7 @@ AMIGO_KERNEL void compute_diagonal_slack_kernel(int num_inequalities,
 
 template <typename T>
 void compute_diagonal_cuda(const OptInfo<T>& info, OptStateData<const T>& pt,
-                           T* diag, cudaStream_t stream = 0) {
+                           T* diag, cudaStream_t stream) {
   constexpr int TPB = 256;
   int gv = (info.num_variables + TPB - 1) / TPB;
   int gi = (info.num_inequalities + TPB - 1) / TPB;
@@ -629,7 +630,7 @@ template <typename T>
 void compute_max_step_cuda(const T tau, const OptInfo<T>& info,
                            OptStateData<const T>& pt, OptStateData<const T>& up,
                            T& alpha_x_max, int& x_index, T& alpha_z_max,
-                           int& z_index, cudaStream_t stream = 0) {
+                           int& z_index, cudaStream_t stream) {
   // Allocate device scalars for results
   T *d_alpha_x, *d_alpha_z;
   int *d_x_idx, *d_z_idx;
@@ -723,7 +724,7 @@ template <typename T>
 void apply_step_update_cuda(const T alpha_x, const T alpha_z,
                             const OptInfo<T>& info, OptStateData<const T>& pt,
                             OptStateData<const T>& up, OptStateData<T>& tmp,
-                            cudaStream_t stream = 0) {
+                            cudaStream_t stream) {
   constexpr int TPB = 256;
   int gv = (info.num_variables + TPB - 1) / TPB;
   int gi = (info.num_inequalities + TPB - 1) / TPB;
@@ -774,7 +775,7 @@ void compute_affine_start_point_cuda(T beta_min, const OptInfo<T>& info,
                                      OptStateData<const T>& pt,
                                      OptStateData<const T>& up,
                                      OptStateData<T>& tmp,
-                                     cudaStream_t stream = 0) {
+                                     cudaStream_t stream) {
   constexpr int TPB = 256;
   int gv = (info.num_variables + TPB - 1) / TPB;
   int gi = (info.num_inequalities + TPB - 1) / TPB;
@@ -783,6 +784,85 @@ void compute_affine_start_point_cuda(T beta_min, const OptInfo<T>& info,
   compute_affine_start_point_ineq_kernel<T><<<gi, TPB, 0, stream>>>(
       info.num_inequalities, beta_min, info, pt, up, tmp);
 }
+
+/**
+ *  Explicit instantiations for T = double
+ */
+template void initialize_multipliers_and_slacks_cuda<double>(
+    double barrier_param, const OptInfo<double>& info, const double* d_g,
+    OptStateData<double>& pt, cudaStream_t stream);
+
+template void add_residual_cuda<double>(double barrier_param, double gamma,
+                                        const OptInfo<double>& info,
+                                        OptStateData<const double>& pt,
+                                        const double* g, double* r,
+                                        cudaStream_t stream);
+
+template void compute_update_cuda<double>(double barrier_param, double gamma,
+                                          const OptInfo<double>& info,
+                                          OptStateData<const double>& pt,
+                                          OptStateData<double>& up,
+                                          cudaStream_t stream);
+
+template void compute_diagonal_cuda<double>(const OptInfo<double>& info,
+                                            OptStateData<const double>& pt,
+                                            double* diag, cudaStream_t stream);
+
+template void compute_max_step_cuda<double>(const double tau,
+                                            const OptInfo<double>& info,
+                                            OptStateData<const double>& pt,
+                                            OptStateData<const double>& up,
+                                            double& alpha_x_max, int& x_index,
+                                            double& alpha_z_max, int& z_index,
+                                            cudaStream_t stream);
+
+template void apply_step_update_cuda<double>(
+    const double alpha_x, const double alpha_z, const OptInfo<double>& info,
+    OptStateData<const double>& pt, OptStateData<const double>& up,
+    OptStateData<double>& tmp, cudaStream_t stream);
+
+template void compute_affine_start_point_cuda<double>(
+    double beta_min, const OptInfo<double>& info,
+    OptStateData<const double>& pt, OptStateData<const double>& up,
+    OptStateData<double>& tmp, cudaStream_t stream);
+
+/**
+ *  Explicit instantiations for T = float
+ */
+template void initialize_multipliers_and_slacks_cuda<float>(
+    float barrier_param, const OptInfo<float>& info, const float* d_g,
+    OptStateData<float>& pt, cudaStream_t stream);
+
+template void add_residual_cuda<float>(float barrier_param, float gamma,
+                                       const OptInfo<float>& info,
+                                       OptStateData<const float>& pt,
+                                       const float* g, float* r,
+                                       cudaStream_t stream);
+
+template void compute_update_cuda<float>(float barrier_param, float gamma,
+                                         const OptInfo<float>& info,
+                                         OptStateData<const float>& pt,
+                                         OptStateData<float>& up,
+                                         cudaStream_t stream);
+
+template void compute_diagonal_cuda<float>(const OptInfo<float>& info,
+                                           OptStateData<const float>& pt,
+                                           float* diag, cudaStream_t stream);
+
+template void compute_max_step_cuda<float>(
+    const float tau, const OptInfo<float>& info, OptStateData<const float>& pt,
+    OptStateData<const float>& up, float& alpha_x_max, int& x_index,
+    float& alpha_z_max, int& z_index, cudaStream_t stream);
+
+template void apply_step_update_cuda<float>(
+    const float alpha_x, const float alpha_z, const OptInfo<float>& info,
+    OptStateData<const float>& pt, OptStateData<const float>& up,
+    OptStateData<float>& tmp, cudaStream_t stream);
+
+template void compute_affine_start_point_cuda<float>(
+    float beta_min, const OptInfo<float>& info, OptStateData<const float>& pt,
+    OptStateData<const float>& up, OptStateData<float>& tmp,
+    cudaStream_t stream);
 
 }  // namespace detail
 
