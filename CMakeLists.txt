@@ -118,7 +118,27 @@ pybind11_add_module(amigo MODULE
 
 # Link the CUDA runtime (shared)
 if(AMIGO_ENABLE_CUDA)
-  target_link_libraries(amigo PRIVATE CUDA::cudart)
+  add_library(amigo_backend include/cuda/optimizer_backend.cu)
+  target_link_libraries(amigo_backend PUBLIC CUDA::cudart MPI::MPI_CXX)
+
+  target_include_directories(amigo_backend
+    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_include_directories(amigo_backend
+    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../a2d/include
+  )
+
+  # Feature flags visible to dependents
+  target_compile_definitions(amigo_backend PUBLIC
+    $<$<BOOL:${AMIGO_ENABLE_CUDA}>:AMIGO_USE_CUDA>
+    $<$<BOOL:${AMIGO_ENABLE_OPENMP}>:AMIGO_USE_OPENMP>
+  )
+
+  set_target_properties(amigo_backend PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+    CUDA_SEPARABLE_COMPILATION ON
+  )
+
+  target_link_libraries(amigo PRIVATE amigo_backend CUDA::cudart)
   # CUDA::cudss
 endif()
 

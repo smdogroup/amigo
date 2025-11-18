@@ -10,10 +10,6 @@
 #include "optimization_problem.h"
 #include "optimizer_backend.h"
 
-#ifdef AMIGO_USE_CUDA
-#include "cuda/optimizer_backend.cuh"
-#endif  // AMIGO_USE_CUDA
-
 namespace amigo {
 
 /**

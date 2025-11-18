@@ -1360,7 +1360,7 @@ class Component:
         # Collect all the group members together...
         group_type = "ComponentGroup"
 
-        cls = f"amigo::{group_type}<double"
+        cls = f"amigo::{group_type}<double, policy"
         for index, args in enumerate(self.args):
             if len(self.args) == 1:
                 class_name = self.name + "__"
@@ -1371,7 +1371,7 @@ class Component:
         cls += ">"
 
         module_class_name = f'"{self.name}"'
-        cpp = f"py::class_<{cls}, amigo::{group_type}Base<double>, std::shared_ptr<{cls}>>"
+        cpp = f"py::class_<{cls}, amigo::{group_type}Base<double, policy>, std::shared_ptr<{cls}>>"
         cpp += f"({mod_ident}, {module_class_name}).def("
 
         vec_cls = "std::shared_ptr<amigo::Vector<int>>"

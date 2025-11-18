@@ -443,8 +443,6 @@ template <typename T, int ncomp, int ndata, int noutput, class... Components>
 using DefaultOutputBackend =
     SerialOutputBackend<T, ncomp, ndata, noutput, Components...>;
 
-#ifdef AMIGO_USE_OPENMP
-
 template <typename T, int ncomp, class Input, int ndata, class Data,
           class... Components>
 class OmpGroupBackend {
@@ -492,7 +490,9 @@ class OmpGroupBackend {
     if constexpr (!Component::is_compute_empty) {
       int num_elems = layout.get_num_elements();
 
+#ifdef AMIGO_USE_OPENMP
 #pragma omp parallel for reduction(+ : value)
+#endif
       for (int i = 0; i < num_elems; i++) {
         Data data;
         Input input;
@@ -527,7 +527,9 @@ class OmpGroupBackend {
       for (int j = 0; j < num_colors; j++) {
         int start = end;
         end = start + elem_per_color[j];
+#ifdef AMIGO_USE_OPENMP
 #pragma omp parallel for
+#endif
         for (int elem = start; elem < end; elem++) {
           Data data;
           Input input, gradient;
@@ -566,7 +568,9 @@ class OmpGroupBackend {
       for (int j = 0; j < num_colors; j++) {
         int start = end;
         end = start + elem_per_color[j];
+#ifdef AMIGO_USE_OPENMP
 #pragma omp parallel for
+#endif
         for (int elem = start; elem < end; elem++) {
           Data data;
           Input input, gradient, direction, result;
@@ -609,7 +613,9 @@ class OmpGroupBackend {
       for (int j = 0; j < num_colors; j++) {
         int start = end;
         end = start + elem_per_color[j];
+#ifdef AMIGO_USE_OPENMP
 #pragma omp parallel for
+#endif
         for (int elem = start; elem < end; elem++) {
           Data data;
           Input input, gradient, direction, result;
@@ -708,7 +714,9 @@ class OmpGroupBackend {
       for (int j = 0; j < num_colors; j++) {
         int start = end;
         end = start + elem_per_color[j];
+#ifdef AMIGO_USE_OPENMP
 #pragma omp parallel for
+#endif
         for (int elem = start; elem < end; elem++) {
           typename Component::template Data<A2D::ADScalar<T, 1>> data;
           typename Component::template Input<A2D::ADScalar<T, 1>> input;
@@ -754,8 +762,6 @@ class OmpGroupBackend {
   int num_colors;
   int* elem_per_color;
 };
-
-#endif
 
 template <typename T, ExecPolicy policy, class... Components>
 class ComponentGroup : public ComponentGroupBase<T, policy> {

@@ -137,7 +137,7 @@ AMIGO_KERNEL void add_residual_eq_kernel(int num_equalities,
 
 template <typename T>
 AMIGO_KERNEL void add_residual_ineq_kernel(int num_inequalities,
-                                           T barrier_param,
+                                           T barrier_param, T gamma,
                                            const OptInfo<T> info,
                                            OptStateData<const T> pt, const T* g,
                                            T* r) {
@@ -209,7 +209,7 @@ void add_residual_cuda(T barrier_param, T gamma, const OptInfo<T>& info,
   add_residual_eq_kernel<T>
       <<<ge, TPB, 0, stream>>>(info.num_equalities, info, pt, g, r);
   add_residual_ineq_kernel<T><<<gi, TPB, 0, stream>>>(
-      info.num_inequalities, barrier_param, info, pt, g, r);
+      info.num_inequalities, barrier_param, gamma, info, pt, g, r);
 }
 
 template <typename T>
@@ -397,7 +397,7 @@ void compute_diagonal_cuda(const OptInfo<T>& info, OptStateData<const T>& pt,
 template <typename T>
 AMIGO_KERNEL void compute_max_step_vars_kernel(
     int num_variables, const T tau, const OptInfo<T> info,
-    const OptStateData<T> pt, const OptStateData<T> up, T init_alpha_x,
+    OptStateData<const T> pt, OptStateData<const T> up, T init_alpha_x,
     T init_alpha_z, T* alpha_x_max_out, int* x_index_out, T* alpha_z_max_out,
     int* z_index_out) {
   extern __shared__ unsigned char smem[];
@@ -499,7 +499,7 @@ AMIGO_KERNEL void compute_max_step_vars_kernel(
 template <typename T>
 AMIGO_KERNEL void compute_max_step_slack_kernel(
     int num_inequalities, const T tau, const OptInfo<T> info,
-    const OptStateData<T> pt, const OptStateData<T> up, T* alpha_x_max_out,
+    OptStateData<const T> pt, OptStateData<const T> up, T* alpha_x_max_out,
     int* x_index_out, T* alpha_z_max_out, int* z_index_out) {
   extern __shared__ unsigned char smem[];
 
@@ -780,8 +780,8 @@ void compute_affine_start_point_cuda(T beta_min, const OptInfo<T>& info,
   int gi = (info.num_inequalities + TPB - 1) / TPB;
   compute_affine_start_point_vars_kernel<T>
       <<<gv, TPB, 0, stream>>>(info.num_variables, beta_min, pt, up, tmp);
-  compute_affine_start_point_ineq_kernel<T>
-      <<<gi, TPB, 0, stream>>>(info.num_inequalities, beta_min, pt, up, tmp);
+  compute_affine_start_point_ineq_kernel<T><<<gi, TPB, 0, stream>>>(
+      info.num_inequalities, beta_min, info, pt, up, tmp);
 }
 
 }  // namespace detail

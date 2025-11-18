@@ -528,6 +528,48 @@ void compute_affine_start_point(T beta_min, const OptInfo<T>& info,
   }
 }
 
+// Template delarations
+#ifdef AMIGO_USE_CUDA
+template <typename T>
+void initialize_multipliers_and_slacks_cuda(T barrier_param,
+                                            const OptInfo<T>& info,
+                                            const T* d_g, OptStateData<T>& pt,
+                                            cudaStream_t stream = 0);
+
+template <typename T>
+void add_residual_cuda(T barrier_param, T gamma, const OptInfo<T>& info,
+                       OptStateData<const T>& pt, const T* g, T* r,
+                       cudaStream_t stream = 0);
+
+template <typename T>
+void compute_update_cuda(T barrier_param, T gamma, const OptInfo<T>& info,
+                         OptStateData<const T>& pt, OptStateData<T>& up,
+                         cudaStream_t stream = 0);
+
+template <typename T>
+void compute_diagonal_cuda(const OptInfo<T>& info, OptStateData<const T>& pt,
+                           T* diag, cudaStream_t stream = 0);
+
+template <typename T>
+void compute_max_step_cuda(const T tau, const OptInfo<T>& info,
+                           OptStateData<const T>& pt, OptStateData<const T>& up,
+                           T& alpha_x_max, int& x_index, T& alpha_z_max,
+                           int& z_index, cudaStream_t stream = 0);
+
+template <typename T>
+void apply_step_update_cuda(const T alpha_x, const T alpha_z,
+                            const OptInfo<T>& info, OptStateData<const T>& pt,
+                            OptStateData<const T>& up, OptStateData<T>& tmp,
+                            cudaStream_t stream = 0);
+
+template <typename T>
+void compute_affine_start_point_cuda(T beta_min, const OptInfo<T>& info,
+                                     OptStateData<const T>& pt,
+                                     OptStateData<const T>& up,
+                                     OptStateData<T>& tmp,
+                                     cudaStream_t stream = 0);
+#endif
+
 }  // namespace detail
 
 }  // namespace amigo
