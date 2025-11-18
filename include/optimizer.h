@@ -466,27 +466,11 @@ class InteriorPointOptimizer {
                         const std::shared_ptr<OptVector<T>> update,
                         T& alpha_x_max, int& x_index, T& alpha_z_max,
                         int& z_index) const {
-    // Get the dual values for the bound constraints
-    T *zl, *zu;
-    const T *pzl, *pzu;
-    vars->get_bound_duals(&zl, &zu);
-    update->get_bound_duals(&pzl, &pzu);
-
-    // Get the slack variable values
-    T *sl, *tl, *su, *tu;
-    const T *psl, *ptl, *psu, *ptu;
-    vars->get_slacks(nullptr, &sl, &tl, &su, &tu);
-    update->get_slacks(nullptr, &psl, &ptl, &psu, &ptu);
-
-    // Get the dual values for the slacks
-    T *zsl, *ztl, *zsu, *ztu;
-    const T *pzsl, *pztl, *pzsu, *pztu;
-    vars->get_slack_duals(&zsl, &ztl, &zsu, &ztu);
-    update->get_slack_duals(&pzsl, &pztl, &pzsu, &pztu);
-
-    // Get the solution update
-    const T* xlam = vars->get_solution_array();
-    const T* pxlam = update->get_solution_array();
+    // Set the values
+    detail::OptStateData<const T> pt =
+        detail::OptStateData<const T>::template make<policy>(vars);
+    detail::OptStateData<const T> up =
+        detail::OptStateData<const T>::template make<policy>(update);
 
     // Set the max step for the design variables and multipliers
     alpha_x_max = 1.0;
@@ -494,121 +478,18 @@ class InteriorPointOptimizer {
     alpha_z_max = 1.0;
     z_index = -1;
 
-    // Check for steps lengths for the design variables and slacks
-    for (int i = 0; i < num_variables; i++) {
-      // Get the gradient component corresponding to this variable
-      int index = design_variable_indices[i];
-      T x = xlam[index];
-      T px = pxlam[index];
-
-      if (!std::isinf(lbx[i])) {
-        if (px < 0.0) {
-          T numer = x - lbx[i];
-          T alpha = -tau * numer / px;
-          if (alpha < alpha_x_max) {
-            alpha_x_max = alpha;
-            x_index = index;
-          }
-        }
-        if (pzl[i] < 0.0) {
-          T alpha = -tau * zl[i] / pzl[i];
-          if (alpha < alpha_z_max) {
-            alpha_z_max = alpha;
-            z_index = index;
-          }
-        }
-      }
-      if (!std::isinf(ubx[i])) {
-        if (px > 0.0) {
-          T numer = ubx[i] - x;
-          T alpha = tau * numer / px;
-          if (alpha < alpha_x_max) {
-            alpha_x_max = alpha;
-            x_index = index;
-          }
-        }
-        if (pzu[i] < 0.0) {
-          T alpha = -tau * zu[i] / pzu[i];
-          if (alpha < alpha_z_max) {
-            alpha_z_max = alpha;
-            z_index = index;
-          }
-        }
-      }
+    // Compute the max step lengths
+    if constexpr (policy == ExecPolicy::SERIAL ||
+                  policy == ExecPolicy::OPENMP) {
+      detail::compute_max_step(tau, info, pt, up, alpha_x_max, x_index,
+                               alpha_z_max, z_index);
     }
-
-    // Check step lengths for the multipliers
-    for (int i = 0; i < num_inequalities; i++) {
-      int index = inequality_indices[i];
-
-      if (!std::isinf(lbc[i])) {
-        // Slack variables
-        if (psl[i] < 0.0) {
-          T alpha = -tau * sl[i] / psl[i];
-          if (alpha < alpha_x_max) {
-            alpha_x_max = alpha;
-            x_index = index;
-          }
-        }
-        if (ptl[i] < 0.0) {
-          T alpha = -tau * tl[i] / ptl[i];
-          if (alpha < alpha_x_max) {
-            alpha_x_max = alpha;
-            x_index = index;
-          }
-        }
-
-        // Dual variables
-        if (pzsl[i] < 0.0) {
-          T alpha = -tau * zsl[i] / pzsl[i];
-          if (alpha < alpha_z_max) {
-            alpha_z_max = alpha;
-            z_index = index;
-          }
-        }
-        if (pztl[i] < 0.0) {
-          T alpha = -tau * ztl[i] / pztl[i];
-          if (alpha < alpha_z_max) {
-            alpha_z_max = alpha;
-            z_index = index;
-          }
-        }
-      }
-
-      if (!std::isinf(ubc[i])) {
-        // Slack variables
-        if (psu[i] < 0.0) {
-          T alpha = -tau * su[i] / psu[i];
-          if (alpha < alpha_x_max) {
-            alpha_x_max = alpha;
-            x_index = index;
-          }
-        }
-        if (ptu[i] < 0.0) {
-          T alpha = -tau * tu[i] / ptu[i];
-          if (alpha < alpha_x_max) {
-            alpha_x_max = alpha;
-            x_index = index;
-          }
-        }
-
-        // Dual variables
-        if (pzsu[i] < 0.0) {
-          T alpha = -tau * zsu[i] / pzsu[i];
-          if (alpha < alpha_z_max) {
-            alpha_z_max = alpha;
-            z_index = index;
-          }
-        }
-        if (pztu[i] < 0.0) {
-          T alpha = -tau * ztu[i] / pztu[i];
-          if (alpha < alpha_z_max) {
-            alpha_z_max = alpha;
-            z_index = index;
-          }
-        }
-      }
+#ifdef AMIGO_USE_CUDA
+    else {
+      detail::compute_max_step_cuda(tau, info, pt, up, alpha_x_max, x_index,
+                                    alpha_z_max, z_index);
     }
+#endif  // AMIGO_USE_CUDA
 
     T alphas[2], max_alphas[2];
     alphas[0] = alpha_x_max;
@@ -631,65 +512,28 @@ class InteriorPointOptimizer {
                          const std::shared_ptr<OptVector<T>> vars,
                          const std::shared_ptr<OptVector<T>> update,
                          std::shared_ptr<OptVector<T>> temp) const {
-    // Get the dual values for the bound constraints
-    const T *zl, *zu;
-    const T *pzl, *pzu;
-    T *nzl, *nzu;
-    vars->get_bound_duals(&zl, &zu);
-    update->get_bound_duals(&pzl, &pzu);
-    temp->get_bound_duals(&nzl, &nzu);
-
-    // Get the slack variable values
-    const T *s, *sl, *tl, *su, *tu;
-    const T *ps, *psl, *ptl, *psu, *ptu;
-    T *ns, *nsl, *ntl, *nsu, *ntu;
-    vars->get_slacks(&s, &sl, &tl, &su, &tu);
-    update->get_slacks(&ps, &psl, &ptl, &psu, &ptu);
-    temp->get_slacks(&ns, &nsl, &ntl, &nsu, &ntu);
-
-    // Get the dual values for the slacks
-    const T *zsl, *ztl, *zsu, *ztu;
-    const T *pzsl, *pztl, *pzsu, *pztu;
-    T *nzsl, *nztl, *nzsu, *nztu;
-    vars->get_slack_duals(&zsl, &ztl, &zsu, &ztu);
-    update->get_slack_duals(&pzsl, &pztl, &pzsu, &pztu);
-    temp->get_slack_duals(&nzsl, &nztl, &nzsu, &nztu);
-
-    // Get the solution update
-    const T* xlam = vars->get_solution_array();
-    const T* pxlam = update->get_solution_array();
-    T* nxlam = temp->get_solution_array();
+    // Set the values
+    detail::OptStateData<const T> pt =
+        detail::OptStateData<const T>::template make<policy>(vars);
+    detail::OptStateData<const T> up =
+        detail::OptStateData<const T>::template make<policy>(update);
+    detail::OptStateData<T> tmp =
+        detail::OptStateData<T>::template make<policy>(temp);
 
     // nxlam = xlam + alpha * pxlam
     temp->get_solution()->copy(*vars->get_solution());
     temp->get_solution()->axpy(alpha_x, *update->get_solution());
 
-    for (int i = 0; i < num_variables; i++) {
-      // Update the dual variables
-      if (!std::isinf(lbx[i])) {
-        nzl[i] = zl[i] + alpha_z * pzl[i];
-      }
-      if (!std::isinf(ubx[i])) {
-        nzu[i] = zu[i] + alpha_z * pzu[i];
-      }
+    // Compute the max step lengths
+    if constexpr (policy == ExecPolicy::SERIAL ||
+                  policy == ExecPolicy::OPENMP) {
+      detail::apply_step_update(alpha_x, alpha_z, info, pt, up, tmp);
     }
-
-    // Update the slack variables and remaining dual variables
-    for (int i = 0; i < num_inequalities; i++) {
-      ns[i] = s[i] + alpha_x * ps[i];
-      if (!std::isinf(lbc[i])) {
-        nsl[i] = sl[i] + alpha_x * psl[i];
-        ntl[i] = tl[i] + alpha_x * ptl[i];
-        nzsl[i] = zsl[i] + alpha_z * pzsl[i];
-        nztl[i] = ztl[i] + alpha_z * pztl[i];
-      }
-      if (!std::isinf(ubc[i])) {
-        nsu[i] = su[i] + alpha_x * psu[i];
-        ntu[i] = tu[i] + alpha_x * ptu[i];
-        nzsu[i] = zsu[i] + alpha_z * pzsu[i];
-        nztu[i] = ztu[i] + alpha_z * pztu[i];
-      }
+#ifdef AMIGO_USE_CUDA
+    else {
+      detail::apply_step_update_cuda(alpha_x, alpha_z, info, pt, up, tmp);
     }
+#endif  // AMIGO_USE_CUDA
   }
 
   /**
@@ -816,23 +660,23 @@ class InteriorPointOptimizer {
     temp->get_slack_duals(&nzsl, &nztl, &nzsu, &nztu);
 
     for (int i = 0; i < num_variables; i++) {
-      nzl[i] = std::max(beta_min, std::fabs(zl[i] + pzl[i]));
-      nzu[i] = std::max(beta_min, std::fabs(zu[i] + pzu[i]));
+      nzl[i] = A2D::max(beta_min, A2D::fabs(zl[i] + pzl[i]));
+      nzu[i] = A2D::max(beta_min, A2D::fabs(zu[i] + pzu[i]));
     }
 
     for (int i = 0; i < num_inequalities; i++) {
       if (!std::isinf(lbc[i])) {
-        nsl[i] = std::max(beta_min, std::fabs(sl[i] + psl[i]));
-        ntl[i] = std::max(beta_min, std::fabs(tl[i] + ptl[i]));
-        nzsl[i] = std::max(beta_min, std::fabs(zsl[i] + pzsl[i]));
-        nztl[i] = std::max(beta_min, std::fabs(ztl[i] + pztl[i]));
+        nsl[i] = A2D::max2(beta_min, A2D::fabs(sl[i] + psl[i]));
+        ntl[i] = A2D::max2(beta_min, A2D::fabs(tl[i] + ptl[i]));
+        nzsl[i] = A2D::max2(beta_min, A2D::fabs(zsl[i] + pzsl[i]));
+        nztl[i] = A2D::max2(beta_min, A2D::fabs(ztl[i] + pztl[i]));
       }
 
       if (!std::isinf(ubc[i])) {
-        nsu[i] = std::max(beta_min, std::fabs(su[i] + psu[i]));
-        ntu[i] = std::max(beta_min, std::fabs(tu[i] + ptu[i]));
-        nzsu[i] = std::max(beta_min, std::fabs(zsu[i] + pzsu[i]));
-        nztu[i] = std::max(beta_min, std::fabs(ztu[i] + pztu[i]));
+        nsu[i] = A2D::max2(beta_min, A2D::fabs(su[i] + psu[i]));
+        ntu[i] = A2D::max2(beta_min, A2D::fabs(tu[i] + ptu[i]));
+        nzsu[i] = A2D::max2(beta_min, A2D::fabs(zsu[i] + pzsu[i]));
+        nztu[i] = A2D::max2(beta_min, A2D::fabs(ztu[i] + pztu[i]));
       }
     }
   }

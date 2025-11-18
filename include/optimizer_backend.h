@@ -10,16 +10,18 @@ namespace detail {
 template <typename T>
 class OptInfo {
  public:
-  int num_variables, num_equalities, num_inequalities;
+  int num_variables = 0;
+  int num_equalities = 0;
+  int num_inequalities = 0;
 
-  const int* design_variable_indices;
-  const int* equality_indices;
-  const int* inequality_indices;
+  const int* design_variable_indices = nullptr;
+  const int* equality_indices = nullptr;
+  const int* inequality_indices = nullptr;
 
   // bounds (can be +/-inf)
-  const T *lbx, *ubx;  // x bounds for variables (size num_variables)
-  const T *lbc, *ubc;  // constraint bounds (size num_inequalities)
-  const T* lbh;        // constraint bounds (size num_equalities)
+  const T *lbx = nullptr, *ubx = nullptr;  // x bounds for variables
+  const T *lbc = nullptr, *ubc = nullptr;  // constraint bounds
+  const T* lbh = nullptr;                  // constraint bounds
 };
 
 template <typename T>
@@ -325,6 +327,165 @@ void compute_diagonal(const OptInfo<T>& info, OptStateData<const T>& pt,
 
     if (C != 0.0) {
       diag[index] = -1.0 / C;
+    }
+  }
+}
+
+template <typename T>
+void compute_max_step(const T tau, OptInfo<T>& info, OptStateData<const T>& pt,
+                      OptStateData<const T>& up, T& alpha_x_max, int& x_index,
+                      T& alpha_z_max, int& z_index) {
+  // Check for steps lengths for the design variables and slacks
+  for (int i = 0; i < info.num_variables; i++) {
+    // Get the gradient component corresponding to this variable
+    int index = info.design_variable_indices[i];
+    T x = pt.xlam[index];
+    T px = up.xlam[index];
+
+    if (!std::isinf(info.lbx[i])) {
+      if (px < 0.0) {
+        T numer = x - info.lbx[i];
+        T alpha = -tau * numer / px;
+        if (alpha < alpha_x_max) {
+          alpha_x_max = alpha;
+          x_index = index;
+        }
+      }
+      if (up.zl[i] < 0.0) {
+        T alpha = -tau * pt.zl[i] / up.zl[i];
+        if (alpha < alpha_z_max) {
+          alpha_z_max = alpha;
+          z_index = index;
+        }
+      }
+    }
+    if (!std::isinf(info.ubx[i])) {
+      if (px > 0.0) {
+        T numer = info.ubx[i] - x;
+        T alpha = tau * numer / px;
+        if (alpha < alpha_x_max) {
+          alpha_x_max = alpha;
+          x_index = index;
+        }
+      }
+      if (up.zu[i] < 0.0) {
+        T alpha = -tau * pt.zu[i] / up.zu[i];
+        if (alpha < alpha_z_max) {
+          alpha_z_max = alpha;
+          z_index = index;
+        }
+      }
+    }
+  }
+
+  // Check step lengths for the multipliers
+  for (int i = 0; i < info.num_inequalities; i++) {
+    int index = info.inequality_indices[i];
+
+    if (!std::isinf(info.lbc[i])) {
+      // Slack variables
+      if (up.sl[i] < 0.0) {
+        T alpha = -tau * pt.sl[i] / up.sl[i];
+        if (alpha < alpha_x_max) {
+          alpha_x_max = alpha;
+          x_index = index;
+        }
+      }
+      if (ptl[i] < 0.0) {
+        T alpha = -tau * pt.tl[i] / up.tl[i];
+        if (alpha < alpha_x_max) {
+          alpha_x_max = alpha;
+          x_index = index;
+        }
+      }
+
+      // Dual variables
+      if (up.zsl[i] < 0.0) {
+        T alpha = -tau * pt.zsl[i] / up.zsl[i];
+        if (alpha < alpha_z_max) {
+          alpha_z_max = alpha;
+          z_index = index;
+        }
+      }
+      if (pztl[i] < 0.0) {
+        T alpha = -tau * pt.ztl[i] / up.ztl[i];
+        if (alpha < alpha_z_max) {
+          alpha_z_max = alpha;
+          z_index = index;
+        }
+      }
+    }
+
+    if (!std::isinf(info.ubc[i])) {
+      // Slack variables
+      if (up.su[i] < 0.0) {
+        T alpha = -tau * pt.su[i] / up.su[i];
+        if (alpha < alpha_x_max) {
+          alpha_x_max = alpha;
+          x_index = index;
+        }
+      }
+      if (up.tu[i] < 0.0) {
+        T alpha = -tau * pt.tu[i] / up.tu[i];
+        if (alpha < alpha_x_max) {
+          alpha_x_max = alpha;
+          x_index = index;
+        }
+      }
+
+      // Dual variables
+      if (up.zsu[i] < 0.0) {
+        T alpha = -tau * pt.zsu[i] / up.zsu[i];
+        if (alpha < alpha_z_max) {
+          alpha_z_max = alpha;
+          z_index = index;
+        }
+      }
+      if (up.ztu[i] < 0.0) {
+        T alpha = -tau * pt.ztu[i] / up.ztu[i];
+        if (alpha < alpha_z_max) {
+          alpha_z_max = alpha;
+          z_index = index;
+        }
+      }
+    }
+  }
+}
+
+template <typename T>
+void apply_step_update(const T alpha_x, const T alpha_z, const OptInfo<T>& info,
+                       OptStateData<const T>& pt, OptStateData<const T>& up,
+                       OptStateData<T>& tmp) {
+#ifdef AMIGO_USE_OPENMP
+#pragma omp parallel for
+#endif  // AMIGO_USE_OPENMP
+  for (int i = 0; i < info.num_variables; i++) {
+    // Update the dual variables
+    if (!std::isinf(info.lbx[i])) {
+      tmp.zl[i] = pt.zl[i] + alpha_z * up.zl[i];
+    }
+    if (!std::isinf(info.ubx[i])) {
+      tmp.zu[i] = pt.zu[i] + alpha_z * up.zu[i];
+    }
+  }
+
+  // Update the slack variables and remaining dual variables
+#ifdef AMIGO_USE_OPENMP
+#pragma omp parallel for
+#endif  // AMIGO_USE_OPENMP
+  for (int i = 0; i < info.num_inequalities; i++) {
+    tmp.s[i] = pt.s[i] + alpha_x * up.s[i];
+    if (!std::isinf(info.lbc[i])) {
+      tmp.sl[i] = pt.sl[i] + alpha_x * up.sl[i];
+      tmp.tl[i] = pt.tl[i] + alpha_x * up.tl[i];
+      tmp.zsl[i] = pt.zsl[i] + alpha_z * up.zsl[i];
+      tmp.ztl[i] = pt.ztl[i] + alpha_z * up.ztl[i];
+    }
+    if (!std::isinf(info.ubc[i])) {
+      tmp.su[i] = pt.su[i] + alpha_x * up.su[i];
+      tmp.tu[i] = pt.tu[i] + alpha_x * up.tu[i];
+      tmp.zsu[i] = pt.zsu[i] + alpha_z * up.zsu[i];
+      tmp.ztu[i] = pt.ztu[i] + alpha_z * up.ztu[i];
     }
   }
 }
