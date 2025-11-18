@@ -42,6 +42,10 @@ class CudaVecBackend {
 
   void zero() { AMIGO_CHECK_CUDA(cudaMemset(d_ptr, 0, size * sizeof(T))); }
 
+  T dot(const T* d_src) const { return T(0); }
+  void axpy(T alpha, const T* d_x) const {}
+  void scale(T alpha) {}
+
   T* get_device_ptr() { return d_ptr; }
   const T* get_device_ptr() const { return d_ptr; }
 

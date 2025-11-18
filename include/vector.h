@@ -21,7 +21,10 @@ class SerialVecBackend {
   void allocate(int size_) {}
   void copy_host_to_device(T* h_dest) {}
   void copy_device_to_host(T* h_src) {}
-  void copy(T* d_src) {}
+  void copy(const T* d_src) {}
+  T dot(const T* d_ptr) const { return T(0); }
+  void axpy(T alpha, const T* d_x) const {}
+  void scale(T alpha) {}
   void zero() {}
   T* get_device_ptr() { return nullptr; }
   const T* get_device_ptr() const { return nullptr; }
@@ -87,7 +90,6 @@ class Vector {
     if (array) {
       std::copy(src, src + size, array);
     }
-    backend.copy(src.get_device_array());
   }
 
   void copy(const Vector<T>& src) {
@@ -116,33 +118,44 @@ class Vector {
     }
   }
 
+  template <ExecPolicy policy>
   void axpy(T alpha, const Vector<T>& x) {
-    if (array && x.array) {
+    if constexpr (policy == ExecPolicy::SERIAL ||
+                  policy == ExecPolicy::OPENMP) {
       for (int i = 0; i < local_size; i++) {
         array[i] += alpha * x.array[i];
       }
+    } else {
+      backend.axpy(alpha, x.get_device_array());
     }
-    backend.axpy(alpha, x.get_device_array());
   }
 
+  template <ExecPolicy policy>
   T dot(const Vector<T>& x) const {
-    T value = 0.0;
-    if (array && x.array) {
-      for (int i = 0; i < local_size; i++) {
-        value += array[i] * x.array[i];
+    if constexpr (policy == ExecPolicy::SERIAL ||
+                  policy == ExecPolicy::OPENMP) {
+      T value = 0.0;
+      if (array && x.array) {
+        for (int i = 0; i < local_size; i++) {
+          value += array[i] * x.array[i];
+        }
       }
+      return value;
+    } else {
+      return backend.dot(x.get_device_array());
     }
-    value = backend.dot(x.get_device_array());
-    return value;
   }
 
+  template <ExecPolicy policy>
   void scale(T alpha) {
-    if (array) {
+    if constexpr (policy == ExecPolicy::SERIAL ||
+                  policy == ExecPolicy::OPENMP) {
       for (int i = 0; i < size; i++) {
         array[i] *= alpha;
       }
+    } else {
+      backend.scale(alpha);
     }
-    backend.scale(alpha);
   }
 
   template <ExecPolicy policy>

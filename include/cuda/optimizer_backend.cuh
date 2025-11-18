@@ -6,9 +6,7 @@
 #include "amigo.h"
 #include "optimizer_backend.h"
 
-#ifdef AMIGO_USE_CUDA
-
-namespace amgio {
+namespace amigo {
 
 namespace detail {
 
@@ -90,7 +88,7 @@ void initialize_multipliers_and_slacks_cuda(T barrier_param,
       info.num_inequalities, barrier_param, info, d_g, pt);
 }
 
-template <class T>
+template <typename T>
 AMIGO_KERNEL void add_residual_vars_kernel(int num_variables, T barrier_param,
                                            const OptInfo<T> info,
                                            OptStateData<const T> pt, const T* g,
@@ -121,7 +119,7 @@ AMIGO_KERNEL void add_residual_vars_kernel(int num_variables, T barrier_param,
   r[index] = bx;
 }
 
-template <class T>
+template <typename T>
 AMIGO_KERNEL void add_residual_eq_kernel(int num_equalities,
                                          const OptInfo<T> info,
                                          OptStateData<const T> pt, const T* g,
@@ -137,7 +135,7 @@ AMIGO_KERNEL void add_residual_eq_kernel(int num_equalities,
   r[index] = -(g[index] - info.lbh[i]);
 }
 
-template <class T>
+template <typename T>
 AMIGO_KERNEL void add_residual_ineq_kernel(int num_inequalities,
                                            T barrier_param,
                                            const OptInfo<T> info,
@@ -199,7 +197,7 @@ AMIGO_KERNEL void add_residual_ineq_kernel(int num_inequalities,
 }
 
 template <typename T>
-void add_residual_cuda(T barrier_param, const OptInfo<T>& info,
+void add_residual_cuda(T barrier_param, T gamma, const OptInfo<T>& info,
                        OptStateData<const T>& pt, const T* g, T* r,
                        cudaStream_t stream = 0) {
   constexpr int TPB = 256;
@@ -215,9 +213,125 @@ void add_residual_cuda(T barrier_param, const OptInfo<T>& info,
 }
 
 template <typename T>
+AMIGO_KERNEL void compute_update_vars_kernel(int num_variables, T barrier_param,
+                                             const OptInfo<T> info,
+                                             OptStateData<const T> pt,
+                                             OptStateData<T> up) {
+  int i = blockDim.x * blockIdx.x + threadIdx.x;
+  if (i >= num_variables) {
+    return;
+  }
+
+  // Get the gradient component corresponding to this variable
+  int index = info.design_variable_indices[i];
+
+  // Extract the design variable
+  T x = pt.xlam[index];
+  T px = up.xlam[index];
+
+  // Compute the update step
+  if (!std::isinf(info.lbx[i])) {
+    T bzl = -((x - info.lbx[i]) * pt.zl[i] - barrier_param);
+    up.zl[i] = (bzl - pt.zl[i] * px) / (x - info.lbx[i]);
+  }
+  if (!std::isinf(info.ubx[i])) {
+    T bzu = -((info.ubx[i] - x) * pt.zu[i] - barrier_param);
+    up.zu[i] = (bzu + pt.zu[i] * px) / (info.ubx[i] - x);
+  }
+}
+
+template <typename T>
+AMIGO_KERNEL void compute_update_ineq_kernel(int num_inequalities,
+                                             T barrier_param, T gamma,
+                                             const OptInfo<T> info,
+                                             OptStateData<const T> pt,
+                                             OptStateData<T> up) {
+  int i = blockDim.x * blockIdx.x + threadIdx.x;
+  if (i >= num_inequalities) {
+    return;
+  }
+
+  int index = info.inequality_indices[i];
+
+  // Extract the multiplier from the solution vector
+  T lam = pt.xlam[index];
+  T plam = up.xlam[index];
+
+  // Compute all the contributions to the update
+  T blam = -(-lam - pt.zsl[i] + pt.zsu[i]);
+
+  // Build the components of C and compute its inverse
+  T C = 0.0;
+  T d = blam;
+  T Fl = 0.0, dl = 0.0, blaml = 0.0, bsl = 0.0, bzsl = 0.0, bztl = 0.0;
+  T Fu = 0.0, du = 0.0, blamu = 0.0, bsu = 0.0, bzsu = 0.0, bztu = 0.0;
+
+  if (!::isinf(info.lbc[i])) {
+    // Compute the right-hand-sides for the lower bound
+    blaml = -(gamma - pt.zsl[i] - pt.ztl[i]);
+    bsl = -(pt.s[i] - info.lbc[i] - pt.sl[i] + pt.tl[i]);
+    bzsl = -(pt.sl[i] * pt.zsl[i] - barrier_param);
+    bztl = -(pt.tl[i] * pt.ztl[i] - barrier_param);
+
+    T inv_zsl = 1.0 / pt.zsl[i];
+    T inv_ztl = 1.0 / pt.ztl[i];
+    Fl = inv_zsl * pt.sl[i] + inv_ztl * pt.tl[i];
+    dl = bsl + inv_zsl * bzsl - inv_ztl * (bztl + pt.tl[i] * blaml);
+
+    T inv_Fl = 1.0 / Fl;
+    d += inv_Fl * dl;
+    C += inv_Fl;
+  }
+
+  if (!::isinf(info.ubc[i])) {
+    blamu = -(gamma - pt.zsu[i] - pt.ztu[i]);
+    bsu = -(info.ubc[i] - pt.s[i] - pt.su[i] + pt.tu[i]);
+    bzsu = -(pt.su[i] * pt.zsu[i] - barrier_param);
+    bztu = -(pt.tu[i] * pt.ztu[i] - barrier_param);
+
+    T inv_zsu = 1.0 / pt.zsu[i];
+    T inv_ztu = 1.0 / pt.ztu[i];
+    Fu = inv_zsu * pt.su[i] + inv_ztu * pt.tu[i];
+    du = bsu + inv_zsu * bzsu - inv_ztu * (bztu + pt.tu[i] * blamu);
+
+    T inv_Fu = 1.0 / Fu;
+    d -= inv_Fu * du;
+    C += inv_Fu;
+  }
+
+  up.s[i] = (plam + d) / C;
+
+  if (!::isinf(info.lbc[i])) {
+    up.zsl[i] = (-up.s[i] + dl) / Fl;
+    up.ztl[i] = -blaml - up.zsl[i];
+    up.sl[i] = (bzsl - pt.sl[i] * up.zsl[i]) / pt.zsl[i];
+    up.tl[i] = (bztl - pt.tl[i] * up.ztl[i]) / pt.ztl[i];
+  }
+  if (!::isinf(info.ubc[i])) {
+    up.zsu[i] = (up.s[i] + du) / Fu;
+    up.ztu[i] = -blamu - up.zsu[i];
+    up.su[i] = (bzsu - pt.su[i] * up.zsu[i]) / pt.zsu[i];
+    up.tu[i] = (bztu - pt.tu[i] * up.ztu[i]) / pt.ztu[i];
+  }
+}
+
+template <typename T>
+void compute_update_cuda(T barrier_param, T gamma, const OptInfo<T>& info,
+                         OptStateData<const T>& pt, OptStateData<T>& up,
+                         cudaStream_t stream = 0) {
+  constexpr int TPB = 256;
+  int gv = (info.num_variables + TPB - 1) / TPB;
+  int gi = (info.num_inequalities + TPB - 1) / TPB;
+  compute_update_vars_kernel<T>
+      <<<gv, TPB, 0, stream>>>(info.num_variables, barrier_param, info, pt, up);
+  compute_update_ineq_kernel<T><<<gi, TPB, 0, stream>>>(
+      info.num_inequalities, barrier_param, gamma, info, pt, up);
+}
+
+template <typename T>
 AMIGO_KERNEL void compute_diagonal_vars_kernel(int num_variables,
-                                               const OptInfo<T>& info,
-                                               OptStateData<const T>& pt,
+                                               const OptInfo<T> info,
+                                               OptStateData<const T> pt,
                                                T* diag) {
   int i = blockDim.x * blockIdx.x + threadIdx.x;
   if (i >= num_variables) {
@@ -225,7 +339,7 @@ AMIGO_KERNEL void compute_diagonal_vars_kernel(int num_variables,
   }
 
   // Get the gradient component corresponding to this variable
-  int index = design_variable_indices[i];
+  int index = info.design_variable_indices[i];
 
   T x = pt.xlam[index];
 
@@ -242,8 +356,8 @@ AMIGO_KERNEL void compute_diagonal_vars_kernel(int num_variables,
 
 template <typename T>
 AMIGO_KERNEL void compute_diagonal_slack_kernel(int num_inequalities,
-                                                const OptInfo<T>& info,
-                                                OptStateData<const T>& pt,
+                                                const OptInfo<T> info,
+                                                OptStateData<const T> pt,
                                                 T* diag) {
   int i = blockDim.x * blockIdx.x + threadIdx.x;
   if (i >= num_inequalities) {
@@ -442,7 +556,7 @@ AMIGO_KERNEL void compute_max_step_slack_kernel(
       }
     }
 
-    if (!std::isinf(info.ubc[i])) {
+    if (!::isinf(info.ubc[i])) {
       // Slack variables
       if (up.su[i] < 0.0) {
         T alpha = -tau * pt.su[i] / up.su[i];
@@ -512,45 +626,49 @@ AMIGO_KERNEL void compute_max_step_slack_kernel(
 }
 
 template <typename T>
-void compute_max_step_gpu(const T tau, OptInfo<T>& info,
-                          OptStateData<const T>& pt, OptStateData<const T>& up,
-                          T& alpha_x_max, int& x_index, T& alpha_z_max,
-                          int& z_index, cudaStream_t stream = 0) {
+void compute_max_step_cuda(const T tau, const OptInfo<T>& info,
+                           OptStateData<const T>& pt, OptStateData<const T>& up,
+                           T& alpha_x_max, int& x_index, T& alpha_z_max,
+                           int& z_index, cudaStream_t stream = 0) {
   // Allocate device scalars for results
   T *d_alpha_x, *d_alpha_z;
   int *d_x_idx, *d_z_idx;
-  cudaMalloc(&d_alpha_x, sizeof(T));
-  cudaMalloc(&d_alpha_z, sizeof(T));
-  cudaMalloc(&d_x_idx, sizeof(int));
-  cudaMalloc(&d_z_idx, sizeof(int));
+  AMIGO_CHECK_CUDA(cudaMalloc(&d_alpha_x, sizeof(T)));
+  AMIGO_CHECK_CUDA(cudaMalloc(&d_alpha_z, sizeof(T)));
+  AMIGO_CHECK_CUDA(cudaMalloc(&d_x_idx, sizeof(int)));
+  AMIGO_CHECK_CUDA(cudaMalloc(&d_z_idx, sizeof(int)));
 
   // Initial values
   T init_alpha_x = alpha_x_max, init_alpha_z = alpha_z_max;
 
-  // 4. Launch kernel
+  // Launch kernel
   int block_size = 256;
   int grid_size = 1;  // single block
   size_t shmem_size = 2 * block_size * (sizeof(T) + sizeof(int));
 
   compute_max_step_vars_kernel<T>
       <<<grid_size, block_size, shmem_size, stream>>>(
-          info.num_variables, tau, info_dev, pt_dev, up_dev, init_alpha_x,
-          init_alpha_z, d_alpha_x, d_x_idx, d_alpha_z, d_z_idx);
+          info.num_variables, tau, info, pt, up, init_alpha_x, init_alpha_z,
+          d_alpha_x, d_x_idx, d_alpha_z, d_z_idx);
 
-  cudaDeviceSynchronize();
+  AMIGO_CHECK_CUDA(cudaDeviceSynchronize());
 
   compute_max_step_slack_kernel<T>
       <<<grid_size, block_size, shmem_size, stream>>>(
-          info.num_inequalities, tau, info_dev, pt_dev, up_dev, d_alpha_x,
-          d_x_idx, d_alpha_z, d_z_idx);
+          info.num_inequalities, tau, info, pt, up, d_alpha_x, d_x_idx,
+          d_alpha_z, d_z_idx);
 
-  cudaDeviceSynchronize();
+  AMIGO_CHECK_CUDA(cudaDeviceSynchronize());
 
-  // 5. Copy back results
-  cudaMemcpy(&alpha_x_max, d_alpha_x, sizeof(T), cudaMemcpyDeviceToHost);
-  cudaMemcpy(&x_index, d_x_idx, sizeof(int), cudaMemcpyDeviceToHost);
-  cudaMemcpy(&alpha_z_max, d_alpha_z, sizeof(T), cudaMemcpyDeviceToHost);
-  cudaMemcpy(&z_index, d_z_idx, sizeof(int), cudaMemcpyDeviceToHost);
+  // Copy back results
+  AMIGO_CHECK_CUDA(
+      cudaMemcpy(&alpha_x_max, d_alpha_x, sizeof(T), cudaMemcpyDeviceToHost));
+  AMIGO_CHECK_CUDA(
+      cudaMemcpy(&x_index, d_x_idx, sizeof(int), cudaMemcpyDeviceToHost));
+  AMIGO_CHECK_CUDA(
+      cudaMemcpy(&alpha_z_max, d_alpha_z, sizeof(T), cudaMemcpyDeviceToHost));
+  AMIGO_CHECK_CUDA(
+      cudaMemcpy(&z_index, d_z_idx, sizeof(int), cudaMemcpyDeviceToHost));
 
   cudaFree(d_alpha_x);
   cudaFree(d_alpha_z);
@@ -559,20 +677,19 @@ void compute_max_step_gpu(const T tau, OptInfo<T>& info,
 }
 
 template <typename T>
-AMIGO_KERNEL void apply_step_update_vars_kernel(int num_variables,
-                                                const T alpha_z,
-                                                OptStateData<const T> pt,
-                                                OptStateData<const T> up,
-                                                OptStateData<T> tmp) {
+AMIGO_KERNEL void apply_step_update_vars_kernel(
+    int num_variables, const T alpha_z, const OptInfo<T> info,
+    OptStateData<const T> pt, OptStateData<const T> up, OptStateData<T> tmp) {
   int i = blockDim.x * blockIdx.x + threadIdx.x;
   if (i >= num_variables) {
     return;
   }
+
   // Update the dual variables
-  if (!::isinf(lbx[i])) {
+  if (!::isinf(info.lbx[i])) {
     tmp.zl[i] = pt.zl[i] + alpha_z * up.zl[i];
   }
-  if (!::isinf(ubx[i])) {
+  if (!::isinf(info.ubx[i])) {
     tmp.zu[i] = pt.zu[i] + alpha_z * up.zu[i];
   }
 }
@@ -580,20 +697,21 @@ AMIGO_KERNEL void apply_step_update_vars_kernel(int num_variables,
 template <typename T>
 AMIGO_KERNEL void apply_step_update_slack_kernel(
     int num_inequalities, const T alpha_x, const T alpha_z,
-    OptStateData<const T> pt, OptStateData<const T> up, OptStateData<T> tmp) {
+    const OptInfo<T> info, OptStateData<const T> pt, OptStateData<const T> up,
+    OptStateData<T> tmp) {
   int i = blockDim.x * blockIdx.x + threadIdx.x;
   if (i >= num_inequalities) {
     return;
   }
 
   tmp.s[i] = pt.s[i] + alpha_x * up.s[i];
-  if (!std::isinf(info.lbc[i])) {
+  if (!::isinf(info.lbc[i])) {
     tmp.sl[i] = pt.sl[i] + alpha_x * up.sl[i];
     tmp.tl[i] = pt.tl[i] + alpha_x * up.tl[i];
     tmp.zsl[i] = pt.zsl[i] + alpha_z * up.zsl[i];
     tmp.ztl[i] = pt.ztl[i] + alpha_z * up.ztl[i];
   }
-  if (!std::isinf(info.ubc[i])) {
+  if (!::isinf(info.ubc[i])) {
     tmp.su[i] = pt.su[i] + alpha_x * up.su[i];
     tmp.tu[i] = pt.tu[i] + alpha_x * up.tu[i];
     tmp.zsu[i] = pt.zsu[i] + alpha_z * up.zsu[i];
@@ -610,15 +728,64 @@ void apply_step_update_cuda(const T alpha_x, const T alpha_z,
   int gv = (info.num_variables + TPB - 1) / TPB;
   int gi = (info.num_inequalities + TPB - 1) / TPB;
   apply_step_update_vars_kernel<T>
-      <<<gv, TPB, 0, stream>>>(info.num_variables, alpha_z, pt, up, tmp);
+      <<<gv, TPB, 0, stream>>>(info.num_variables, alpha_z, info, pt, up, tmp);
   apply_step_update_slack_kernel<T><<<gi, TPB, 0, stream>>>(
-      info.num_inequalities, alpha_x, alpha_z, pt, up, tmp);
+      info.num_inequalities, alpha_x, alpha_z, info, pt, up, tmp);
+}
+
+template <typename T>
+AMIGO_KERNEL void compute_affine_start_point_vars_kernel(
+    int num_variables, T beta_min, OptStateData<const T> pt,
+    OptStateData<const T> up, OptStateData<T> tmp) {
+  int i = blockDim.x * blockIdx.x + threadIdx.x;
+  if (i >= num_variables) {
+    return;
+  }
+
+  tmp.zl[i] = A2D::max2(beta_min, A2D::fabs(pt.zl[i] + up.zl[i]));
+  tmp.zu[i] = A2D::max2(beta_min, A2D::fabs(pt.zu[i] + up.zu[i]));
+}
+
+template <typename T>
+AMIGO_KERNEL void compute_affine_start_point_ineq_kernel(
+    int num_inequalities, T beta_min, const OptInfo<T> info,
+    OptStateData<const T> pt, OptStateData<const T> up, OptStateData<T> tmp) {
+  int i = blockDim.x * blockIdx.x + threadIdx.x;
+  if (i >= num_inequalities) {
+    return;
+  }
+  if (!::isinf(info.lbc[i])) {
+    tmp.sl[i] = A2D::max2(beta_min, A2D::fabs(pt.sl[i] + up.sl[i]));
+    tmp.tl[i] = A2D::max2(beta_min, A2D::fabs(pt.tl[i] + up.tl[i]));
+    tmp.zsl[i] = A2D::max2(beta_min, A2D::fabs(pt.zsl[i] + up.zsl[i]));
+    tmp.ztl[i] = A2D::max2(beta_min, A2D::fabs(pt.ztl[i] + up.ztl[i]));
+  }
+
+  if (!::isinf(info.ubc[i])) {
+    tmp.su[i] = A2D::max2(beta_min, A2D::fabs(pt.su[i] + up.su[i]));
+    tmp.tu[i] = A2D::max2(beta_min, A2D::fabs(pt.tu[i] + up.tu[i]));
+    tmp.zsu[i] = A2D::max2(beta_min, A2D::fabs(pt.zsu[i] + up.zsu[i]));
+    tmp.ztu[i] = A2D::max2(beta_min, A2D::fabs(pt.ztu[i] + up.ztu[i]));
+  }
+}
+
+template <typename T>
+void compute_affine_start_point_cuda(T beta_min, const OptInfo<T>& info,
+                                     OptStateData<const T>& pt,
+                                     OptStateData<const T>& up,
+                                     OptStateData<T>& tmp,
+                                     cudaStream_t stream = 0) {
+  constexpr int TPB = 256;
+  int gv = (info.num_variables + TPB - 1) / TPB;
+  int gi = (info.num_inequalities + TPB - 1) / TPB;
+  compute_affine_start_point_vars_kernel<T>
+      <<<gv, TPB, 0, stream>>>(info.num_variables, beta_min, pt, up, tmp);
+  compute_affine_start_point_ineq_kernel<T>
+      <<<gi, TPB, 0, stream>>>(info.num_inequalities, beta_min, pt, up, tmp);
 }
 
 }  // namespace detail
 
-}  // namespace amgio
-
-#endif  // AMIGO_USE_CUDA
+}  // namespace amigo
 
 #endif  // AMIGO_OPTIMIZER_CUDA_BACKEND_H

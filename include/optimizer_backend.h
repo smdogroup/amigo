@@ -495,6 +495,39 @@ void apply_step_update(const T alpha_x, const T alpha_z, const OptInfo<T>& info,
   }
 }
 
+template <typename T>
+void compute_affine_start_point(T beta_min, const OptInfo<T>& info,
+                                OptStateData<const T>& pt,
+                                OptStateData<const T>& up,
+                                OptStateData<T>& tmp) {
+#ifdef AMIGO_USE_OPENMP
+#pragma omp parallel for
+#endif  // AMIGO_USE_OPENMP
+  for (int i = 0; i < info.num_variables; i++) {
+    tmp.zl[i] = A2D::max2(beta_min, A2D::fabs(pt.zl[i] + up.zl[i]));
+    tmp.zu[i] = A2D::max2(beta_min, A2D::fabs(pt.zu[i] + up.zu[i]));
+  }
+
+#ifdef AMIGO_USE_OPENMP
+#pragma omp parallel for
+#endif  // AMIGO_USE_OPENMP
+  for (int i = 0; i < info.num_inequalities; i++) {
+    if (!std::isinf(info.lbc[i])) {
+      tmp.sl[i] = A2D::max2(beta_min, A2D::fabs(pt.sl[i] + up.sl[i]));
+      tmp.tl[i] = A2D::max2(beta_min, A2D::fabs(pt.tl[i] + up.tl[i]));
+      tmp.zsl[i] = A2D::max2(beta_min, A2D::fabs(pt.zsl[i] + up.zsl[i]));
+      tmp.ztl[i] = A2D::max2(beta_min, A2D::fabs(pt.ztl[i] + up.ztl[i]));
+    }
+
+    if (!std::isinf(info.ubc[i])) {
+      tmp.su[i] = A2D::max2(beta_min, A2D::fabs(pt.su[i] + up.su[i]));
+      tmp.tu[i] = A2D::max2(beta_min, A2D::fabs(pt.tu[i] + up.tu[i]));
+      tmp.zsu[i] = A2D::max2(beta_min, A2D::fabs(pt.zsu[i] + up.zsu[i]));
+      tmp.ztu[i] = A2D::max2(beta_min, A2D::fabs(pt.ztu[i] + up.ztu[i]));
+    }
+  }
+}
+
 }  // namespace detail
 
 }  // namespace amigo

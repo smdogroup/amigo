@@ -247,19 +247,19 @@ class InteriorPointOptimizer {
     for (int i = 0; i < size; i++) {
       if (is_multiplier[i]) {
         if (!std::isinf(lb[i]) && !std::isinf(ub[i]) && lb[i] == ub[i]) {
-          lbh[num_eq] = lb[i];
-          equality_indices[num_eq] = i;
+          (*lbh)[num_eq] = lb[i];
+          (*equality_indices)[num_eq] = i;
           num_eq++;
         } else {
-          lbc[num_ineq] = lb[i];
-          ubc[num_ineq] = ub[i];
-          inequality_indices[num_ineq] = i;
+          (*lbc)[num_ineq] = lb[i];
+          (*ubc)[num_ineq] = ub[i];
+          (*inequality_indices)[num_ineq] = i;
           num_ineq++;
         }
       } else {
-        lbx[num_vars] = lb[i];
-        ubx[num_vars] = ub[i];
-        design_variable_indices[num_vars] = i;
+        (*lbx)[num_vars] = lb[i];
+        (*ubx)[num_vars] = ub[i];
+        (*design_variable_indices)[num_vars] = i;
         num_vars++;
       }
     }
@@ -267,10 +267,10 @@ class InteriorPointOptimizer {
     // Sync everything between the host and device
     lbx->copy_host_to_device();
     ubx->copy_host_to_device();
-    desgin_variable_indices->copy_host_to_device();
+    design_variable_indices->copy_host_to_device();
 
-    ubx->copy_host_to_device();
-    desgin_variable_indices->copy_host_to_device();
+    lbh->copy_host_to_device();
+    equality_indices->copy_host_to_device();
 
     lbc->copy_host_to_device();
     ubc->copy_host_to_device();
@@ -284,7 +284,7 @@ class InteriorPointOptimizer {
     info.design_variable_indices =
         design_variable_indices->template get_array<policy>();
     info.equality_indices = equality_indices->template get_array<policy>();
-    info.equality_indices = inequality_indices->template get_array<policy>();
+    info.inequality_indices = inequality_indices->template get_array<policy>();
 
     info.lbx = lbx->template get_array<policy>();
     info.ubx = ubx->template get_array<policy>();
@@ -370,16 +370,16 @@ class InteriorPointOptimizer {
 
     if constexpr (policy == ExecPolicy::SERIAL ||
                   policy == ExecPolicy::OPENMP) {
-      detail::add_residual(barrier, gamma, info, pt, g, r);
+      detail::add_residual(barrier_param, gamma, info, pt, g, r);
     }
 #ifdef AMIGO_USE_CUDA
     else {
-      detail::add_residual_cuda(barrier, gamma, info, pt, g, r);
+      detail::add_residual_cuda(barrier_param, gamma, info, pt, g, r);
     }
 #endif
 
     // Compute the residual norm
-    T local_norm = res->dot(*res);
+    T local_norm = res->template dot<policy>(*res);
     T norm;
     MPI_Allreduce(&local_norm, &norm, 1, get_mpi_type<T>(), MPI_SUM, comm);
 
@@ -415,7 +415,7 @@ class InteriorPointOptimizer {
     }
 #ifdef AMIGO_USE_CUDA
     else {
-      detail::compute_update_cuda(barrier, gamma, info, pt, g, r);
+      detail::compute_update_cuda(barrier_param, gamma, info, pt, up);
     }
 #endif
   }
@@ -443,11 +443,11 @@ class InteriorPointOptimizer {
     // Perform the update
     if constexpr (policy == ExecPolicy::SERIAL ||
                   policy == ExecPolicy::OPENMP) {
-      detail::compute_diagonal(barrier_param, gamma, info, pt, diag);
+      detail::compute_diagonal(info, pt, diag);
     }
 #ifdef AMIGO_USE_CUDA
     else {
-      detail::compute_diagonal_cuda(barrier, gamma, info, pt, diag);
+      detail::compute_diagonal_cuda(info, pt, diag);
     }
 #endif
   }
@@ -523,7 +523,8 @@ class InteriorPointOptimizer {
 
     // nxlam = xlam + alpha * pxlam
     temp->get_solution()->copy(*vars->get_solution());
-    temp->get_solution()->axpy(alpha_x, *update->get_solution());
+    temp->get_solution()->template axpy<policy>(alpha_x,
+                                                *update->get_solution());
 
     // Compute the max step lengths
     if constexpr (policy == ExecPolicy::SERIAL ||
@@ -549,77 +550,80 @@ class InteriorPointOptimizer {
    */
   T compute_complementarity(const std::shared_ptr<OptVector<T>> vars,
                             T* uniformity_measure) const {
-    // Get the dual values for the bound constraints
-    const T *zl, *zu;
-    vars->get_bound_duals(&zl, &zu);
+    // // Get the dual values for the bound constraints
+    // const T *zl, *zu;
+    // vars->get_bound_duals(&zl, &zu);
 
-    // Get the slack variable values
-    const T *sl, *tl, *su, *tu;
-    vars->get_slacks(nullptr, &sl, &tl, &su, &tu);
+    // // Get the slack variable values
+    // const T *sl, *tl, *su, *tu;
+    // vars->get_slacks(nullptr, &sl, &tl, &su, &tu);
 
-    // Get the dual values for the slacks
-    const T *zsl, *ztl, *zsu, *ztu;
-    vars->get_slack_duals(&zsl, &ztl, &zsu, &ztu);
+    // // Get the dual values for the slacks
+    // const T *zsl, *ztl, *zsu, *ztu;
+    // vars->get_slack_duals(&zsl, &ztl, &zsu, &ztu);
 
-    T* xlam = vars->get_solution_array();
+    // T* xlam = vars->get_solution_array();
 
-    T partial_sum[2] = {0.0, 0.0};
-    T local_min = std::numeric_limits<T>::max();
+    // T partial_sum[2] = {0.0, 0.0};
+    // T local_min = std::numeric_limits<T>::max();
 
-    for (int i = 0; i < num_variables; i++) {
-      // Extract the design variable value
-      int index = design_variable_indices[i];
-      T x = xlam[index];
+    // for (int i = 0; i < num_variables; i++) {
+    //   // Extract the design variable value
+    //   int index = design_variable_indices[i];
+    //   T x = xlam[index];
 
-      if (!std::isinf(lbx[i])) {
-        T comp = (x - lbx[i]) * zl[i];
-        partial_sum[0] += comp;
-        partial_sum[1] += 1.0;
-        local_min = A2D::min2(local_min, comp);
-      }
-      if (!std::isinf(ubx[i])) {
-        T comp = (ubx[i] - x) * zu[i];
-        partial_sum[0] += comp;
-        partial_sum[1] += 1.0;
-        local_min = A2D::min2(local_min, comp);
-      }
-    }
+    //   if (!std::isinf(lbx[i])) {
+    //     T comp = (x - lbx[i]) * zl[i];
+    //     partial_sum[0] += comp;
+    //     partial_sum[1] += 1.0;
+    //     local_min = A2D::min2(local_min, comp);
+    //   }
+    //   if (!std::isinf(ubx[i])) {
+    //     T comp = (ubx[i] - x) * zu[i];
+    //     partial_sum[0] += comp;
+    //     partial_sum[1] += 1.0;
+    //     local_min = A2D::min2(local_min, comp);
+    //   }
+    // }
 
-    for (int i = 0; i < num_inequalities; i++) {
-      if (!std::isinf(lbc[i])) {
-        T comp_sl = sl[i] * zsl[i];
-        T comp_tl = tl[i] * ztl[i];
-        partial_sum[0] += comp_sl + comp_tl;
-        partial_sum[1] += 2.0;
-        local_min = A2D::min2(local_min, A2D::min2(comp_sl, comp_tl));
-      }
+    // for (int i = 0; i < num_inequalities; i++) {
+    //   if (!std::isinf(lbc[i])) {
+    //     T comp_sl = sl[i] * zsl[i];
+    //     T comp_tl = tl[i] * ztl[i];
+    //     partial_sum[0] += comp_sl + comp_tl;
+    //     partial_sum[1] += 2.0;
+    //     local_min = A2D::min2(local_min, A2D::min2(comp_sl, comp_tl));
+    //   }
 
-      if (!std::isinf(ubc[i])) {
-        T comp_su = su[i] * zsu[i];
-        T comp_tu = tu[i] * ztu[i];
-        partial_sum[0] += comp_su + comp_tu;
-        partial_sum[1] += 2.0;
-        local_min = A2D::min2(local_min, A2D::min2(comp_su, comp_tu));
-      }
-    }
+    //   if (!std::isinf(ubc[i])) {
+    //     T comp_su = su[i] * zsu[i];
+    //     T comp_tu = tu[i] * ztu[i];
+    //     partial_sum[0] += comp_su + comp_tu;
+    //     partial_sum[1] += 2.0;
+    //     local_min = A2D::min2(local_min, A2D::min2(comp_su, comp_tu));
+    //   }
+    // }
 
-    // Compute the complementarity value across all processors
-    T sum[2];
-    MPI_Allreduce(partial_sum, sum, 2, get_mpi_type<T>(), MPI_SUM, comm);
+    // // Compute the complementarity value across all processors
+    // T sum[2];
+    // MPI_Allreduce(partial_sum, sum, 2, get_mpi_type<T>(), MPI_SUM, comm);
 
-    // Compute average complementarity
-    T avg_complementarity = (sum[1] == 0.0) ? 0.0 : sum[0] / sum[1];
+    // // Compute average complementarity
+    // T avg_complementarity = (sum[1] == 0.0) ? 0.0 : sum[0] / sum[1];
 
-    // Compute the uniformity measure
-    T global_min;
-    MPI_Allreduce(&local_min, &global_min, 1, get_mpi_type<T>(), MPI_MIN, comm);
+    // // Compute the uniformity measure
+    // T global_min;
+    // MPI_Allreduce(&local_min, &global_min, 1, get_mpi_type<T>(), MPI_MIN,
+    // comm);
 
-    if (avg_complementarity <= 0.0) {
-      *uniformity_measure = 1.0;
-    } else {
-      T uniformity = global_min / avg_complementarity;
-      *uniformity_measure = A2D::max2(0.0, A2D::min2(1.0, uniformity));
-    }
+    // if (avg_complementarity <= 0.0) {
+    //   *uniformity_measure = 1.0;
+    // } else {
+    //   T uniformity = global_min / avg_complementarity;
+    //   *uniformity_measure = A2D::max2(0.0, A2D::min2(1.0, uniformity));
+    // }
+
+    T avg_complementarity = 0.0;
 
     return avg_complementarity;
   }
@@ -636,50 +640,24 @@ class InteriorPointOptimizer {
                                   const std::shared_ptr<OptVector<T>> vars,
                                   const std::shared_ptr<OptVector<T>> update,
                                   std::shared_ptr<OptVector<T>> temp) {
-    // Get the dual values for the bound constraints
-    const T *zl, *zu;
-    const T *pzl, *pzu;
-    T *nzl, *nzu;
-    vars->get_bound_duals(&zl, &zu);
-    update->get_bound_duals(&pzl, &pzu);
-    temp->get_bound_duals(&nzl, &nzu);
+    // Set the values
+    detail::OptStateData<const T> pt =
+        detail::OptStateData<const T>::template make<policy>(vars);
+    detail::OptStateData<const T> up =
+        detail::OptStateData<const T>::template make<policy>(update);
+    detail::OptStateData<T> tmp =
+        detail::OptStateData<T>::template make<policy>(temp);
 
-    // Get the slack variable values
-    const T *sl, *tl, *su, *tu;
-    const T *psl, *ptl, *psu, *ptu;
-    T *nsl, *ntl, *nsu, *ntu;
-    vars->get_slacks(nullptr, &sl, &tl, &su, &tu);
-    update->get_slacks(nullptr, &psl, &ptl, &psu, &ptu);
-    temp->get_slacks(nullptr, &nsl, &ntl, &nsu, &ntu);
-
-    // Get the dual values for the slacks
-    const T *zsl, *ztl, *zsu, *ztu;
-    const T *pzsl, *pztl, *pzsu, *pztu;
-    T *nzsl, *nztl, *nzsu, *nztu;
-    vars->get_slack_duals(&zsl, &ztl, &zsu, &ztu);
-    update->get_slack_duals(&pzsl, &pztl, &pzsu, &pztu);
-    temp->get_slack_duals(&nzsl, &nztl, &nzsu, &nztu);
-
-    for (int i = 0; i < num_variables; i++) {
-      nzl[i] = A2D::max(beta_min, A2D::fabs(zl[i] + pzl[i]));
-      nzu[i] = A2D::max(beta_min, A2D::fabs(zu[i] + pzu[i]));
+    // Compute the max step lengths
+    if constexpr (policy == ExecPolicy::SERIAL ||
+                  policy == ExecPolicy::OPENMP) {
+      detail::compute_affine_start_point(beta_min, info, pt, up, tmp);
     }
-
-    for (int i = 0; i < num_inequalities; i++) {
-      if (!std::isinf(lbc[i])) {
-        nsl[i] = A2D::max2(beta_min, A2D::fabs(sl[i] + psl[i]));
-        ntl[i] = A2D::max2(beta_min, A2D::fabs(tl[i] + ptl[i]));
-        nzsl[i] = A2D::max2(beta_min, A2D::fabs(zsl[i] + pzsl[i]));
-        nztl[i] = A2D::max2(beta_min, A2D::fabs(ztl[i] + pztl[i]));
-      }
-
-      if (!std::isinf(ubc[i])) {
-        nsu[i] = A2D::max2(beta_min, A2D::fabs(su[i] + psu[i]));
-        ntu[i] = A2D::max2(beta_min, A2D::fabs(tu[i] + ptu[i]));
-        nzsu[i] = A2D::max2(beta_min, A2D::fabs(zsu[i] + pzsu[i]));
-        nztu[i] = A2D::max2(beta_min, A2D::fabs(ztu[i] + pztu[i]));
-      }
+#ifdef AMIGO_USE_CUDA
+    else {
+      detail::compute_affine_start_point_cuda(beta_min, info, pt, up, tmp);
     }
+#endif  // AMIGO_USE_CUDA
   }
 
   /**
@@ -737,53 +715,53 @@ class InteriorPointOptimizer {
 
       hessian->mult(update->get_solution(), tmp);
       for (int i = 0; i < num_variables; i++) {
-        int index = design_variable_indices[i];
+        int index = info.design_variable_indices[i];
 
         // Compute the residual
         T rx = (g[index] - zl[i] + zu[i]);
         t[index] = t[index] - pzl[i] + pzu[i] + rx;
       }
       for (int i = 0; i < num_equalities; i++) {
-        int index = equality_indices[i];
+        int index = info.equality_indices[i];
         T rh = g[index];
         t[index] = t[index] + rh;
       }
       for (int i = 0; i < num_inequalities; i++) {
-        int index = inequality_indices[i];
+        int index = info.inequality_indices[i];
         T rc = g[index] - s[i];
         t[index] = t[index] - ps[i] + rc;
       }
       std::printf("%-40s %15.6e\n", "||H * px - pzl + pzu + rx|| ",
-                  std::sqrt(tmp->dot(*tmp)));
+                  std::sqrt(tmp->template dot<policy>(*tmp)));
 
       // (xs - lb) * pzl + pxs * zl + rzl
       t.zero();
       for (int i = 0; i < num_variables; i++) {
-        int index = design_variable_indices[i];
+        int index = info.design_variable_indices[i];
         if (!std::isinf(lbx[i])) {
           T rzl = (xlam[index] - lbx[i]) * zl[i] - barrier_param;
           t[i] = (xlam[index] - lbx[i]) * pzl[i] + pxlam[index] * zl[i] + rzl;
         }
       }
       std::printf("%-40s %15.6e\n", "||(x - lbx) * pzl + px * zl + rzl|| ",
-                  std::sqrt(tmp->dot(*tmp)));
+                  std::sqrt(tmp->template dot<policy>(*tmp)));
 
       // (ub - xs) * pzu - pxs * zu = bzu
       t.zero();
       for (int i = 0; i < num_variables; i++) {
-        int index = design_variable_indices[i];
+        int index = info.design_variable_indices[i];
         if (!std::isinf(ubx[i])) {
           T rzu = (ubx[i] - xlam[index]) * zu[i] - barrier_param;
           t[i] = (ubx[i] - xlam[index]) * pzu[i] - zu[i] * pxlam[index] + rzu;
         }
       }
       std::printf("%-40s %15.6e\n", "||(ubx - x) * pzu - px * zu + rzu|| ",
-                  std::sqrt(tmp->dot(*tmp)));
+                  std::sqrt(tmp->template dot<policy>(*tmp)));
 
       // -plam - pzlc + pzuc = blam
       t.zero();
       for (int i = 0; i < num_inequalities; i++) {
-        int index = inequality_indices[i];
+        int index = info.inequality_indices[i];
 
         T lam = xlam[index];
         T plam = pxlam[index];
@@ -791,105 +769,105 @@ class InteriorPointOptimizer {
         t[index] = (-plam - pzsl[i] + pzsu[i]) + rlam;
       }
       std::printf("%-40s %15.6e\n", "||-plam - pzlc + pzuc - blam|| ",
-                  std::sqrt(tmp->dot(*tmp)));
+                  std::sqrt(tmp->template dot<policy>(*tmp)));
 
       // Test equations for the lower bounds
       // rsl = s - lc - sl + tl
       t.zero();
       for (int i = 0; i < num_inequalities; i++) {
-        int index = inequality_indices[i];
+        int index = info.inequality_indices[i];
         if (!std::isinf(lbc[i])) {
           T rsl = s[i] - lbc[i] - sl[i] + tl[i];
           t[index] = ps[i] - psl[i] + ptl[i] + rsl;
         }
       }
       std::printf("%-40s %15.6e\n", "||ps - psl + ptl + rsl|| ",
-                  std::sqrt(tmp->dot(*tmp)));
+                  std::sqrt(tmp->template dot<policy>(*tmp)));
 
       // rlaml = gamma - zsl - ztl
       t.zero();
       for (int i = 0; i < num_inequalities; i++) {
-        int index = inequality_indices[i];
+        int index = info.inequality_indices[i];
         if (!std::isinf(lbc[i])) {
           T rlaml = gamma - zsl[i] - ztl[i];
           t[index] = -pzsl[i] - pztl[i] + rlaml;
         }
       }
       std::printf("%-40s %15.6e\n", "||-pzsl - pztl + rlaml|| ",
-                  std::sqrt(tmp->dot(*tmp)));
+                  std::sqrt(tmp->template dot<policy>(*tmp)));
 
       // rzsl = Sl * zsl - barrier_param
       t.zero();
       for (int i = 0; i < num_inequalities; i++) {
-        int index = inequality_indices[i];
+        int index = info.inequality_indices[i];
         if (!std::isinf(lbc[i])) {
           T rzsl = sl[i] * zsl[i] - barrier_param;
           t[index] = sl[i] * pzsl[i] + zsl[i] * psl[i] + rzsl;
         }
       }
       std::printf("%-40s %15.6e\n", "||sl * pzsl + zsl * psl + rzsl|| ",
-                  std::sqrt(tmp->dot(*tmp)));
+                  std::sqrt(tmp->template dot<policy>(*tmp)));
 
       // rzsl = Tl * ztl - barrier_param
       t.zero();
       for (int i = 0; i < num_inequalities; i++) {
-        int index = inequality_indices[i];
+        int index = info.inequality_indices[i];
         if (!std::isinf(lbc[i])) {
           T rztl = tl[i] * ztl[i] - barrier_param;
           t[index] = tl[i] * pztl[i] + ztl[i] * ptl[i] + rztl;
         }
       }
       std::printf("%-40s %15.6e\n", "||tl * pztl + ztl * ptl + rztl|| ",
-                  std::sqrt(tmp->dot(*tmp)));
+                  std::sqrt(tmp->template dot<policy>(*tmp)));
 
       // Test equations for the upper bounds
       // rsu = ubc - s - su + tu
       t.zero();
       for (int i = 0; i < num_inequalities; i++) {
-        int index = inequality_indices[i];
+        int index = info.inequality_indices[i];
         if (!std::isinf(ubc[i])) {
           T rsu = ubc[i] - s[i] - su[i] + tu[i];
           t[index] = -ps[i] - psu[i] + ptu[i] + rsu;
         }
       }
       std::printf("%-40s %15.6e\n", "||-ps - psu + ptu + rsu|| ",
-                  std::sqrt(tmp->dot(*tmp)));
+                  std::sqrt(tmp->template dot<policy>(*tmp)));
 
       // rlamu = gamma - zsu - ztu
       t.zero();
       for (int i = 0; i < num_inequalities; i++) {
-        int index = inequality_indices[i];
+        int index = info.inequality_indices[i];
         if (!std::isinf(ubc[i])) {
           T rlamu = gamma - zsu[i] - ztu[i];
           t[index] = -pzsu[i] - pztu[i] + rlamu;
         }
       }
       std::printf("%-40s %15.6e\n", "||-pzsu - pztu + rlamu|| ",
-                  std::sqrt(tmp->dot(*tmp)));
+                  std::sqrt(tmp->template dot<policy>(*tmp)));
 
       // rzsu = Su * zsu - barrier_param
       t.zero();
       for (int i = 0; i < num_inequalities; i++) {
-        int index = inequality_indices[i];
+        int index = info.inequality_indices[i];
         if (!std::isinf(ubc[i])) {
           T rzsu = su[i] * zsu[i] - barrier_param;
           t[index] = su[i] * pzsu[i] + zsu[i] * psu[i] + rzsu;
         }
       }
       std::printf("%-40s %15.6e\n", "||su * pzsu + zsu * psu + rzsu|| ",
-                  std::sqrt(tmp->dot(*tmp)));
+                  std::sqrt(tmp->template dot<policy>(*tmp)));
 
       // rzsu = Tu * ztu - barrier_param
       t.zero();
       for (int i = 0; i < num_inequalities; i++) {
-        int index = inequality_indices[i];
+        int index = info.inequality_indices[i];
         if (!std::isinf(ubc[i])) {
           T rztu = tu[i] * ztu[i] - barrier_param;
           t[index] = tu[i] * pztu[i] + ztu[i] * ptu[i] + rztu;
         }
       }
       std::printf("%-40s %15.6e\n", "||tu * pztu + ztu * ptu + rztu|| ",
-                  std::sqrt(tmp->dot(*tmp)));
+                  std::sqrt(tmp->template dot<policy>(*tmp)));
     }
   }
 
