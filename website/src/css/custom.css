@@ -1,0 +1,720 @@
+/**
+ * Amigo Documentation Custom Styles
+ * Inspired by control-toolbox.org (Documenter.jl theme)
+ */
+
+:root {
+  /* Primary colors - blue theme like control-toolbox */
+  --ifm-color-primary: #4063D8;
+  --ifm-color-primary-dark: #3454c7;
+  --ifm-color-primary-darker: #2f4dbb;
+  --ifm-color-primary-darkest: #26409a;
+  --ifm-color-primary-light: #5377e0;
+  --ifm-color-primary-lighter: #5f81e3;
+  --ifm-color-primary-lightest: #7a96eb;
+  
+  /* Navbar teal color from control-toolbox */
+  --ifm-navbar-background-color: #007FA2;
+  --ifm-navbar-link-color: rgba(255, 255, 255, 0.75);
+  --ifm-navbar-link-hover-color: rgba(255, 255, 255, 0.95);
+
+  /* Secondary colors */
+  --ifm-color-secondary: #4063D8;
+  --ifm-color-success: #389826;
+  --ifm-color-info: #4063D8;
+  --ifm-color-warning: #F59E0B;
+  --ifm-color-danger: #CB3C33;
+
+  /* Background colors */
+  --ifm-background-color: #ffffff;
+  --ifm-background-surface-color: #f9fafb;
+  
+  /* Code blocks */
+  --ifm-code-font-size: 95%;
+  --docusaurus-highlighted-code-line-bg: rgba(64, 99, 216, 0.1);
+
+  /* Font - exactly like control-toolbox (Documenter.jl) */
+  --ifm-font-family-base: 'Lato', 'Lato-Regular', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  --ifm-font-family-monospace: 'JuliaMono', 'SFMono-Regular', 'Menlo', 'Consolas', 'Liberation Mono', monospace;
+  
+  /* Spacing */
+  --ifm-spacing-horizontal: 1.5rem;
+  --ifm-navbar-height: 3.75rem;
+
+  /* Sidebar */
+  --doc-sidebar-width: 280px !important;
+}
+
+/* Dark mode colors */
+[data-theme='dark'] {
+  --ifm-color-primary: #6b8afb;
+  --ifm-color-primary-dark: #4c72fa;
+  --ifm-color-primary-darker: #3b65fa;
+  --ifm-color-primary-darkest: #0841f7;
+  --ifm-color-primary-light: #8aa2fc;
+  --ifm-color-primary-lighter: #9baffc;
+  --ifm-color-primary-lightest: #cddbfe;
+
+  --ifm-background-color: #1b1f23;
+  --ifm-background-surface-color: #242930;
+  
+  /* Keep navbar teal in dark mode too */
+  --ifm-navbar-background-color: #007FA2;
+  
+  --docusaurus-highlighted-code-line-bg: rgba(107, 138, 251, 0.15);
+}
+
+/* Navbar styling - control-toolbox inspired */
+.navbar {
+  background-color: var(--ifm-navbar-background-color) !important;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  border-bottom: none;
+}
+
+.navbar__title {
+  font-weight: 700;
+  font-size: 1.5rem;
+  color: #ffffff !important;
+}
+
+.navbar__brand {
+  color: #ffffff !important;
+}
+
+.navbar__brand:hover {
+  color: #ffffff !important;
+}
+
+.navbar__link {
+  color: var(--ifm-navbar-link-color) !important;
+  font-weight: 400;
+  transition: color 0.15s ease-in-out;
+}
+
+.navbar__link:hover,
+.navbar__link--active {
+  color: var(--ifm-navbar-link-hover-color) !important;
+}
+
+/* All navbar items including GitHub link */
+.navbar__item.navbar__link {
+  color: var(--ifm-navbar-link-color) !important;
+}
+
+.navbar__item.navbar__link:hover {
+  color: var(--ifm-navbar-link-hover-color) !important;
+}
+
+/* Dropdown menu styling */
+.dropdown__menu {
+  background-color: #ffffff;
+}
+
+.dropdown__link {
+  color: #333333 !important;
+}
+
+.dropdown__link:hover {
+  background-color: rgba(0, 127, 162, 0.1);
+  color: #007FA2 !important;
+}
+
+/* Sidebar styling - inspired by Documenter.jl */
+.theme-doc-sidebar-container {
+  background-color: var(--ifm-background-surface-color);
+  border-right: 1px solid var(--ifm-toc-border-color);
+}
+
+/* Search bar styling in sidebar */
+.theme-doc-sidebar-container input[type="text"] {
+  transition: border-color 0.2s ease;
+}
+
+.theme-doc-sidebar-container input[type="text"]::placeholder {
+  color: #9ca3af;
+  font-style: italic;
+}
+
+/* Sidebar category headings - black and bold */
+.menu__list-item-collapsible > .menu__link {
+  color: #1a1a1a;
+  font-weight: 700;
+  font-size: 0.95rem;
+  padding: 0.5rem 0.75rem;
+}
+
+.menu__list-item-collapsible > .menu__link:hover {
+  background-color: rgba(0, 0, 0, 0.03);
+  color: #000000;
+}
+
+/* Expanded category - white background only when expanded */
+.theme-doc-sidebar-item-category:not(.menu__list-item--collapsed) {
+  background-color: #ffffff;
+  border-radius: 0 !important;
+  margin: 0.25rem 0;
+  padding: 0.5rem 0.25rem;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+/* Ensure collapsed categories don't have white background */
+.theme-doc-sidebar-item-category.menu__list-item--collapsed {
+  background-color: transparent;
+}
+
+/* Remove all rounded corners from sidebar elements */
+.menu__list-item,
+.menu__list,
+ul.menu__list,
+.menu__list-item-collapsible,
+.theme-doc-sidebar-item-category,
+.theme-doc-sidebar-item-category > *,
+.theme-doc-sidebar-item-link,
+nav.menu,
+.theme-doc-sidebar-container * {
+  border-radius: 0 !important;
+}
+
+/* Sidebar links - darker gray */
+.menu__link {
+  border-radius: 0;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.9rem;
+  color: #4a4a4a;
+}
+
+.menu__link:hover {
+  background-color: rgba(0, 0, 0, 0.05);
+  color: #1a1a1a;
+}
+
+.menu__link--active {
+  background-color: #e8e8e8;
+  color: #1a1a1a;
+  font-weight: 600;
+  border-left: 3px solid #007FA2;
+  border-radius: 0;
+}
+
+.menu__link--active:hover {
+  background-color: #dddddd;
+  color: #000000;
+}
+
+.menu__list-item-collapsible:hover {
+  background-color: transparent;
+}
+
+/* Hide the chevron/caret icon */
+.menu__caret,
+.menu__caret:before,
+.menu__link--sublist-caret:after {
+  display: none !important;
+  background: none !important;
+}
+
+/* Documentation content */
+.markdown {
+  --ifm-h1-font-size: 2rem;
+  --ifm-h2-font-size: 1.5rem;
+  --ifm-h3-font-size: 1.25rem;
+}
+
+/* Justify text in documentation */
+.markdown p {
+  text-align: justify;
+  hyphens: auto;
+}
+
+/* Reduce spacing after images and center them */
+.markdown img {
+  margin-bottom: 0.2rem;
+  margin-top: 0.2rem;
+  display: block;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* Center div for figures */
+div[align="center"] {
+  text-align: center !important;
+}
+
+div[align="center"] img {
+  display: inline-block;
+  margin-bottom: 0.2rem !important;
+}
+
+div[align="center"] p {
+  text-align: center !important;
+  margin-top: 0 !important;
+  margin-bottom: 0.5rem;
+}
+
+/* Style figure captions - all figures same teal color */
+div[align="center"] p strong,
+p[align="center"] strong {
+  color: #005F73;
+  font-weight: 600;
+}
+
+/* Hide only the # anchor link symbol on hover */
+.hash-link::before {
+  display: none !important;
+}
+
+a.hash-link {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+.markdown h1 {
+  color: #005F73;
+  font-weight: 600;
+  font-size: 2rem;
+  margin-bottom: 2.5rem;
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.markdown h2 {
+  color: #005F73;
+  font-weight: 600;
+  font-size: 2rem;
+  margin-top: 2.5rem;
+  margin-bottom: 1.5rem;
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.markdown h3 {
+  color: #007FA2;
+  font-weight: 600;
+  font-size: 1.5rem;
+  margin-top: 1.5rem;
+  margin-bottom: 0.75rem;
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.markdown h4 {
+  color: #007FA2;
+  font-weight: 600;
+  font-size: 1.25rem;
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+/* Code blocks - Documenter.jl style with gray background */
+.prism-code {
+  border-radius: 3px;
+  font-size: 0.9rem;
+  border: 1px solid #DCDCDC;
+  background-color: #F5F5F5 !important;
+}
+
+pre {
+  border-radius: 3px;
+  border: 1px solid #DCDCDC;
+  background-color: #F5F5F5 !important;
+}
+
+div[class*="codeBlock"] {
+  border-radius: 3px;
+  box-shadow: none;
+  background-color: #F5F5F5;
+}
+
+div[class*="codeBlockContainer"] {
+  background-color: #F5F5F5;
+  border: 1px solid #DCDCDC;
+  border-radius: 3px;
+  margin: 1rem 0;
+}
+
+/* Admonitions - Same style as code blocks with blue border (control-toolbox style) */
+.theme-admonition {
+  border: 2px solid #3C5DCD !important;
+  border-radius: 3px !important;
+  box-shadow: none !important;
+  margin: 1.5rem 0 !important;
+  padding: 1rem 1.25rem !important;
+  background-color: #F5F5F5 !important;
+}
+
+/* Remove inner div styling */
+.theme-admonition > div {
+  border: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  background-color: transparent !important;
+}
+
+/* Heading styling - blue color matching border */
+.theme-admonition h5 {
+  font-weight: 700 !important;
+  margin: 0 0 0.75rem 0 !important;
+  color: #3C5DCD !important;
+  font-size: 0.95rem !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 0.5rem !important;
+  text-transform: uppercase !important;
+}
+
+/* Note - blue icon and border */
+.theme-admonition-note svg {
+  display: inline-block !important;
+  width: 22px !important;
+  height: 22px !important;
+  fill: #3C5DCD !important;
+  color: #3C5DCD !important;
+}
+
+.theme-admonition-note svg path {
+  fill: #3C5DCD !important;
+}
+
+.theme-admonition-note {
+  border-color: #3C5DCD !important;
+}
+
+.theme-admonition-note h5 {
+  color: #3C5DCD !important;
+}
+
+/* Tip - green icon and border */
+.theme-admonition-tip {
+  border: 2px solid #259A12 !important;
+}
+
+.theme-admonition-tip h5 {
+  color: #259A12 !important;
+}
+
+.theme-admonition-tip svg {
+  display: inline-block !important;
+  width: 22px !important;
+  height: 22px !important;
+  fill: #259A12 !important;
+  color: #259A12 !important;
+}
+
+.theme-admonition-tip svg path {
+  fill: #259A12 !important;
+}
+
+/* Warning - yellow/brown icon and border */
+.theme-admonition-warning {
+  border: 2px solid #A98800 !important;
+  background-color: #F5F5F5 !important;
+  border-radius: 3px !important;
+  padding: 1rem 1.25rem !important;
+  margin: 1.5rem 0 !important;
+}
+
+.theme-admonition-warning h5 {
+  color: #A98800 !important;
+  font-weight: 700 !important;
+  text-transform: uppercase !important;
+}
+
+.theme-admonition-warning svg {
+  display: inline-block !important;
+  width: 22px !important;
+  height: 22px !important;
+  fill: #A98800 !important;
+  color: #A98800 !important;
+}
+
+.theme-admonition-warning svg path {
+  fill: #A98800 !important;
+}
+
+/* Content text styling */
+.theme-admonition p {
+  margin: 0 !important;
+  color: #333333 !important;
+  line-height: 1.6 !important;
+}
+
+.admonition-warning .admonition-heading {
+  color: #b45309;
+}
+
+/* Danger - red */
+.admonition-danger {
+  border-left-color: #CB3C33;
+  background-color: #fef2f2;
+}
+
+.admonition-danger .admonition-heading {
+  color: #991b1b;
+}
+
+/* Table of Contents - hidden */
+.table-of-contents,
+.theme-doc-toc-desktop,
+.col--3 {
+  display: none !important;
+}
+
+/* Expand main content to use full width when TOC is hidden */
+.docMainContainer_node_modules-\@docusaurus-theme-classic-lib-theme-DocPage-Layout-Main-styles-module,
+.col.col--9 {
+  max-width: 100% !important;
+  flex: 0 0 100% !important;
+}
+
+/* Footer - smaller, minimal */
+.footer {
+  background-color: var(--ifm-background-surface-color);
+  border-top: 1px solid var(--ifm-toc-border-color);
+  padding: 1rem 0;
+}
+
+.footer__copyright {
+  font-size: 0.85rem;
+  margin: 0;
+}
+
+/* Hero section on homepage - teal gradient like control-toolbox */
+.hero {
+  background: linear-gradient(135deg, #007FA2 0%, #006684 100%);
+  color: white;
+  padding: 4rem 0;
+}
+
+.hero__title {
+  font-size: 3rem;
+  font-weight: 800;
+}
+
+.hero__subtitle {
+  font-size: 1.5rem;
+  font-weight: 400;
+  opacity: 0.9;
+}
+
+/* Buttons */
+.button {
+  border-radius: 6px;
+  font-weight: 600;
+  padding: 0.75rem 1.5rem;
+  transition: all 0.2s ease;
+}
+
+.button--primary {
+  background-color: var(--ifm-color-primary);
+  border-color: var(--ifm-color-primary);
+}
+
+.button--primary:hover {
+  background-color: var(--ifm-color-primary-dark);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+}
+
+.button--secondary {
+  color: var(--ifm-color-primary);
+  border: 2px solid var(--ifm-color-primary);
+}
+
+.button--secondary:hover {
+  background-color: var(--ifm-color-primary);
+  color: white;
+}
+
+/* Feature cards */
+.features {
+  padding: 4rem 0;
+}
+
+.feature {
+  padding: 2rem;
+  text-align: center;
+}
+
+.feature h3 {
+  color: var(--ifm-color-primary);
+  font-weight: 700;
+}
+
+/* Search bar */
+.DocSearch-Button {
+  border-radius: 6px;
+  border: 1px solid var(--ifm-toc-border-color);
+}
+
+/* Pagination - show both prev and next with page names */
+.pagination-nav {
+  margin-top: 3rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid #e5e7eb;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+
+.pagination-nav__item--prev {
+  justify-self: start;
+  text-align: left;
+}
+
+.pagination-nav__item--next {
+  justify-self: end;
+  text-align: right;
+}
+
+/* Remove box styling */
+.pagination-nav__link {
+  border: none !important;
+  padding: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  min-height: auto !important;
+}
+
+.pagination-nav__link:hover {
+  background: transparent !important;
+  transform: none !important;
+}
+
+/* Hide "Previous" and "Next" labels */
+.pagination-nav__label {
+  display: none !important;
+}
+
+/* Show only page names */
+.pagination-nav__sublabel {
+  color: #4063D8;
+  font-size: 1rem;
+  font-weight: 400;
+}
+
+.pagination-nav__link:hover .pagination-nav__sublabel {
+  color: #3454c7;
+  text-decoration: underline;
+}
+
+/* Add arrows to page names */
+.pagination-nav__item--prev .pagination-nav__sublabel::before {
+  content: "« ";
+}
+
+.pagination-nav__item--next .pagination-nav__sublabel::after {
+  content: " »";
+}
+
+/* Breadcrumbs - gray like control-toolbox */
+.breadcrumbs {
+  margin-bottom: 1rem;
+}
+
+.breadcrumbs__link {
+  color: #6b7280;
+  text-decoration: none;
+}
+
+.breadcrumbs__link:hover {
+  color: #4b5563;
+}
+
+.breadcrumbs__item--active .breadcrumbs__link {
+  color: #4b5563;
+  font-weight: 400;
+}
+
+.breadcrumbs__item:not(:last-child)::after {
+  color: #9ca3af;
+}
+
+/* Hide edit this page link */
+.theme-doc-footer-edit-meta-row,
+.theme-edit-this-page {
+  display: none !important;
+}
+
+/* Inline code */
+code {
+  background-color: rgba(64, 99, 216, 0.1);
+  border: 1px solid rgba(64, 99, 216, 0.2);
+  border-radius: 3px;
+  padding: 0.1rem 0.3rem;
+  font-size: 0.9em;
+}
+
+[data-theme='dark'] code {
+  background-color: rgba(107, 138, 251, 0.15);
+  border-color: rgba(107, 138, 251, 0.25);
+}
+
+/* Tables */
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1rem 0;
+}
+
+table thead tr {
+  background-color: var(--ifm-background-surface-color);
+  border-bottom: 2px solid var(--ifm-color-primary);
+}
+
+table th {
+  font-weight: 700;
+  text-align: left;
+  padding: 0.75rem;
+}
+
+table td {
+  padding: 0.75rem;
+  border-bottom: 1px solid var(--ifm-toc-border-color);
+}
+
+table tr:hover {
+  background-color: rgba(64, 99, 216, 0.03);
+}
+
+/* Version badge */
+.badge {
+  display: inline-block;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  border-radius: 4px;
+  background-color: var(--ifm-color-primary);
+  color: white;
+}
+
+/* FORCE sharp corners on ALL sidebar elements - override at the end */
+aside.theme-doc-sidebar-container *,
+.theme-doc-sidebar-container div,
+.theme-doc-sidebar-container ul,
+.theme-doc-sidebar-container li,
+.theme-doc-sidebar-container a,
+aside *,
+.menu *,
+[class*="sidebar"] *,
+[class*="menu"] * {
+  border-radius: 0 !important;
+}
+
+/* Specifically target the white category boxes */
+.theme-doc-sidebar-item-category,
+.theme-doc-sidebar-item-category *,
+.theme-doc-sidebar-item-category::before,
+.theme-doc-sidebar-item-category::after,
+li.theme-doc-sidebar-item-category,
+li[class*="category"] {
+  border-radius: 0 !important;
+  -webkit-border-radius: 0 !important;
+  -moz-border-radius: 0 !important;
+}
+
+/* Target any nested containers */
+.theme-doc-sidebar-item-category ul,
+.theme-doc-sidebar-item-category > ul,
+.theme-doc-sidebar-item-category .menu__list {
+  border-radius: 0 !important;
+}
+

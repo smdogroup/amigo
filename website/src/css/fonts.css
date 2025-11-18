@@ -1,0 +1,25 @@
+/* Import Lato font from Google Fonts - exactly like control-toolbox */
+@import url('https://fonts.googleapis.com/css2?family=Lato:ital,wght@0,300;0,400;0,700;0,900;1,300;1,400;1,700;1,900&display=swap');
+
+/* Import JuliaMono for code blocks */
+@import url('https://cdn.jsdelivr.net/npm/juliamono@0.050/webfonts/JuliaMono.css');
+
+/* Apply Lato as the primary font */
+body {
+  font-family: 'Lato', 'Lato-Regular', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  font-weight: 400;
+  line-height: 1.6;
+}
+
+/* Headings with Lato */
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Lato', 'Lato-Regular', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  font-weight: 700;
+}
+
+/* Code and monospace with JuliaMono */
+code, pre, .prism-code {
+  font-family: 'JuliaMono', 'SFMono-Regular', 'Menlo', 'Consolas', 'Liberation Mono', monospace;
+  font-variant-ligatures: none;
+}
+

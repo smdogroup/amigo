@@ -201,6 +201,85 @@ def plot(d, theta, xctrl):
     return
 
 
+def plot_for_documentation(x, final_time=2.0, num_time_steps=100):
+    """
+    Create documentation-style plots matching control-toolbox format
+    2x2 grid for states, separate panel for control with clean styling
+    """
+    # Extract solution
+    time = np.linspace(0, final_time, num_time_steps + 1)
+    q1 = x["cart.q[:, 0]"]      # Cart position
+    q2 = x["cart.q[:, 1]"]      # Pole angle  
+    q1dot = x["cart.q[:, 2]"]   # Cart velocity
+    q2dot = x["cart.q[:, 3]"]   # Angular velocity
+    u = x["cart.x[:]"]          # Control force
+    
+    # Professional blue color
+    blue_color = '#4063D8'
+    
+    # Create figure with more vertical spacing
+    fig = plt.figure(figsize=(14, 11))
+    
+    # Add centered main title for states
+    fig.text(0.5, 0.95, 'State', ha='center', fontsize=14, fontweight='bold')
+    
+    # State variables in 2x2 grid (top 2/3 of figure)
+    ax1 = plt.subplot(3, 2, 1)
+    ax1.plot(time, q1, color=blue_color, linewidth=2.5)
+    ax1.set_ylabel(r'$q_1$ [m]', fontsize=12)
+    ax1.grid(True, alpha=0.25, linewidth=0.5)
+    ax1.tick_params(labelsize=10)
+    
+    ax2 = plt.subplot(3, 2, 2)
+    ax2.plot(time, q2, color=blue_color, linewidth=2.5)
+    ax2.set_ylabel(r'$q_2$ [rad]', fontsize=12)
+    ax2.axhline(y=np.pi, color='#888888', linestyle='--', alpha=0.6, linewidth=1.5)
+    ax2.grid(True, alpha=0.25, linewidth=0.5)
+    ax2.tick_params(labelsize=10)
+    
+    ax3 = plt.subplot(3, 2, 3)
+    ax3.plot(time, q1dot, color=blue_color, linewidth=2.5)
+    ax3.set_ylabel(r'$\dot{q}_1$ [m/s]', fontsize=12)
+    ax3.set_xlabel('Time [s]', fontsize=11)
+    ax3.grid(True, alpha=0.25, linewidth=0.5)
+    ax3.tick_params(labelsize=10)
+    
+    ax4 = plt.subplot(3, 2, 4)
+    ax4.plot(time, q2dot, color=blue_color, linewidth=2.5)
+    ax4.set_ylabel(r'$\dot{q}_2$ [rad/s]', fontsize=12)
+    ax4.set_xlabel('Time [s]', fontsize=11)
+    ax4.grid(True, alpha=0.25, linewidth=0.5)
+    ax4.tick_params(labelsize=10)
+    
+    # Add centered title for control
+    fig.text(0.5, 0.31, 'Control', ha='center', fontsize=14, fontweight='bold')
+    
+    # Control plot in bottom section
+    ax5 = plt.subplot(3, 1, 3)
+    ax5.plot(time, u, color=blue_color, linewidth=2.5)
+    ax5.set_xlabel('Time [s]', fontsize=11)
+    ax5.set_ylabel(r'$x$ [N]', fontsize=12)
+    ax5.grid(True, alpha=0.25, linewidth=0.5)
+    ax5.tick_params(labelsize=10)
+    
+    # Set font for all axes
+    fontname = "Helvetica"
+    for ax in [ax1, ax2, ax3, ax4, ax5]:
+        ax.xaxis.label.set_fontname(fontname)
+        ax.yaxis.label.set_fontname(fontname)
+        for tick in ax.get_xticklabels():
+            tick.set_fontname(fontname)
+        for tick in ax.get_yticklabels():
+            tick.set_fontname(fontname)
+    
+    plt.subplots_adjust(top=0.94, bottom=0.06, hspace=0.35, wspace=0.25)
+    fig.savefig("cart_pole_solution.png", dpi=300, bbox_inches='tight', facecolor='white')
+    fig.savefig("cart_pole_solution.svg", bbox_inches='tight', facecolor='white')
+    print("Saved cart_pole_solution.png/svg for documentation")
+    
+    return
+
+
 def plot_convergence(nrms):
     with plt.style.context(niceplots.get_style()):
         fig, ax = plt.subplots(1, 1)
@@ -513,6 +592,9 @@ if comm_rank == 0:
     plot(d, theta, xctrl)
     plot_convergence(norms)
     visualize(d, theta)
+    
+    # Generate documentation-style plots
+    plot_for_documentation(x, final_time, num_time_steps)
 
     if args.show_sparsity:
         H = am.tocsr(opt.solver.hess)
