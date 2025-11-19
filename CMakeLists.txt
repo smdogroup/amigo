@@ -118,8 +118,8 @@ pybind11_add_module(amigo MODULE
 
 # Link the CUDA runtime (shared)
 if(AMIGO_ENABLE_CUDA)
-  add_library(amigo_backend include/cuda/optimizer_backend.cu)
-  target_link_libraries(amigo_backend PUBLIC CUDA::cudart MPI::MPI_CXX)
+  add_library(amigo_backend src/optimizer_backend.cu src/csr_factor_cuda.cu)
+  target_link_libraries(amigo_backend PUBLIC CUDA::cudart CUDA::cusolver CUDA::cusparse MPI::MPI_CXX)
 
   target_include_directories(amigo_backend
     PUBLIC
@@ -139,7 +139,8 @@ if(AMIGO_ENABLE_CUDA)
     CUDA_RESOLVE_DEVICE_SYMBOLS ON
   )
 
-  target_link_libraries(amigo PRIVATE amigo_backend CUDA::cudart)
+  target_link_libraries(amigo PRIVATE amigo_backend CUDA::cudart CUDA::cublas
+        CUDA::cublasLt CUDA::cusolver CUDA::cusparse)
   # CUDA::cudss
 endif()
 

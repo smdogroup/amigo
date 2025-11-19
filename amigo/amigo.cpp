@@ -11,11 +11,14 @@ typedef SSIZE_T ssize_t;
 #include "alias_tracker.h"
 #include "amigo_include_paths.h"
 #include "csr_matrix.h"
-#include "cuda/csr_factor_cuda.h"
 #include "external_component.h"
 #include "optimization_problem.h"
 #include "optimizer.h"
 #include "sparse_cholesky.h"
+
+#ifdef AMIGO_USE_CUDA
+#include "cuda/csr_factor_cuda.h"
+#endif
 
 namespace py = pybind11;
 
@@ -485,7 +488,7 @@ PYBIND11_MODULE(amigo, mod) {
       .def("factor", &amigo::SparseCholesky<double>::factor)
       .def("solve", &amigo::SparseCholesky<double>::solve);
 
-#ifdef AMIGO_USE_CUDSS
+#ifdef AMIGO_USE_CUDA
   py::class_<amigo::CSRMatFactorCuda, std::shared_ptr<amigo::CSRMatFactorCuda>>(
       mod, "CSRMatFactorCuda")
       .def(py::init<std::shared_ptr<amigo::CSRMat<double>>>())

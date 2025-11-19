@@ -30,60 +30,63 @@ enum class ExecPolicy { SERIAL, OPENMP, CUDA };
 #endif
 
 #ifndef AMIGO_CHECK_CUDA
-#define AMIGO_CHECK_CUDA(call)                                      \
-  do {                                                              \
-    cudaError_t err__ = (call);                                     \
-    if (err__ != cudaSuccess) {                                     \
-      fprintf(stderr, "CUDA error %s:%d: %s\n", __FILE__, __LINE__, \
-              cudaGetErrorString(err__));                           \
-      std::abort();                                                 \
-    }                                                               \
+#define AMIGO_CHECK_CUDA(call)                                           \
+  do {                                                                   \
+    cudaError_t err__ = (call);                                          \
+    if (err__ != cudaSuccess) {                                          \
+      std::fprintf(stderr, "CUDA error %s:%d: %s\n", __FILE__, __LINE__, \
+                   cudaGetErrorString(err__));                           \
+      std::abort();                                                      \
+    }                                                                    \
   } while (0)
 #endif
 
 #ifndef AMIGO_CHECK_CUSPARSE
-#define AMIGO_CHECK_CUSPARSE(call)                                             \
-  do {                                                                         \
-    auto err__ = (call);                                                       \
-    if (err__ != CUSPARSE_STATUS_SUCCESS) {                                    \
-      fprintf(stderr, "cuSPARSE %s:%d: %d\n", __FILE__, __LINE__, (int)err__); \
-      std::abort();                                                            \
-    }                                                                          \
+#define AMIGO_CHECK_CUSPARSE(call)                                     \
+  do {                                                                 \
+    auto err__ = (call);                                               \
+    if (err__ != CUSPARSE_STATUS_SUCCESS) {                            \
+      std::fprintf(stderr, "cuSPARSE %s:%d: %d\n", __FILE__, __LINE__, \
+                   (int)err__);                                        \
+      std::abort();                                                    \
+    }                                                                  \
   } while (0)
 #endif
 
 #ifndef AMIGO_CHECK_CUSOLVER
-#define AMIGO_CHECK_CUSOLVER(call)                                             \
-  do {                                                                         \
-    auto err__ = (call);                                                       \
-    if (err__ != CUSOLVER_STATUS_SUCCESS) {                                    \
-      fprintf(stderr, "cuSOLVER %s:%d: %d\n", __FILE__, __LINE__, (int)err__); \
-      std::abort();                                                            \
-    }                                                                          \
+#define AMIGO_CHECK_CUSOLVER(call)                                     \
+  do {                                                                 \
+    auto err__ = (call);                                               \
+    if (err__ != CUSOLVER_STATUS_SUCCESS) {                            \
+      std::fprintf(stderr, "cuSOLVER %s:%d: %d\n", __FILE__, __LINE__, \
+                   (int)err__);                                        \
+      std::abort();                                                    \
+    }                                                                  \
   } while (0)
 #endif
 
 #ifdef AMIGO_USE_CUDSS
 #ifndef AMIGO_CHECK_CUDSS
-#define AMIGO_CHECK_CUDSS(call)                    \
-  do {                                             \
-    auto err__ = (call);                           \
-    if (s != CUDSS_STATUS_SUCCESS) {               \
-      fprintf(stderr, "cuDSS error %d\n", int(s)); \
-      std::abort();                                \
-    }                                              \
+#define AMIGO_CHECK_CUDSS(call)                                           \
+  do {                                                                    \
+    auto err__ = (call);                                                  \
+    if (err__ != CUDSS_STATUS_SUCCESS) {                                  \
+      std::fprintf(stderr, "cuDSS error %s:%d: %d\n", __FILE__, __LINE__, \
+                   int(err__));                                           \
+      std::abort();                                                       \
+    }                                                                     \
   } while (0)
 #endif
 #endif
 
 #ifndef AMIGO_CHECK_CUBLAS
-#define AMIGO_CHECK_CUBLAS(call)                                       \
-  do {                                                                 \
-    cublasStatus_t _st = (call);                                       \
-    if (_st != CUBLAS_STATUS_SUCCESS) {                                \
-      throw std::runtime_error("cuBLAS error: " +                      \
-                               std::to_string(static_cast<int>(_st))); \
-    }                                                                  \
+#define AMIGO_CHECK_CUBLAS(call)                            \
+  do {                                                      \
+    cublasStatus_t _st = (call);                            \
+    if (_st != CUBLAS_STATUS_SUCCESS) {                     \
+      std::fprintf(stderr, "cuBLAS error: %d\n", int(_st)); \
+      std::abort();                                         \
+    }                                                       \
   } while (0)
 #endif
 
