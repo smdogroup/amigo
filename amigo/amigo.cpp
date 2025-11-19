@@ -85,6 +85,8 @@ void bind_vector(py::module_& m, const std::string& name) {
       .def(py::init<int>())
       .def("zero", &amigo::Vector<T>::zero)
       .def("get_size", &amigo::Vector<T>::get_size)
+      .def("copy_host_to_device", &amigo::Vector<T>::copy_host_to_device)
+      .def("copy_device_to_host", &amigo::Vector<T>::copy_device_to_host)
       .def("__getitem__",
            [](const amigo::Vector<T>& v, py::object index) -> py::object {
              if (py::isinstance<py::int_>(index)) {
@@ -326,7 +328,9 @@ PYBIND11_MODULE(amigo, mod) {
       .def("get_column_owners", &amigo::CSRMat<double>::get_column_owners)
       .def("gauss_seidel", &amigo::CSRMat<double>::gauss_seidel)
       .def("mult", &amigo::CSRMat<double>::mult)
-      .def("add_diagonal", &amigo::CSRMat<double>::add_diagonal);
+      .def("add_diagonal", &amigo::CSRMat<double>::add_diagonal)
+      .def("copy_data_device_to_host",
+           &amigo::CSRMat<double>::copy_data_device_to_host);
 
   bind_vector<int>(mod, "VectorInt");
   bind_vector<double>(mod, "Vector");
