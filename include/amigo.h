@@ -21,6 +21,7 @@ enum class ExecPolicy { SERIAL, OPENMP, CUDA };
 #define AMIGO_HOST_DEVICE __host__ __device__
 #define AMIGO_RESTRICT __restrict__
 
+#include <cublas_v2.h>
 #include <cuda_runtime.h>
 
 #if __has_include(<cudss.h>)
@@ -73,6 +74,17 @@ enum class ExecPolicy { SERIAL, OPENMP, CUDA };
     }                                              \
   } while (0)
 #endif
+#endif
+
+#ifndef AMIGO_CHECK_CUBLAS
+#define AMIGO_CHECK_CUBLAS(call)                                       \
+  do {                                                                 \
+    cublasStatus_t _st = (call);                                       \
+    if (_st != CUBLAS_STATUS_SUCCESS) {                                \
+      throw std::runtime_error("cuBLAS error: " +                      \
+                               std::to_string(static_cast<int>(_st))); \
+    }                                                                  \
+  } while (0)
 #endif
 
 #else
