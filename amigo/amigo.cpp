@@ -259,7 +259,9 @@ PYBIND11_MODULE(amigo, mod) {
   mod.doc() = "Amigo: A friendly library for MDO on HPC";
 
   // Import mpi4py
-  import_mpi4py();
+  if (import_mpi4py() < 0) {
+    throw pybind11::error_already_set();
+  }
 
 #ifdef AMIGO_USE_OPENMP
   constexpr amigo::ExecPolicy policy = amigo::ExecPolicy::OPENMP;
@@ -362,8 +364,14 @@ PYBIND11_MODULE(amigo, mod) {
       .def(py::init([](py::object pyobj, py::array_t<int> ranges) {
         int size = 1;
         MPI_Comm comm = MPI_COMM_SELF;
+
         if (!pyobj.is_none()) {
-          comm = *PyMPIComm_Get(pyobj.ptr());
+          MPI_Comm* comm_ptr = PyMPIComm_Get(pyobj.ptr());
+          if (!comm_ptr) {
+            throw py::error_already_set();
+          }
+
+          comm = *comm_ptr;
           MPI_Comm_size(comm, &size);
         }
         if (ranges.size() != size + 1) {

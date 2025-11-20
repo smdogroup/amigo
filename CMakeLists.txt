@@ -68,6 +68,7 @@ endif()
 # )
 
 # target_link_libraries(amigo PRIVATE METIS::metis)
+set(CMAKE_CXX_FLAGS_DEBUG "-g -O0 -DDEBUG")
 
 # Python / pybind11 for the extension module
 find_package(Python3 REQUIRED COMPONENTS Development.Module Interpreter)
@@ -114,6 +115,10 @@ endif()
 # This is your only .cpp file
 pybind11_add_module(amigo MODULE
   ${CMAKE_CURRENT_SOURCE_DIR}/amigo/amigo.cpp
+)
+
+target_compile_options(amigo PRIVATE
+    $<$<CONFIG:Debug>:-g -O0 -DDEBUG>
 )
 
 # Link the CUDA runtime (shared)

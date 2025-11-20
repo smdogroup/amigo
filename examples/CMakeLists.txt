@@ -41,6 +41,8 @@ find_package(pybind11 CONFIG REQUIRED)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../include)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../../a2d/include)
 
+set(CMAKE_CXX_FLAGS_DEBUG "-g -O0 -DDEBUG")
+
 # Ask Python for the exact extension suffix
 execute_process(
   COMMAND "${Python3_EXECUTABLE}" -c "import sysconfig; print(sysconfig.get_config_var('EXT_SUFFIX') or '')"
@@ -81,6 +83,10 @@ function(add_amigo_example MODULE_DIR MODULE_NAME)
       ${BLD_GEN_DIR}                 # for generated header
       ${MPI4PY_INCLUDE_DIR}          # if using mpi4py C-API
   )
+
+  target_compile_options(${MODULE_NAME} PRIVATE
+    $<$<CONFIG:Debug>:-g -O0 -DDEBUG>
+)
 
   target_link_libraries(${MODULE_NAME} PRIVATE MPI::MPI_CXX)
 
