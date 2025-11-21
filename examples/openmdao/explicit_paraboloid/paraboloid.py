@@ -71,7 +71,7 @@ prob.model.add_subsystem(
     am.ExplicitOpenMDAOPostOptComponent(
         data=["quad.a", "quad.b"],  # The Amigo names
         output=["quad.f"],
-        data_mapping={"quad.a": "a", "quad.b" : "b"},
+        data_mapping={"quad.a": "a", "quad.b": "b"},
         output_mapping={"quad.f": "f"},
         model=model,
         x=x,
