@@ -412,12 +412,17 @@ args = parser.parse_args()
 model = create_cart_model()
 
 if args.build:
+    import sys
+
     compile_args = []
     link_args = []
     define_macros = []
     if args.use_openmp:
-        compile_args = ["-fopenmp"]
-        link_args = ["-fopenmp"]
+        if sys.platform == "win32":
+            compile_args = ["/openmp"]
+        else:
+            compile_args = ["-fopenmp"]
+            link_args = ["-fopenmp"]
         define_macros = [("AMIGO_USE_OPENMP", "1")]
 
     model.build_module(

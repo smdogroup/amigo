@@ -7,3 +7,5 @@ pybind11
 pre-commit>=3.5.0
 setuptools
 mpi4py
+networkx
+pyvis

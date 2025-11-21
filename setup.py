@@ -85,12 +85,12 @@ def get_extensions():
     metis_include = os.path.join(home, "git", "tacs", "extern", "metis", "include")
     metis_lib = os.path.join(home, "git", "tacs", "extern", "metis", "lib")
 
+    metis_available = False
     if os.path.exists(metis_include) and os.path.exists(metis_lib):
         inc_dirs.append(metis_include)
         lib_dirs.append(metis_lib)
         libs.append("metis")
-        # if sys.platform != "win32":  # Only enable METIS macro on non-Windows
-        #     define_macros += [("AMIGO_USE_METIS", "1")]
+        metis_available = True
 
     # Escape backslashes for Windows paths in C++ string literals
     a2d_include_escaped = a2d_include.replace("\\", "\\\\")
@@ -117,19 +117,27 @@ def get_extensions():
         libs += ["openblas"]
     elif sys.platform == "darwin":
         compile_args += ["-std=c++17"]
-        define_macros += [("AMIGO_USE_METIS", "1")]
+        if metis_available:
+            define_macros += [("AMIGO_USE_METIS", "1")]
     else:
         link_args += ["-lblas", "-llapack"]
         compile_args += ["-std=c++17"]
-        define_macros += [("AMIGO_USE_METIS", "1")]
+        if metis_available:
+            define_macros += [("AMIGO_USE_METIS", "1")]
 
     if use_openmp:
-        compile_args += ["-fopenmp"]
-        link_args += ["-fopenmp"]
+        if sys.platform == "win32":
+            compile_args += ["/openmp"]
+        else:
+            compile_args += ["-fopenmp"]
+            link_args += ["-fopenmp"]
         define_macros += [("AMIGO_USE_OPENMP", "1")]
 
     if use_debug:
-        compile_args += ["-g", "-O0"]
+        if sys.platform == "win32":
+            compile_args += ["/Od", "/Zi"]
+        else:
+            compile_args += ["-g", "-O0"]
 
     ext_modules = [
         Extension(

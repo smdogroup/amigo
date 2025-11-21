@@ -16,8 +16,12 @@ authors = [{ name = "Graeme J. Kennedy", email = "graeme.kennedy@aerospace.gatec
 requires-python = ">=3.9"
 dependencies = [
   "numpy", "scipy", "pybind11", "matplotlib", "niceplots", "setuptools", "mpi4py",
-  "black>=25.1.0", "pre-commit>=3.5.0", "networkx",
+  "black>=25.1.0", "pre-commit>=3.5.0", "networkx", "pyvis", "tabulate", "icecream"
 ]
+# dependencies = ["gmsh"]
+
+[tool.setuptools.packages.find]
+where = ["."]
 
 [project.optional-dependencies]
 openmdao = ["openmdao>=3.29"]
