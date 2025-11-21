@@ -60,7 +60,6 @@ class CSRMat {
         rowp(nullptr),
         cols(nullptr),
         data(nullptr),
-        ext_data(nullptr),
         mem_loc(MemoryLocation::HOST_AND_DEVICE),
         sqdef_index(-1) {}
   ~CSRMat() {
@@ -75,9 +74,6 @@ class CSRMat {
     }
     if (data) {
       delete[] data;
-    }
-    if (ext_data) {
-      delete[] ext_data;
     }
   }
 
@@ -531,31 +527,33 @@ class CSRMat {
   }
 
   /**
-   * @brief Add a sorted row to the matrix
+   * @brief Get the locations in the data array of the sorted list of column
+   * indices in the specified row
    *
-   * @tparam ArrayType
-   * @param row
-   * @param nvalues
-   * @param indices
-   * @param values
+   * For this code to work corrrectly, the indices array must be sorted
+   *
+   * @param row Row that the search is performed in
+   * @param nindices Number of column indices to find
+   * @param indices Column indices to find (sorted in ascending order)
+   * @param loc Return locations within the CSR matrx
    */
-  template <class ArrayType>
-  void add_row_sorted(int row, int nvalues, const int indices[],
-                      const ArrayType values) {
-    int size = rowp[row + 1] - rowp[row];
+  void get_sorted_locations(int row, int nindices, const int indices[],
+                            int loc[]) {
+    int offset = rowp[row];
+    int size = rowp[row + 1] - offset;
     int* col_ptr = &cols[rowp[row]];
     T* data_ptr = &data[rowp[row]];
 
     int i = 0;  // index into input indices
-    int j = 0;  // index into col_ptr
+    int j = 0;  // index into col_ptr (the column indices for this row)
 
-    while (i < nvalues && j < size) {
+    while (i < nindices && j < size) {
       if (indices[i] < col_ptr[j]) {
         i++;
       } else if (indices[i] > col_ptr[j]) {
         j++;
       } else {
-        data_ptr[j] += values[i];
+        loc[i] = offset + j;
         i++;
         j++;
       }
@@ -657,19 +655,6 @@ class CSRMat {
   }
 
   /**
-   * @brief Get the external data that will be sent to other processors
-   */
-  const T* get_ext_data() const {
-    if (mem_loc == MemoryLocation::HOST_ONLY ||
-        mem_loc == MemoryLocation::HOST_AND_DEVICE) {
-      int num_local_rows = row_owners->get_local_size();
-      return &data[rowp[num_local_rows]];
-    } else {
-      return ext_data;
-    }
-  }
-
-  /**
    * @brief Get the index of the first sqdef element
    *
    */
@@ -704,16 +689,10 @@ class CSRMat {
   /**
    * @brief Copy external data computed on the device back to the host
    */
-  void copy_ext_data_device_to_host() {
-    if (ext_data) {
-      int num_local_rows = nrows;
-      if (row_owners) {
-        num_local_rows = row_owners->get_local_size();
-      }
-      int ext_offset = rowp[num_local_rows];
-      int ext_size = nnz - ext_offset;
-      backend.copy_data_device_to_host(ext_offset, ext_size, ext_data);
-    }
+  void copy_ext_data_device_to_host(int num_local_rows, T* ext_data) {
+    int ext_offset = rowp[num_local_rows];
+    int ext_size = nnz - ext_offset;
+    backend.copy_data_device_to_host(ext_offset, ext_size, ext_data);
   }
 
   CSRMat(int nrows, int ncols, int nnz, int* rowp, int* cols,
@@ -726,7 +705,6 @@ class CSRMat {
         rowp(rowp),
         cols(cols),
         data(nullptr),
-        ext_data(nullptr),
         mem_loc(mem_loc),
         row_owners(row_owners),
         col_owners(col_owners),
@@ -771,10 +749,6 @@ class CSRMat {
 
     // Allocate space on the GPU
     if (mem_loc != MemoryLocation::HOST_ONLY) {
-      int ext_size = nnz - rowp[num_local_rows];
-      if (ext_size > 0) {
-        ext_data = new T[ext_size];
-      }
       backend.allocate(nrows, ncols, nnz);
       backend.copy_pattern_host_to_device(rowp, cols, diag);
     }
@@ -788,7 +762,6 @@ class CSRMat {
   int* rowp;               // Pointer into the column array
   int* cols;               // Column indices
   T* data;                 // Matrix values
-  T* ext_data;             // Buffer for external data when mem_loc = DEVICE
   MemoryLocation mem_loc;  // Memory location
 
   // For parallel matrices

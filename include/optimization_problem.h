@@ -651,10 +651,10 @@ class OptimizationProblem {
       }
 
       // Distribute the pattern across matrices
-      mat_dist =
-          new MatrixDistribute(comm, mem_loc, var_owners, var_owners,
-                               num_variables, num_variables, rowp, cols, mat);
-      mat_dist_ctx = mat_dist->create_context<T>();
+      mat_dist = new MatrixDistribute<policy>(comm, mem_loc, var_owners,
+                                              var_owners, num_variables,
+                                              num_variables, rowp, cols, mat);
+      mat_dist_ctx = mat_dist->template create_context<T>();
 
       delete[] rowp;
       delete[] cols;
@@ -769,10 +769,6 @@ class OptimizationProblem {
       components[i]->add_hessian(alpha, *data_vec, *x, *var_owners, *matrix);
     }
 
-    if constexpr (policy == ExecPolicy::CUDA) {
-      matrix->copy_ext_data_device_to_host();
-    }
-
     mat_dist->begin_assembly(matrix, mat_dist_ctx);
     mat_dist->end_assembly(matrix, mat_dist_ctx);
   }
@@ -849,10 +845,10 @@ class OptimizationProblem {
 
       // Distribute the pattern across matrices
       MemoryLocation mem_loc = MemoryLocation::HOST_AND_DEVICE;
-      grad_jac_dist =
-          new MatrixDistribute(comm, mem_loc, var_owners, data_owners,
-                               num_variables, num_data, rowp, cols, grad_jac);
-      grad_jac_dist_ctx = grad_jac_dist->create_context<T>();
+      grad_jac_dist = new MatrixDistribute<policy>(
+          comm, mem_loc, var_owners, data_owners, num_variables, num_data, rowp,
+          cols, grad_jac);
+      grad_jac_dist_ctx = grad_jac_dist->template create_context<T>();
 
       delete[] rowp;
       delete[] cols;
@@ -974,10 +970,10 @@ class OptimizationProblem {
 
       // Distribute the pattern across matrices
       MemoryLocation mem_loc = MemoryLocation::HOST_AND_DEVICE;
-      input_jac_dist = new MatrixDistribute(
+      input_jac_dist = new MatrixDistribute<policy>(
           comm, mem_loc, output_owners, var_owners, num_outputs, num_variables,
           rowp, cols, input_jac);
-      input_jac_dist_ctx = input_jac_dist->create_context<T>();
+      input_jac_dist_ctx = input_jac_dist->template create_context<T>();
 
       delete[] rowp;
       delete[] cols;
@@ -1039,10 +1035,10 @@ class OptimizationProblem {
 
       // Distribute the pattern across matrices
       MemoryLocation mem_loc = MemoryLocation::HOST_AND_DEVICE;
-      data_jac_dist =
-          new MatrixDistribute(comm, mem_loc, output_owners, data_owners,
-                               num_outputs, num_data, rowp, cols, data_jac);
-      data_jac_dist_ctx = data_jac_dist->create_context<T>();
+      data_jac_dist = new MatrixDistribute<policy>(
+          comm, mem_loc, output_owners, data_owners, num_outputs, num_data,
+          rowp, cols, data_jac);
+      data_jac_dist_ctx = data_jac_dist->template create_context<T>();
 
       delete[] rowp;
       delete[] cols;
@@ -1286,21 +1282,25 @@ class OptimizationProblem {
 
   // Information about the Hessian matrix
   std::shared_ptr<CSRMat<T>> mat;
-  MatrixDistribute* mat_dist;
-  MatrixDistribute::MatDistributeContext<T>* mat_dist_ctx;
+  MatrixDistribute<policy>* mat_dist;
+  typename MatrixDistribute<policy>::template MatDistributeContext<T>*
+      mat_dist_ctx;
 
   // Information about the output Jacobian
   std::shared_ptr<CSRMat<T>> input_jac;
-  MatrixDistribute* input_jac_dist;
-  MatrixDistribute::MatDistributeContext<T>* input_jac_dist_ctx;
+  MatrixDistribute<policy>* input_jac_dist;
+  typename MatrixDistribute<policy>::template MatDistributeContext<T>*
+      input_jac_dist_ctx;
 
   std::shared_ptr<CSRMat<T>> data_jac;
-  MatrixDistribute* data_jac_dist;
-  MatrixDistribute::MatDistributeContext<T>* data_jac_dist_ctx;
+  MatrixDistribute<policy>* data_jac_dist;
+  typename MatrixDistribute<policy>::template MatDistributeContext<T>*
+      data_jac_dist_ctx;
 
   std::shared_ptr<CSRMat<T>> grad_jac;
-  MatrixDistribute* grad_jac_dist;
-  MatrixDistribute::MatDistributeContext<T>* grad_jac_dist_ctx;
+  MatrixDistribute<policy>* grad_jac_dist;
+  typename MatrixDistribute<policy>::template MatDistributeContext<T>*
+      grad_jac_dist_ctx;
 };
 
 }  // namespace amigo

@@ -126,7 +126,8 @@ if(AMIGO_ENABLE_CUDA)
   add_library(amigo_backend 
     src/csr_factor_cuda.cu
     src/csr_matrix_backend.cu
-    src/optimizer_backend.cu)
+    src/optimizer_backend.cu
+    src/vector_distribute.cu)
   target_link_libraries(amigo_backend PUBLIC CUDA::cudart CUDA::cusolver CUDA::cusparse MPI::MPI_CXX)
 
   target_include_directories(amigo_backend

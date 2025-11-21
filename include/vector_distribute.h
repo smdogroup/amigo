@@ -70,7 +70,7 @@ class VectorDistribute {
       if (policy == ExecPolicy::CUDA) {
 #ifdef AMIGO_USE_CUDA
         recv_buffer = new T[num_recv_nodes];
-        AMIGO_CHECK_CUDA(cudaMalloc(&d_send_buffer, nnodes * sizeof(int)));
+        AMIGO_CHECK_CUDA(cudaMalloc(&d_send_buffer, nnodes * sizeof(T)));
 #endif  // AMIGO_USE_CUDA
       }
 
@@ -122,8 +122,8 @@ class VectorDistribute {
                                     nnodes * sizeof(T),
                                     cudaMemcpyDeviceToHost));
 #endif  // AMIGO_USE_CUDA
+        return send_buffer;
       }
-      return send_buffer;
     }
 
     T* forward_get_recv_buffer(T* array) {
@@ -307,7 +307,7 @@ class VectorDistribute {
     }
 
     // Copy the send indices to the device
-    if (policy == ExecPolicy::CUDA) {
+    if constexpr (policy == ExecPolicy::CUDA) {
       send_indices->copy_host_to_device();
     }
 
