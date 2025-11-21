@@ -122,17 +122,16 @@ class VectorDistribute {
                                     nnodes * sizeof(T),
                                     cudaMemcpyDeviceToHost));
 #endif  // AMIGO_USE_CUDA
-        return send_buffer;
       }
+      return send_buffer;
     }
 
     T* forward_get_recv_buffer(T* array) {
       if constexpr (policy == ExecPolicy::SERIAL ||
                     policy == ExecPolicy::OPENMP) {
         return &array[num_owned_nodes];
-      } else {
-        return recv_buffer;
       }
+      return recv_buffer;
     }
 
     void forward_set_recv_values(T* array) {
@@ -151,9 +150,8 @@ class VectorDistribute {
       if constexpr (policy == ExecPolicy::SERIAL ||
                     policy == ExecPolicy::OPENMP) {
         return &array[num_owned_nodes];
-      } else {
-        return recv_buffer;
       }
+      return recv_buffer;
     }
 
     void reverse_add_buffer_values(T* array) {
