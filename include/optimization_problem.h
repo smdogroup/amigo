@@ -39,9 +39,9 @@ class OptimizationProblem {
         data_dist(data_owners),
         var_dist(var_owners),
         output_dist(output_owners) {
-    data_ctx = data_dist.create_context<T>();
-    var_ctx = var_dist.create_context<T>();
-    output_ctx = output_dist.create_context<T>();
+    data_ctx = data_dist.template create_context<T>();
+    var_ctx = var_dist.template create_context<T>();
+    output_ctx = output_dist.template create_context<T>();
 
     data_vec = create_data_vector();
 
@@ -448,12 +448,15 @@ class OptimizationProblem {
     }
 
     if (distribute) {
-      VectorDistribute::VecDistributeContext<T1>* ctx =
-          dist_prob->var_dist.template create_context<T1>();
+      auto ctx = dist_prob->var_dist.template create_context<T1>();
+
+      // If policy == CUDA, copy the vector to the device
+      if constexpr (policy == ExecPolicy::CUDA) {
+        dist_vec->copy_host_to_device();
+      }
 
       dist_prob->var_dist.begin_forward(dist_vec, ctx);
       dist_prob->var_dist.end_forward(dist_vec, ctx);
-      dist_vec->copy_host_to_device();
 
       delete ctx;
     }
@@ -569,12 +572,14 @@ class OptimizationProblem {
     }
 
     if (distribute) {
-      VectorDistribute::VecDistributeContext<T1>* ctx =
-          dist_prob->data_dist.template create_context<T1>();
+      auto ctx = dist_prob->data_dist.template create_context<T1>();
+
+      if constexpr (policy == ExecPolicy::CUDA) {
+        dist_vec->copy_host_to_device();
+      }
 
       dist_prob->data_dist.begin_forward(dist_vec, ctx);
       dist_prob->data_dist.end_forward(dist_vec, ctx);
-      dist_vec->copy_host_to_device();
 
       delete ctx;
     }
@@ -672,7 +677,6 @@ class OptimizationProblem {
   void update(std::shared_ptr<Vector<T>> x) {
     var_dist.begin_forward(x, var_ctx);
     var_dist.end_forward(x, var_ctx);
-    x->copy_host_to_device();
 
     for (size_t i = 0; i < components.size(); i++) {
       components[i]->update(*x);
@@ -689,7 +693,6 @@ class OptimizationProblem {
   T lagrangian(T alpha, std::shared_ptr<Vector<T>> x) {
     var_dist.begin_forward(x, var_ctx);
     var_dist.end_forward(x, var_ctx);
-    x->copy_host_to_device();
 
     T lagrange = 0.0;
     for (size_t i = 0; i < components.size(); i++) {
@@ -712,8 +715,6 @@ class OptimizationProblem {
                 std::shared_ptr<Vector<T>> g) {
     var_dist.begin_forward(x, var_ctx);
     var_dist.end_forward(x, var_ctx);
-    x->copy_host_to_device();
-    data_vec->copy_host_to_device();
 
     g->zero();
     for (size_t i = 0; i < components.size(); i++) {
@@ -722,7 +723,6 @@ class OptimizationProblem {
 
     var_dist.begin_reverse_add(g, var_ctx);
     var_dist.end_reverse_add(g, var_ctx);
-    g->copy_device_to_host();
   }
 
   /**
@@ -738,11 +738,9 @@ class OptimizationProblem {
                        std::shared_ptr<Vector<T>> h) {
     var_dist.begin_forward(x, var_ctx);
     var_dist.end_forward(x, var_ctx);
-    x->copy_host_to_device();
 
     var_dist.begin_forward(p, var_ctx);
     var_dist.end_forward(p, var_ctx);
-    p->copy_host_to_device();
 
     h->zero();
     for (size_t i = 0; i < components.size(); i++) {
@@ -751,7 +749,6 @@ class OptimizationProblem {
 
     var_dist.begin_reverse_add(h, var_ctx);
     var_dist.end_reverse_add(h, var_ctx);
-    h->copy_device_to_host();
   }
 
   /**
@@ -765,8 +762,6 @@ class OptimizationProblem {
                std::shared_ptr<CSRMat<T>> matrix) {
     var_dist.begin_forward(x, var_ctx);
     var_dist.end_forward(x, var_ctx);
-    x->copy_host_to_device();
-    data_vec->copy_host_to_device();
 
     // Compute the Hessian matrix entries
     matrix->zero();
@@ -793,14 +788,12 @@ class OptimizationProblem {
                                   std::shared_ptr<CSRMat<T>> jac) {
     var_dist.begin_forward(x, var_ctx);
     var_dist.end_forward(x, var_ctx);
-    x->copy_host_to_device();
 
     jac->zero();
     for (size_t i = 0; i < components.size(); i++) {
       components[i]->add_grad_jac_wrt_data(*data_vec, *x, *data_owners, *jac);
     }
 
-    jac->copy_data_device_to_host();
     grad_jac_dist->begin_assembly(jac, grad_jac_dist_ctx);
     grad_jac_dist->end_assembly(jac, grad_jac_dist_ctx);
   }
@@ -878,7 +871,6 @@ class OptimizationProblem {
                       std::shared_ptr<Vector<T>> outputs) {
     var_dist.begin_forward(x, var_ctx);
     var_dist.end_forward(x, var_ctx);
-    x->copy_host_to_device();
 
     outputs->zero();
     for (size_t i = 0; i < components.size(); i++) {
@@ -887,7 +879,6 @@ class OptimizationProblem {
 
     output_dist.begin_reverse_add(outputs, output_ctx);
     output_dist.end_reverse_add(outputs, output_ctx);
-    outputs->copy_device_to_host();
   }
 
   /**
@@ -900,14 +891,12 @@ class OptimizationProblem {
                                  std::shared_ptr<CSRMat<T>> jacobian) {
     var_dist.begin_forward(x, var_ctx);
     var_dist.end_forward(x, var_ctx);
-    x->copy_host_to_device();
 
     jacobian->zero();
     for (size_t i = 0; i < components.size(); i++) {
       components[i]->add_output_jac_wrt_input(*data_vec, *x, *jacobian);
     }
 
-    jacobian->copy_data_device_to_host();
     input_jac_dist->begin_assembly(jacobian, input_jac_dist_ctx);
     input_jac_dist->end_assembly(jacobian, input_jac_dist_ctx);
   }
@@ -922,14 +911,12 @@ class OptimizationProblem {
                                 std::shared_ptr<CSRMat<T>> jacobian) {
     var_dist.begin_forward(x, var_ctx);
     var_dist.end_forward(x, var_ctx);
-    x->copy_host_to_device();
 
     jacobian->zero();
     for (size_t i = 0; i < components.size(); i++) {
       components[i]->add_output_jac_wrt_data(*data_vec, *x, *jacobian);
     }
 
-    jacobian->copy_data_device_to_host();
     data_jac_dist->begin_assembly(jacobian, data_jac_dist_ctx);
     data_jac_dist->end_assembly(jacobian, data_jac_dist_ctx);
   }
@@ -1279,14 +1266,15 @@ class OptimizationProblem {
   std::vector<std::shared_ptr<ComponentGroupBase<T, policy>>> components;
 
   // Variable information
-  VectorDistribute data_dist;
-  VectorDistribute var_dist;
-  VectorDistribute::VecDistributeContext<T>* data_ctx;
-  VectorDistribute::VecDistributeContext<T>* var_ctx;
+  VectorDistribute<policy> data_dist;
+  VectorDistribute<policy> var_dist;
+  typename VectorDistribute<policy>::template VecDistributeContext<T>* data_ctx;
+  typename VectorDistribute<policy>::template VecDistributeContext<T>* var_ctx;
 
   // Output information
-  VectorDistribute output_dist;
-  VectorDistribute::VecDistributeContext<T>* output_ctx;
+  VectorDistribute<policy> output_dist;
+  typename VectorDistribute<policy>::template VecDistributeContext<T>*
+      output_ctx;
 
   // The shared data vector
   std::shared_ptr<Vector<T>> data_vec;

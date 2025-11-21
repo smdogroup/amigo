@@ -4,6 +4,7 @@
 #include <mpi.h>
 
 #include "amigo.h"
+#include "csr_matrix.h"
 #include "node_owners.h"
 #include "ordering_utils.h"
 #include "vector_distribute.h"

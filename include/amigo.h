@@ -13,6 +13,17 @@ enum class MemoryLocation { HOST_ONLY, DEVICE_ONLY, HOST_AND_DEVICE };
  */
 enum class ExecPolicy { SERIAL, OPENMP, CUDA };
 
+inline bool check_consistent_policy_and_location(ExecPolicy policy,
+                                                 MemoryLocation loc) {
+  if ((policy == ExecPolicy::SERIAL || policy == ExecPolicy::OPENMP) &&
+      loc == MemoryLocation::DEVICE_ONLY) {
+    return false;
+  } else if (policy == ExecPolicy::CUDA && loc == MemoryLocation::HOST_ONLY) {
+    return false;
+  }
+  return true;
+}
+
 }  // namespace amigo
 
 #ifdef AMIGO_USE_CUDA
