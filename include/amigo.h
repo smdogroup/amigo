@@ -42,26 +42,26 @@ enum class ExecPolicy { SERIAL, OPENMP, CUDA };
 #endif
 
 #ifndef AMIGO_CHECK_CUSPARSE
-#define AMIGO_CHECK_CUSPARSE(call)                                     \
-  do {                                                                 \
-    auto err__ = (call);                                               \
-    if (err__ != CUSPARSE_STATUS_SUCCESS) {                            \
-      std::fprintf(stderr, "cuSPARSE %s:%d: %d\n", __FILE__, __LINE__, \
-                   (int)err__);                                        \
-      std::abort();                                                    \
-    }                                                                  \
+#define AMIGO_CHECK_CUSPARSE(call)                                           \
+  do {                                                                       \
+    auto err__ = (call);                                                     \
+    if (err__ != CUSPARSE_STATUS_SUCCESS) {                                  \
+      std::fprintf(stderr, "cuSPARSE error %s:%d: %d\n", __FILE__, __LINE__, \
+                   (int)err__);                                              \
+      std::abort();                                                          \
+    }                                                                        \
   } while (0)
 #endif
 
 #ifndef AMIGO_CHECK_CUSOLVER
-#define AMIGO_CHECK_CUSOLVER(call)                                     \
-  do {                                                                 \
-    auto err__ = (call);                                               \
-    if (err__ != CUSOLVER_STATUS_SUCCESS) {                            \
-      std::fprintf(stderr, "cuSOLVER %s:%d: %d\n", __FILE__, __LINE__, \
-                   (int)err__);                                        \
-      std::abort();                                                    \
-    }                                                                  \
+#define AMIGO_CHECK_CUSOLVER(call)                                           \
+  do {                                                                       \
+    auto err__ = (call);                                                     \
+    if (err__ != CUSOLVER_STATUS_SUCCESS) {                                  \
+      std::fprintf(stderr, "cuSOLVER error %s:%d: %d\n", __FILE__, __LINE__, \
+                   (int)err__);                                              \
+      std::abort();                                                          \
+    }                                                                        \
   } while (0)
 #endif
 

@@ -486,18 +486,23 @@ class CSRMat {
    * @param x The vector of diagonal elements
    */
   void add_diagonal(const std::shared_ptr<Vector<T>>& x) {
-    int size = nrows;
-    if (row_owners) {
-      size = row_owners->get_local_size();
-    }
-    if (nrows < size) {
-      size = nrows;
-    }
-    const T* x_array = x->get_array();
-    for (int row = 0; row < size; row++) {
-      if (diag[row] != -1) {
-        data[diag[row]] += x_array[row];
+    if (mem_loc == MemoryLocation::HOST_ONLY ||
+        mem_loc == MemoryLocation::HOST_AND_DEVICE) {
+      int size = nrows;
+      if (row_owners) {
+        size = row_owners->get_local_size();
       }
+      if (nrows < size) {
+        size = nrows;
+      }
+      const T* x_array = x->get_array();
+      for (int row = 0; row < size; row++) {
+        if (diag[row] != -1) {
+          data[diag[row]] += x_array[row];
+        }
+      }
+    } else {
+      backend.add_diagonal(x->get_device_array());
     }
   }
 
@@ -688,7 +693,7 @@ class CSRMat {
    * @brief Copy the non-zero pattern to the device
    */
   void copy_pattern_host_to_device() {
-    backend.copy_pattern_host_to_device(rowp, cols);
+    backend.copy_pattern_host_to_device(rowp, cols, diag);
   }
 
   /**
@@ -771,7 +776,7 @@ class CSRMat {
         ext_data = new T[ext_size];
       }
       backend.allocate(nrows, ncols, nnz);
-      backend.copy_pattern_host_to_device(rowp, cols);
+      backend.copy_pattern_host_to_device(rowp, cols, diag);
     }
   }
 

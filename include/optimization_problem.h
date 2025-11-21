@@ -585,7 +585,8 @@ class OptimizationProblem {
    *
    * @return std::shared_ptr<CSRMat<T>>
    */
-  std::shared_ptr<CSRMat<T>> create_matrix() {
+  std::shared_ptr<CSRMat<T>> create_matrix(
+      MemoryLocation mem_loc = MemoryLocation::HOST_AND_DEVICE) {
     if (mat) {
       return mat->duplicate();
     } else {
@@ -645,7 +646,6 @@ class OptimizationProblem {
       }
 
       // Distribute the pattern across matrices
-      MemoryLocation mem_loc = MemoryLocation::HOST_AND_DEVICE;
       mat_dist =
           new MatrixDistribute(comm, mem_loc, var_owners, var_owners,
                                num_variables, num_variables, rowp, cols, mat);

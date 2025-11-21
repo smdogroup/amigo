@@ -88,6 +88,8 @@ void bind_vector(py::module_& m, const std::string& name) {
       .def(py::init<int>())
       .def("zero", &amigo::Vector<T>::zero)
       .def("get_size", &amigo::Vector<T>::get_size)
+      .def("copy", [](amigo::Vector<T>& self,
+                      amigo::Vector<T>& src) { self.copy(src); })
       .def("copy_host_to_device", &amigo::Vector<T>::copy_host_to_device)
       .def("copy_device_to_host", &amigo::Vector<T>::copy_device_to_host)
       .def("__getitem__",
@@ -438,7 +440,8 @@ PYBIND11_MODULE(amigo, mod) {
       .def("gradient", &amigo::OptimizationProblem<double, policy>::gradient,
            py::arg("alpha"), py::arg("x"), py::arg("grad"))
       .def("create_matrix",
-           &amigo::OptimizationProblem<double, policy>::create_matrix)
+           &amigo::OptimizationProblem<double, policy>::create_matrix,
+           py::arg("loc") = amigo::MemoryLocation::HOST_AND_DEVICE)
       .def("hessian", &amigo::OptimizationProblem<double, policy>::hessian,
            py::arg("alpha"), py::arg("x"), py::arg("hess"))
       .def("scatter_vector",
@@ -529,6 +532,16 @@ PYBIND11_MODULE(amigo, mod) {
             return self.create_opt_vector();
           },
           py::arg("x") = py::none())
+      .def(
+          "set_multipliers_value",
+          &amigo::InteriorPointOptimizer<double, policy>::set_multipliers_value)
+      .def(
+          "set_design_vars_value",
+          &amigo::InteriorPointOptimizer<double, policy>::set_design_vars_value)
+      .def("copy_multipliers",
+           &amigo::InteriorPointOptimizer<double, policy>::copy_multipliers)
+      .def("copy_design_vars",
+           &amigo::InteriorPointOptimizer<double, policy>::copy_design_vars)
       .def("initialize_multipliers_and_slacks",
            &amigo::InteriorPointOptimizer<
                double, policy>::initialize_multipliers_and_slacks)

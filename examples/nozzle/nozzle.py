@@ -749,6 +749,8 @@ if args.use_lnks:
         residuals=residuals,
     )
 
+solver = am.DirectCudaSolver(model.get_problem())
+
 # Set up the optimizer
 opt = am.Optimizer(model, x, lower=lower, upper=upper, solver=solver)
 

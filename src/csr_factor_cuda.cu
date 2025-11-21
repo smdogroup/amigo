@@ -8,15 +8,6 @@
 
 namespace amigo {
 
-AMIGO_KERNEL void gather_perm_kernel(int n, const int* __restrict__ p,
-                                     const double* __restrict__ x,
-                                     double* __restrict__ y) {
-  int i = blockIdx.x * blockDim.x + threadIdx.x;
-  if (i < n) {
-    y[i] = x[p[i]];
-  }
-}
-
 class CudssFactorBackend {
  public:
   CudssFactorBackend(std::shared_ptr<CSRMat<double>> m,
@@ -129,25 +120,31 @@ class CudssFactorBackend {
 
 class CuSolverFactorBackend {
  public:
-  CuSolverFactorBackend(std::shared_ptr<CSRMat<double>> m,
+  CuSolverFactorBackend(std::shared_ptr<CSRMat<double>> m, int reorder_in = 3,
                         double pivot_tol_in = 1e-12)
-      : mat(std::move(m)), pivot_tol(pivot_tol_in), n(0), nnz(0) {}
+      : mat(m), reorder(reorder_in), pivot_tol(pivot_tol_in), n(0), nnz(0) {
+    // Get the matrix sizes
+    mat->get_data(&n, nullptr, &nnz, nullptr, nullptr, nullptr);
 
-  ~CuSolverFactorBackend() {}
+    AMIGO_CHECK_CUSOLVER(cusolverSpCreate(&handle));
+
+    // Descriptor for the original matrix A
+    AMIGO_CHECK_CUSPARSE(cusparseCreateMatDescr(&descA));
+    AMIGO_CHECK_CUSPARSE(
+        cusparseSetMatType(descA, CUSPARSE_MATRIX_TYPE_GENERAL));
+    AMIGO_CHECK_CUSPARSE(
+        cusparseSetMatIndexBase(descA, CUSPARSE_INDEX_BASE_ZERO));
+  }
+
+  ~CuSolverFactorBackend() {
+    cusparseDestroyMatDescr(descA);
+    cusolverSpDestroy(handle);
+  }
 
   void factor() {}
 
   void solve(std::shared_ptr<Vector<double>> b,
              std::shared_ptr<Vector<double>> x) {
-    cusolverSpHandle_t handle;
-    AMIGO_CHECK_CUSOLVER(cusolverSpCreate(&handle));
-
-    // Descriptor for the original matrix A
-    cusparseMatDescr_t descA;
-    AMIGO_CHECK_CUSPARSE(cusparseCreateMatDescr(&descA));
-    cusparseSetMatType(descA, CUSPARSE_MATRIX_TYPE_GENERAL);
-    cusparseSetMatIndexBase(descA, CUSPARSE_INDEX_BASE_ZERO);
-
     // Get device-side data
     const int* d_rowp = nullptr;
     const int* d_cols = nullptr;
@@ -157,23 +154,21 @@ class CuSolverFactorBackend {
     double* d_b = b->get_device_array();
     double* d_x = x->get_device_array();
 
-    // Reorder with Symmetric AMD
-    int reorder = 2;
-
     int singularity = -1;
     AMIGO_CHECK_CUSOLVER(cusolverSpDcsrlsvqr(handle, n, nnz, descA, d_data,
                                              d_rowp, d_cols, d_b, pivot_tol,
                                              reorder, d_x, &singularity));
-
-    cusparseDestroyMatDescr(descA);
-    cusolverSpDestroy(handle);
   }
 
  private:
   std::shared_ptr<CSRMat<double>> mat;
 
+  int reorder;
   double pivot_tol;
   int n, nnz;
+
+  cusolverSpHandle_t handle;
+  cusparseMatDescr_t descA;
 };
 
 CSRMatFactorCuda::CSRMatFactorCuda(std::shared_ptr<CSRMat<double>> m,

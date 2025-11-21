@@ -12,6 +12,78 @@ namespace amigo {
 namespace detail {
 
 template <typename T>
+AMIGO_KERNEL void set_array_value(int num_variables, const int* indices,
+                                  T value, T* array) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i >= num_variables) {
+    return;
+  }
+
+  int idx = indices[i];
+  array[idx] = value;
+}
+
+template <typename T>
+AMIGO_KERNEL void copy_array_values(int num_variables, const int* indices,
+                                    const T* d_src, T* d_dest) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i >= num_variables) {
+    return;
+  }
+
+  int idx = indices[i];
+  d_dest[idx] = d_src[idx];
+}
+
+template <typename T>
+void set_multipliers_value_cuda(const OptInfo<T>& info, const T value, T* d_x,
+                                cudaStream_t stream) {
+  constexpr int TPB = 256;
+
+  int grid_eq = (info.num_equalities + TPB - 1) / TPB;
+  set_array_value<T><<<grid_eq, TPB, 0, stream>>>(
+      info.num_equalities, info.equality_indices, value, d_x);
+
+  int grid_ineq = (info.num_inequalities + TPB - 1) / TPB;
+  set_array_value<T><<<grid_ineq, TPB, 0, stream>>>(
+      info.num_inequalities, info.inequality_indices, value, d_x);
+}
+
+template <typename T>
+void set_design_vars_value_cuda(const OptInfo<T>& info, const T value, T* d_x,
+                                cudaStream_t stream) {
+  constexpr int TPB = 256;
+
+  int grid_vars = (info.num_variables + TPB - 1) / TPB;
+  set_array_value<T><<<grid_vars, TPB, 0, stream>>>(
+      info.num_variables, info.design_variable_indices, value, d_x);
+}
+
+template <typename T>
+void copy_multipliers_cuda(const OptInfo<T>& info, const T* d_src, T* d_dest,
+                           cudaStream_t stream) {
+  constexpr int TPB = 256;
+
+  int grid_eq = (info.num_equalities + TPB - 1) / TPB;
+  copy_array_values<T><<<grid_eq, TPB, 0, stream>>>(
+      info.num_equalities, info.equality_indices, d_src, d_dest);
+
+  int grid_ineq = (info.num_inequalities + TPB - 1) / TPB;
+  copy_array_values<T><<<grid_ineq, TPB, 0, stream>>>(
+      info.num_inequalities, info.inequality_indices, d_src, d_dest);
+}
+
+template <typename T>
+void copy_design_vars_cuda(const OptInfo<T>& info, const T* d_src, T* d_dest,
+                           cudaStream_t stream) {
+  constexpr int TPB = 256;
+
+  int grid_vars = (info.num_variables + TPB - 1) / TPB;
+  copy_array_values<T><<<grid_vars, TPB, 0, stream>>>(
+      info.num_variables, info.design_variable_indices, d_src, d_dest);
+}
+
+template <typename T>
 AMIGO_KERNEL void initialize_multipliers_kernel(int num_variables,
                                                 T barrier_param,
                                                 OptInfo<T> info,
@@ -788,6 +860,23 @@ void compute_affine_start_point_cuda(T beta_min, const OptInfo<T>& info,
 /**
  *  Explicit instantiations for T = double
  */
+
+template void set_multipliers_value_cuda<double>(const OptInfo<double>& info,
+                                                 double value, double* d_x,
+                                                 cudaStream_t stream);
+
+template void set_design_vars_value_cuda<double>(const OptInfo<double>& info,
+                                                 double value, double* d_x,
+                                                 cudaStream_t stream);
+
+template void copy_multipliers_cuda<double>(const OptInfo<double>& info,
+                                            const double* d_src, double* d_dest,
+                                            cudaStream_t stream);
+
+template void copy_design_vars_cuda<double>(const OptInfo<double>& info,
+                                            const double* d_src, double* d_dest,
+                                            cudaStream_t stream);
+
 template void initialize_multipliers_and_slacks_cuda<double>(
     double barrier_param, const OptInfo<double>& info, const double* d_g,
     OptStateData<double>& pt, cudaStream_t stream);
@@ -829,6 +918,22 @@ template void compute_affine_start_point_cuda<double>(
 /**
  *  Explicit instantiations for T = float
  */
+template void set_multipliers_value_cuda<float>(const OptInfo<float>& info,
+                                                float value, float* d_x,
+                                                cudaStream_t stream);
+
+template void set_design_vars_value_cuda<float>(const OptInfo<float>& info,
+                                                float value, float* d_x,
+                                                cudaStream_t stream);
+
+template void copy_multipliers_cuda<float>(const OptInfo<float>& info,
+                                           const float* d_src, float* d_dest,
+                                           cudaStream_t stream);
+
+template void copy_design_vars_cuda<float>(const OptInfo<float>& info,
+                                           const float* d_src, float* d_dest,
+                                           cudaStream_t stream);
+
 template void initialize_multipliers_and_slacks_cuda<float>(
     float barrier_param, const OptInfo<float>& info, const float* d_g,
     OptStateData<float>& pt, cudaStream_t stream);

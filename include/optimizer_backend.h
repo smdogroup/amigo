@@ -58,6 +58,66 @@ class OptStateData {
 };
 
 template <typename T>
+void set_multipliers_value(const OptInfo<T>& info, T value, T* x) {
+#ifdef AMIGO_USE_OPENMP
+#pragma omp parallel for
+#endif  // AMIGO_USE_OPENMP
+  for (int i = 0; i < info.num_equalities; i++) {
+    int idx = info.equality_indices[i];
+    x[idx] = value;
+  }
+
+#ifdef AMIGO_USE_OPENMP
+#pragma omp parallel for
+#endif  // AMIGO_USE_OPENMP
+  for (int i = 0; i < info.num_inequalities; i++) {
+    int idx = info.inequality_indices[i];
+    x[idx] = value;
+  }
+}
+
+template <typename T>
+void set_design_vars_value(const OptInfo<T>& info, T value, T* x) {
+#ifdef AMIGO_USE_OPENMP
+#pragma omp parallel for
+#endif  // AMIGO_USE_OPENMP
+  for (int i = 0; i < info.num_variables; i++) {
+    int idx = info.design_variable_indices[i];
+    x[idx] = value;
+  }
+}
+
+template <typename T>
+void copy_multipliers(const OptInfo<T>& info, const T* d_src, T* d_dest) {
+#ifdef AMIGO_USE_OPENMP
+#pragma omp parallel for
+#endif  // AMIGO_USE_OPENMP
+  for (int i = 0; i < info.num_equalities; i++) {
+    int idx = info.equality_indices[i];
+    d_dest[idx] = d_src[idx];
+  }
+
+#ifdef AMIGO_USE_OPENMP
+#pragma omp parallel for
+#endif  // AMIGO_USE_OPENMP
+  for (int i = 0; i < info.num_inequalities; i++) {
+    int idx = info.inequality_indices[i];
+    d_dest[idx] = d_src[idx];
+  }
+}
+
+template <typename T>
+void copy_design_vars(const OptInfo<T>& info, const T* d_src, T* d_dest) {
+#ifdef AMIGO_USE_OPENMP
+#pragma omp parallel for
+#endif  // AMIGO_USE_OPENMP
+  for (int i = 0; i < info.num_variables; i++) {
+    int idx = info.design_variable_indices[i];
+    d_dest[idx] = d_src[idx];
+  }
+}
+
+template <typename T>
 void initialize_multipliers_and_slacks(T barrier_param, const OptInfo<T>& info,
                                        const T* g, OptStateData<T>& pt) {
   // Initialize the lower and upper bound dual variables
@@ -531,6 +591,22 @@ void compute_affine_start_point(T beta_min, const OptInfo<T>& info,
 
 // Template delarations
 #ifdef AMIGO_USE_CUDA
+template <typename T>
+void set_multipliers_value_cuda(const OptInfo<T>& info, const T value, T* d_x,
+                                cudaStream_t stream = 0);
+
+template <typename T>
+void set_design_vars_value_cuda(const OptInfo<T>& info, const T value, T* d_x,
+                                cudaStream_t stream = 0);
+
+template <typename T>
+void copy_multipliers_cuda(const OptInfo<T>& info, const T* d_src, T* d_dest,
+                           cudaStream_t stream = 0);
+
+template <typename T>
+void copy_design_vars_cuda(const OptInfo<T>& info, const T* d_src, T* d_dest,
+                           cudaStream_t stream = 0);
+
 template <typename T>
 void initialize_multipliers_and_slacks_cuda(T barrier_param,
                                             const OptInfo<T>& info,

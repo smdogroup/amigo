@@ -1,10 +1,11 @@
 import warnings
+import sys
 import numpy as np
 from scipy.sparse.linalg import MatrixRankWarning
 from scipy.sparse import csr_matrix
 from scipy.sparse.linalg import splu, eigsh
 
-from .amigo import InteriorPointOptimizer
+from .amigo import InteriorPointOptimizer, MemoryLocation
 from .model import ModelVector
 from .utils import tocsr
 
@@ -102,6 +103,30 @@ def gmres(mult, precon, b, x, msub=20, rtol=1e-2, atol=1e-30):
     return
 
 
+class DirectCudaSolver:
+    def __init__(self, problem):
+        self.problem = problem
+
+        try:
+            from .amigo import CSRMatFactorCuda
+        except:
+            raise NotImplementedError("Amigo compiled without CUDA support")
+
+        loc = MemoryLocation.DEVICE_ONLY
+        self.hess = self.problem.create_matrix(loc)
+        self.solver = CSRMatFactorCuda(self.hess)
+
+    def factor(self, alpha, x, diag):
+        self.problem.hessian(alpha, x, self.hess)
+        self.hess.add_diagonal(diag)
+        self.solver.factor()
+        return
+
+    def solve(self, bx, px):
+        self.solver.solve(bx, px)
+        return
+
+
 class DirectScipySolver:
     def __init__(self, problem):
         self.problem = problem
@@ -118,9 +143,12 @@ class DirectScipySolver:
         Compute and factor the Hessian matrix
         """
 
-        # Compute the Hessian
+        # Compute the Hessian and add the diagonal values
         self.problem.hessian(alpha, x, self.hess)
         self.hess.add_diagonal(diag)
+
+        # Copy to the host if needed
+        self.hess.copy_data_device_to_host()
 
         # Build the CSR matrix and convert to CSC
         shape = (self.nrows, self.ncols)
@@ -137,7 +165,10 @@ class DirectScipySolver:
         Solve the KKT system
         """
 
+        bx.copy_device_to_host()
+        print(np.linalg.norm(bx.get_array()))
         px.get_array()[:] = self.lu.solve(bx.get_array())
+        px.copy_host_to_device()
 
         return
 
@@ -435,6 +466,7 @@ class Optimizer:
                 else:
                     line += f"{iter_data[name]:15.6e} "
         print(line)
+        sys.stdout.flush()
 
         return
 
@@ -501,40 +533,31 @@ class Optimizer:
         [ A     0  ][ lambda ] =   [             0 ]
 
         Note that the w components are discarded.
+
+        On input to the function, the design variables stored in self.vars.get_solution() are
+        at the initial point and the multipliers are initialized to zero.
         """
 
-        # Get which variables are multipliers/constraints
-        if self.distribute:
-            is_mult = self.mpi_problem.get_multiplier_indicator()
-        else:
-            is_mult = self.problem.get_multiplier_indicator()
-        is_mult_array = is_mult.get_array()
-
-        # Set the diagonal entries of the matrix
-        diag_array = self.diag.get_array()
-        diag_array[:] = 1.0
-        diag_array[is_mult_array != 0] = 0.0
-
-        # Compute the residual
+        # Compute the residual based on the gradient. At this point the multipliers are zero
+        x = self.vars.get_solution()
         self.optimizer.compute_residual(0.0, 0.0, self.vars, self.grad, self.res)
 
-        # Zero the constraint contributions
-        res_array = self.res.get_array()
-        res_array[is_mult_array != 0] = 0.0
+        # Zero out the constraint contributions from the right-hand-side
+        self.optimizer.set_multipliers_value(0.0, self.res)
 
-        # Find the solution values
-        x = self.vars.get_solution()
-        xt = self.grad
-        xt.get_array()[:] = x.get_array()[:]
-        xt.get_array()[is_mult_array != 0.0] = 0.0
+        # Set the diagonal entries - zero everywhere except in entries with the design variables
+        # where the diagonal = 1.0
+        self.diag.zero()
+        self.optimizer.set_design_vars_value(1.0, self.diag)
 
-        # Set alpha = 0.0 so that the only contributions are from constraints
-        self.solver.factor(0.0, xt, self.diag)
+        # Set up the system above (Note that alpha = 0.0, zeroing the objective contributions
+        # to the Hessian. Since the multipliers are also zero, they contribute nothing to the
+        # design-variable Hessian. Only the constraint Jacobians remain.)
+        self.solver.factor(0.0, x, self.diag)
         self.solver.solve(self.res, self.px)
 
-        # Update the multiplier values
-        x_array = x.get_array()
-        x_array[is_mult_array != 0] = self.px.get_array()[is_mult_array != 0]
+        # Copy the multipiler values from self.px to x
+        self.optimizer.copy_multipliers(x, self.px)
 
         return
 
@@ -572,10 +595,9 @@ class Optimizer:
             beta_min, self.vars, self.update, self.temp
         )
 
-        # Copy over the design point
-        xt_array = self.temp.get_solution().get_array()
-        x_array = self.vars.get_solution().get_array()
-        xt_array[:] = x_array[:]
+        # Copy the multipliers to the solution
+        xt = self.temp.get_solution()
+        self.optimizer.copy_multipliers(x, xt)
 
         # Now, compute the updates based
         barrier = self.optimizer.compute_complementarity(self.temp)
@@ -585,29 +607,14 @@ class Optimizer:
         return barrier
 
     def _add_regularization_terms(self, diag, eps_x=1e-4, eps_z=1e-4):
-        if self.distribute:
-            is_mult = self.mpi_problem.get_multiplier_indicator()
-        else:
-            is_mult = self.problem.get_multiplier_indicator()
-        is_mult_array = is_mult.get_array()
-
-        # Add regularization terms
-        diag_array = diag.get_array()
-        diag_array[is_mult_array == 0] += eps_x
-        diag_array[is_mult_array == 1] -= eps_z
+        self.optimizer.set_design_vars_value(eps_x, diag)
+        self.optimizer.set_multipliers_value(-eps_z, diag)
 
         return
 
     def _zero_multipliers(self, x):
         # Zero the multiplier contributions
-        if self.distribute:
-            is_mult = self.mpi_problem.get_multiplier_indicator()
-        else:
-            is_mult = self.problem.get_multiplier_indicator()
-        is_mult_array = is_mult.get_array()
-
-        x_array = x.get_array()
-        x_array[is_mult_array != 0] = 0.0
+        self.optimizer.set_multipliers_value(0.0, x)
 
         return
 
@@ -661,10 +668,10 @@ class Optimizer:
 
         # Initialize the multipliers
         if options["init_affine_step_multipliers"]:
-            # Compute the
+            print("Computing least squares multipliers")
             self._compute_least_squares_multipliers()
 
-            # Compute the affine step multipliers and
+            # Compute the affine step multipliers and the new barrier parameter
             self.barrier_param = self._compute_affine_multipliers(
                 beta_min=self.barrier_param, gamma_penalty=self.gamma_penalty
             )

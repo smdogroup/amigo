@@ -313,6 +313,86 @@ class InteriorPointOptimizer {
   }
 
   /**
+   * @brief Set the multipliers to the specified value
+   *
+   * @param value Value to place into the multiplier components
+   * @param x Vector
+   */
+  void set_multipliers_value(T value, std::shared_ptr<Vector<T>> x) const {
+    T* x_array = x->template get_array<policy>();
+    if constexpr (policy == ExecPolicy::SERIAL ||
+                  policy == ExecPolicy::OPENMP) {
+      detail::set_multipliers_value(info, value, x_array);
+    }
+#ifdef AMIGO_USE_CUDA
+    else {
+      detail::set_multipliers_value_cuda(info, value, x_array);
+    }
+#endif
+  }
+
+  /**
+   * @brief Set the design variables to the specified value
+   *
+   * @param value Value to place into the design variable components
+   * @param x Vector
+   */
+  void set_design_vars_value(T value, std::shared_ptr<Vector<T>> x) const {
+    T* x_array = x->template get_array<policy>();
+    if constexpr (policy == ExecPolicy::SERIAL ||
+                  policy == ExecPolicy::OPENMP) {
+      detail::set_design_vars_value(info, value, x_array);
+    }
+#ifdef AMIGO_USE_CUDA
+    else {
+      detail::set_design_vars_value_cuda(info, value, x_array);
+    }
+#endif
+  }
+
+  /**
+   * @brief Copy only the multipliers from the src to the dest vector
+   *
+   * @param dest Destination vector
+   * @param src Source vector
+   */
+  void copy_multipliers(std::shared_ptr<Vector<T>> dest,
+                        std::shared_ptr<Vector<T>> src) const {
+    if constexpr (policy == ExecPolicy::SERIAL ||
+                  policy == ExecPolicy::OPENMP) {
+      detail::copy_multipliers(info, src->template get_array<policy>(),
+                               dest->template get_array<policy>());
+    }
+#ifdef AMIGO_USE_CUDA
+    else {
+      detail::copy_multipliers_cuda(info, src->template get_array<policy>(),
+                                    dest->template get_array<policy>());
+    }
+#endif
+  }
+
+  /**
+   * @brief Copy only the design variables from the src to the dest vector
+   *
+   * @param dest Destination vector
+   * @param src Source vector
+   */
+  void copy_design_vars(std::shared_ptr<Vector<T>> dest,
+                        std::shared_ptr<Vector<T>> src) const {
+    if constexpr (policy == ExecPolicy::SERIAL ||
+                  policy == ExecPolicy::OPENMP) {
+      detail::copy_design_vars(info, src->template get_array<policy>(),
+                               dest->template get_array<policy>());
+    }
+#ifdef AMIGO_USE_CUDA
+    else {
+      detail::copy_design_vars_cuda(info, src->template get_array<policy>(),
+                                    dest->template get_array<policy>());
+    }
+#endif
+  }
+
+  /**
    * @brief Initialize the multipliers and slack variables in the problem
    *
    * @param vars All of the optimization variables
