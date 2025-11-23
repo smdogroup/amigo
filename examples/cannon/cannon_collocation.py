@@ -326,13 +326,6 @@ parser.add_argument(
     "--build", dest="build", action="store_true", default=False, help="Enable building"
 )
 parser.add_argument(
-    "--with-openmp",
-    dest="use_openmp",
-    action="store_true",
-    default=False,
-    help="Enable OpenMP",
-)
-parser.add_argument(
     "--show-sparsity",
     dest="show_sparsity",
     action="store_true",
@@ -344,17 +337,7 @@ args = parser.parse_args()
 model = create_cannon_model()
 
 if args.build:
-    compile_args = []
-    link_args = []
-    define_macros = []
-    if args.use_openmp:
-        compile_args = ["-fopenmp"]
-        link_args = ["-fopenmp"]
-        define_macros = [("AMIGO_USE_OPENMP", "1")]
-
-    model.build_module(
-        compile_args=compile_args, link_args=link_args, define_macros=define_macros
-    )
+    model.build_module()
 
 model.initialize(order_type=am.OrderingType.NESTED_DISSECTION)
 

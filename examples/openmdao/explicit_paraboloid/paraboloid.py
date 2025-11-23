@@ -51,7 +51,7 @@ class Quadratic(am.Component):
 model = am.Model("paraboloid")
 model.add_component("quad", 1, Quadratic())
 
-model.build_module(debug=True)
+model.build_module()
 model.initialize()
 
 x = model.create_vector()

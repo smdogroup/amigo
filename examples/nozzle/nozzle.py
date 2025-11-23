@@ -1,5 +1,6 @@
 import argparse
 import json
+from pathlib import Path
 import amigo as am
 import numpy as np
 import matplotlib.pylab as plt
@@ -493,32 +494,11 @@ parser.add_argument(
     "--build", dest="build", action="store_true", default=False, help="Enable building"
 )
 parser.add_argument(
-    "--generate",
-    dest="generate",
-    action="store_true",
-    default=False,
-    help="Generate the code",
-)
-parser.add_argument(
-    "--with-openmp",
-    dest="use_openmp",
-    action="store_true",
-    default=False,
-    help="Enable OpenMP",
-)
-parser.add_argument(
     "--show-sparsity",
     dest="show_sparsity",
     action="store_true",
     default=False,
     help="Show the sparsity pattern",
-)
-parser.add_argument(
-    "--with-debug",
-    dest="use_debug",
-    action="store_true",
-    default=False,
-    help="Enable debug flags",
 )
 parser.add_argument(
     "--with-lnks",
@@ -645,25 +625,9 @@ model.link("area.output[0]", "calc.A_inlet")
 model.link("area.output[-1]", "calc.A_outlet")
 model.link("inlet.M_inlet", "calc.M_inlet")
 
-if args.generate:
-    model.generate_cpp()
-    exit(0)
-
-elif args.build:
-    compile_args = []
-    link_args = []
-    define_macros = []
-    if args.use_openmp:
-        compile_args = ["-fopenmp"]
-        link_args = ["-fopenmp"]
-        define_macros = [("AMIGO_USE_OPENMP", "1")]
-
-    model.build_module(
-        compile_args=compile_args,
-        link_args=link_args,
-        define_macros=define_macros,
-        debug=args.use_debug,
-    )
+if args.build:
+    source_dir = Path(__file__).resolve().parent
+    model.build_module(source_dir=source_dir)
 
 model.initialize(order_type=am.OrderingType.NATURAL)
 
@@ -778,7 +742,7 @@ with open("nozzle_history.json", "w") as fp:
 inputs, cons, _, _ = model.get_names()
 
 res = model.create_vector()
-model.problem.gradient(x.get_vector(), res.get_vector())
+model.problem.gradient(1.0, x.get_vector(), res.get_vector())
 inputs.extend(cons)
 
 print("Variable summary")
