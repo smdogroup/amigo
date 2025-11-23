@@ -9,7 +9,7 @@ include/amigo_include_paths.h
 **/__pycache__
 **/*.pyd
 
-# Ignore in examples/ and all its subdirectories
+# Ignore in examples and all its subdirectories
 /examples/**/*.h
 /examples/**/*.cpp
 /examples/**/*.so
@@ -21,7 +21,8 @@ include/amigo_include_paths.h
 /examples/**/*.js
 /examples/**/*.css
 /examples/**/build/
-examples/**/lib/
+/examples/**/lib/
+/examples/**/*.txt
 
 # Virtual environments and packaging
 venv/

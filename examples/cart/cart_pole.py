@@ -1,7 +1,8 @@
-import amigo as am
-import numpy as np
 import argparse
 import json
+from pathlib import Path
+import amigo as am
+import numpy as np
 import matplotlib.pylab as plt
 import niceplots
 
@@ -358,20 +359,6 @@ parser.add_argument(
     "--build", dest="build", action="store_true", default=False, help="Enable building"
 )
 parser.add_argument(
-    "--with-openmp",
-    dest="use_openmp",
-    action="store_true",
-    default=False,
-    help="Enable OpenMP",
-)
-parser.add_argument(
-    "--with-debug",
-    dest="use_debug",
-    action="store_true",
-    default=False,
-    help="Enable debug flags",
-)
-parser.add_argument(
     "--show-sparsity",
     dest="show_sparsity",
     action="store_true",
@@ -412,25 +399,8 @@ args = parser.parse_args()
 model = create_cart_model()
 
 if args.build:
-    import sys
-
-    compile_args = []
-    link_args = []
-    define_macros = []
-    if args.use_openmp:
-        if sys.platform == "win32":
-            compile_args = ["/openmp"]
-        else:
-            compile_args = ["-fopenmp"]
-            link_args = ["-fopenmp"]
-        define_macros = [("AMIGO_USE_OPENMP", "1")]
-
-    model.build_module(
-        compile_args=compile_args,
-        link_args=link_args,
-        define_macros=define_macros,
-        debug=args.use_debug,
-    )
+    source_dir = Path(__file__).resolve().parent
+    model.build_module(source_dir=source_dir)
 
 comm = COMM_WORLD
 model.initialize(comm=comm)
@@ -485,9 +455,11 @@ opt_options = {
     "max_iterations": 500,  # Sufficient iterations
     "init_affine_step_multipliers": True,  # Enable for better scaling
     # Use the new heuristic barrier parameter update
-    "barrier_strategy": "heuristic",
-    "verbose_barrier": True,  # Show ξ and complementarity values
+    # "barrier_strategy": "heuristic",
+    # "verbose_barrier": True,  # Show ξ and complementarity values
 }
+
+exit(0)
 
 # Set up the optimizer
 opt = am.Optimizer(model, x, lower=lower, upper=upper, comm=comm, distribute=distribute)

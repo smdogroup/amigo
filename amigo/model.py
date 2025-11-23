@@ -2,6 +2,11 @@ import numpy as np
 import ast
 import sys
 import importlib
+import subprocess
+from pathlib import Path
+from scipy.sparse import spmatrix
+import pybind11
+import networkx as nx
 from .amigo import (
     OrderingType,
     MemoryLocation,
@@ -15,9 +20,8 @@ from .amigo import (
     CSRMat,
     ExternalComponentGroup,
 )
+from .utils import get_cmake_dir
 from .component import Component
-from scipy.sparse import spmatrix
-import networkx as nx
 
 try:
     from mpi4py.MPI import COMM_WORLD
@@ -953,10 +957,9 @@ class Model:
     def build_module(
         self,
         comm=COMM_WORLD,
-        compile_args=[],
-        link_args=[],
-        define_macros=[],
-        debug=False,
+        source_dir=None,
+        build_dir=None,
+        **kwargs,
     ):
         """
         Generate the model code and build it. Additional compile, link arguments and macros can be added here.
@@ -968,12 +971,7 @@ class Model:
 
         if comm_rank == 0:
             self.generate_cpp()
-            self._build_module(
-                compile_args=compile_args,
-                link_args=link_args,
-                define_macros=define_macros,
-                debug=debug,
-            )
+            self._build_module(source_dir=source_dir, build_dir=build_dir)
 
         if comm is not None:
             comm.Barrier()
@@ -1047,19 +1045,24 @@ class Model:
 
         return
 
-    def _build_module(self, **kwargs):
+    def _build_module(
+        self, source_dir: str | Path, build_dir: str | Path = None, **kwargs
+    ):
+        """
+        Build an extension module, utilizing the"""
 
         source_dir = Path(source_dir).resolve()
         if build_dir is None:
             build_dir = source_dir / "_amigo_build"
+
         build_dir = build_dir.resolve()
         build_dir.mkdir(parents=True, exist_ok=True)
+        cmake_pybind11_dir = pybind11.get_cmake_dir()
 
         # Optionally drop a trivial CMakeLists.txt into the source_dir
         cmakelists = source_dir / "CMakeLists.txt"
-        if generate_cmakelists and not cmakelists.exists():
-            cmakelists.write_text(
-                f"""\
+        cmakelists.write_text(
+            f"""\
 cmake_minimum_required(VERSION 3.25)
 project({self.module_name} LANGUAGES CXX)
 
@@ -1070,13 +1073,16 @@ amigo_add_python_module(
     SOURCES {self.module_name}.cpp
 )
 """
-            )
+        )
 
         # Locate the installed Amigo CMake package inside the Python package
-        amigo_cmake_dir = files("amigo") / "cmake" / "Amigo"
+        amigo_cmake_dir = get_cmake_dir()
+
+        print(amigo_cmake_dir)
+        exit(0)
 
         # Configure
-        subprocess.check_call(
+        p = subprocess.Popen(
             [
                 "cmake",
                 "-S",
@@ -1085,20 +1091,32 @@ amigo_add_python_module(
                 str(build_dir),
                 f"-DCMAKE_PREFIX_PATH={amigo_cmake_dir}",
                 f"-DPython3_EXECUTABLE={sys.executable}",
-            ]
+                f"-Dpybind11_DIR={cmake_pybind11_dir}",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
         )
+
+        for line in p.stdout:
+            print(line, end="")
+
+        p.wait()
 
         # Build
-        subprocess.check_call(
-            ["cmake", "--build", str(build_dir), "--config", "Release"]
+        p = subprocess.Popen(
+            ["cmake", "--build", str(build_dir), "--config", "Release"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
         )
 
-        # amigo_add_python_module drops the .so in source_dir
-        for p in source_dir.iterdir():
-            if p.stem == name and p.suffix in {".so", ".pyd", ".dll", ".dylib"}:
-                return p
+        for line in p.stdout:
+            print(line, end="")
 
-        raise RuntimeError(f"Could not find built module {name} in {source_dir}")
+        p.wait()
 
         return
 

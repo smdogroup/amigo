@@ -1,3 +1,5 @@
+from importlib.resources import files
+from pathlib import Path
 import numpy as np
 from scipy.sparse import csr_matrix
 from scipy.interpolate import BSpline
@@ -7,6 +9,22 @@ try:
     from petsc4py import PETSc
 except:
     PETSc = None
+
+
+def get_cmake_dir() -> Path:
+    """
+    Return the directory containing Amigo's CMake package files
+    (AmigoConfig.cmake, AmigoAddModule.cmake, AmigoTargets.cmake).
+
+    Works for both normal and editable installs.
+    """
+    cmake_dir = files("amigo") / "cmake" / "Amigo"
+    cmake_dir = Path(cmake_dir)
+
+    if not cmake_dir.is_dir():
+        raise RuntimeError(f"Amigo CMake directory not found at {cmake_dir}")
+
+    return cmake_dir
 
 
 def tocsr(mat):

@@ -63,22 +63,23 @@ if(NOT MPI4PY_RC EQUAL 0 OR NOT EXISTS "${MPI4PY_INCLUDE_DIR}/mpi4py/mpi4py.h")
 endif()
 
 # Amigo headers
-add_library(amigo_headers INTERFACE)
-add_library(amigo::headers ALIAS amigo_headers)
-target_compile_definitions(amigo_headers INTERFACE
+add_library(headers INTERFACE)
+add_library(amigo::headers ALIAS headers)
+
+target_compile_definitions(headers INTERFACE
   $<$<BOOL:${AMIGO_ENABLE_CUDA}>:AMIGO_USE_CUDA>
   $<$<BOOL:${AMIGO_ENABLE_OPENMP}>:AMIGO_USE_OPENMP>
 )
 
 # MPI / OpenMP linkage for any TU that includes headers and calls MPI/OpenMP
-target_link_libraries(amigo_headers INTERFACE MPI::MPI_CXX)
+target_link_libraries(headers INTERFACE MPI::MPI_CXX)
 if(AMIGO_ENABLE_OPENMP AND OpenMP_CXX_FOUND)
-  target_link_libraries(amigo_headers INTERFACE 
+  target_link_libraries(headers INTERFACE 
     OpenMP::OpenMP_CXX)
 endif()
 
 # Add LAPACK and BLAS
-target_link_libraries(amigo_headers INTERFACE 
+target_link_libraries(headers INTERFACE 
   LAPACK::LAPACK BLAS::BLAS)
 
 # Add the pybind11 wrapper
@@ -96,7 +97,7 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../a2d/include/
     DESTINATION "${AMIGO_PY_PACKAGE_DIR}/a2d/include"
 )
 
-target_include_directories(amigo_headers INTERFACE
+target_include_directories(headers INTERFACE
   # When building this project
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../a2d/include>
@@ -108,28 +109,28 @@ target_include_directories(amigo_headers INTERFACE
 
 # If Cuda is enabled, then we need to build the backend files
 if(AMIGO_ENABLE_CUDA)
-  add_library(amigo_backend 
+  add_library(backend 
     src/csr_factor_cuda.cu
     src/csr_matrix_backend.cu
     src/optimizer_backend.cu
     src/vector_distribute.cu)
-  target_link_libraries(amigo_backend PUBLIC 
+  target_link_libraries(backend PUBLIC 
     CUDA::cudart CUDA::cublas CUDA::cublasLt 
     CUDA::cusolver CUDA::cusparse MPI::MPI_CXX)
 
   # Feature flags visible to dependents
-  target_compile_definitions(amigo_backend PUBLIC
+  target_compile_definitions(backend PUBLIC
     $<$<BOOL:${AMIGO_ENABLE_CUDA}>:AMIGO_USE_CUDA>
     $<$<BOOL:${AMIGO_ENABLE_OPENMP}>:AMIGO_USE_OPENMP>
   )
 
-  set_target_properties(amigo_backend PROPERTIES
+  set_target_properties(backend PROPERTIES
     POSITION_INDEPENDENT_CODE ON
     CUDA_SEPARABLE_COMPILATION ON
     CUDA_RESOLVE_DEVICE_SYMBOLS ON
   )
 
-  target_link_libraries(amigo PRIVATE amigo_backend)
+  target_link_libraries(amigo PRIVATE backend)
 endif()
 
 target_include_directories(amigo
@@ -147,19 +148,21 @@ target_include_directories(amigo PRIVATE
 
 # Install the Python extension into the amigo Python package
 set_target_properties(amigo PROPERTIES PREFIX "")
+
 install(TARGETS amigo
   LIBRARY DESTINATION "${AMIGO_PY_PACKAGE_DIR}"
 )
 
 # Always export the header-only interface
-install(TARGETS amigo_headers
-  EXPORT AmigoTargets
+install(TARGETS headers
+  EXPORT AmigoTargets 
+  DESTINATION "${AMIGO_PY_PACKAGE_DIR}"
 )
 
 # If CUDA backend exists, export the CUDA backend
 if(AMIGO_ENABLE_CUDA)
-  add_library(amigo::backend ALIAS amigo_backend)
-  install(TARGETS amigo_backend
+  add_library(amigo::backend ALIAS backend)
+  install(TARGETS backend
     EXPORT AmigoTargets
     LIBRARY DESTINATION lib
     ARCHIVE DESTINATION lib
@@ -168,9 +171,9 @@ endif()
 
 # Export file with imported targets (amigo::headers, amigo::backend)
 install(EXPORT AmigoTargets
-  NAMESPACE amigo::
-  FILE AmigoTargets.cmake
-  DESTINATION "${AMIGO_PY_PACKAGE_DIR}/cmake/Amigo"
+    NAMESPACE amigo::
+    FILE AmigoTargets.cmake
+    DESTINATION "${AMIGO_PY_PACKAGE_DIR}/cmake/Amigo"
 )
 
 configure_package_config_file(

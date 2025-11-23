@@ -19,6 +19,9 @@ function(amigo_add_python_module)
   find_package(Amigo REQUIRED CONFIG)
   find_package(Python3 REQUIRED COMPONENTS Development.Module)
   find_package(pybind11 REQUIRED CONFIG)
+  find_package(BLAS REQUIRED)
+  find_package(LAPACK REQUIRED)
+  find_package(MPI REQUIRED COMPONENTS CXX)
 
   pybind11_add_module(${AMIGO_NAME} MODULE ${AMIGO_SOURCES})
   set_target_properties(${AMIGO_NAME} PROPERTIES

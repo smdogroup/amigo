@@ -15,7 +15,7 @@ from .amigo import (
 from .component import Component
 from .model import Model
 from .optimizer import *
-from .utils import tocsr, topetsc, BSplineInterpolant
+from .utils import *
 from .unary_operations import *
 from .interfaces import (
     ExternalOpenMDAOComponent,
