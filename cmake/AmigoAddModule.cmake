@@ -16,7 +16,7 @@ function(amigo_add_python_module)
     message(FATAL_ERROR "amigo_add_python_module: SOURCES is required")
   endif()
 
-  find_package(Amigo REQUIRED CONFIG)
+  find_package(amigo REQUIRED CONFIG)
   find_package(Python3 REQUIRED COMPONENTS Development.Module)
   find_package(pybind11 REQUIRED CONFIG)
   find_package(BLAS REQUIRED)
@@ -32,7 +32,7 @@ function(amigo_add_python_module)
   # Always use headers
   target_link_libraries(${AMIGO_NAME} PRIVATE amigo::headers)
 
-  # If the CUDA backend was built for this Amigo install, link to it too
+  # If the CUDA backend was built for this amigo install, link to it too
   if(TARGET amigo::backend)
     target_link_libraries(${AMIGO_NAME} PRIVATE amigo::backend)
   endif()

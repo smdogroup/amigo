@@ -173,17 +173,17 @@ endif()
 install(EXPORT AmigoTargets
     NAMESPACE amigo::
     FILE AmigoTargets.cmake
-    DESTINATION "${AMIGO_PY_PACKAGE_DIR}/cmake/Amigo"
+    DESTINATION "${AMIGO_PY_PACKAGE_DIR}/cmake/amigo"
 )
 
 configure_package_config_file(
   ${CMAKE_CURRENT_SOURCE_DIR}/cmake/AmigoConfig.cmake.in
   ${CMAKE_CURRENT_BINARY_DIR}/AmigoConfig.cmake
-  INSTALL_DESTINATION "${AMIGO_PY_PACKAGE_DIR}/cmake/Amigo"
+  INSTALL_DESTINATION "${AMIGO_PY_PACKAGE_DIR}/cmake/amigo"
 )
 
 install(FILES
   ${CMAKE_CURRENT_BINARY_DIR}/AmigoConfig.cmake
   ${CMAKE_CURRENT_SOURCE_DIR}/cmake/AmigoAddModule.cmake
-  DESTINATION "${AMIGO_PY_PACKAGE_DIR}/cmake/Amigo"
+  DESTINATION "${AMIGO_PY_PACKAGE_DIR}/cmake/amigo"
 )

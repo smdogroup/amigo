@@ -15,7 +15,7 @@ def get_cmake_dir() -> Path:
     import amigo as _amigo
 
     pkg_dir = Path(_amigo.__file__).resolve().parent
-    candidate = pkg_dir / "cmake" / "Amigo"
+    candidate = pkg_dir / "cmake" / "amigo"
     if candidate.is_dir():
         return candidate
 
@@ -23,7 +23,7 @@ def get_cmake_dir() -> Path:
     # the source tree, while the *installed* package (with cmake files)
     # lives somewhere else on sys.path. Look for that.
     for entry in map(Path, sys.path):
-        cmake_dir = entry / "amigo" / "cmake" / "Amigo"
+        cmake_dir = entry / "amigo" / "cmake" / "amigo"
         if cmake_dir.is_dir():
             return cmake_dir
 
