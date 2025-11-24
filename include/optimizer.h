@@ -618,90 +618,53 @@ class InteriorPointOptimizer {
    * @brief Compute the complementarity value for all inequalities
    *
    * This method computes the average complementarity and the
-   * uniformity measure ξ = min_i [w_i y_i / (y^T w / m)]
+   * uniformity measure xi = min_i [w_i y_i / (y^T w / m)]
    *
    * @param vars The optimization variables
    * @param uniformity_measure Pointer to store the uniformity measure
    * @return T The average complementarity value
    */
-  T compute_complementarity(const std::shared_ptr<OptVector<T>> vars,
-                            T* uniformity_measure) const {
-    // // Get the dual values for the bound constraints
-    // const T *zl, *zu;
-    // vars->get_bound_duals(&zl, &zu);
+  void compute_complementarity(const std::shared_ptr<OptVector<T>> vars,
+                               T& avg_complementarity,
+                               T& uniformity_measure) const {
+    detail::OptStateData<const T> pt =
+        detail::OptStateData<const T>::template make<policy>(vars);
 
-    // // Get the slack variable values
-    // const T *sl, *tl, *su, *tu;
-    // vars->get_slacks(nullptr, &sl, &tl, &su, &tu);
+    T partial_sum[2] = {0.0, 0.0};
+    T local_min = std::numeric_limits<T>::max();
 
-    // // Get the dual values for the slacks
-    // const T *zsl, *ztl, *zsu, *ztu;
-    // vars->get_slack_duals(&zsl, &ztl, &zsu, &ztu);
+    // Compute the max step lengths
+    if constexpr (policy == ExecPolicy::SERIAL ||
+                  policy == ExecPolicy::OPENMP) {
+      detail::compute_complementarity_pairs(info, pt, partial_sum, local_min);
+    }
+#ifdef AMIGO_USE_CUDA
+    else {
+      detail::compute_complementarity_pairs_cuda(info, pt, partial_sum,
+                                                 local_min);
+    }
+#endif  // AMIGO_USE_CUDA
 
-    // T* xlam = vars->get_solution_array();
+    // Compute the complementarity value across all processors
+    T sum[2];
+    MPI_Allreduce(partial_sum, sum, 2, get_mpi_type<T>(), MPI_SUM, comm);
 
-    // T partial_sum[2] = {0.0, 0.0};
-    // T local_min = std::numeric_limits<T>::max();
+    // Compute average complementarity
+    avg_complementarity = 0.0;
+    if (sum[1] != 0.0) {
+      avg_complementarity = sum[0] / sum[1];
+    }
 
-    // for (int i = 0; i < num_variables; i++) {
-    //   // Extract the design variable value
-    //   int index = design_variable_indices[i];
-    //   T x = xlam[index];
+    // Compute the minimum measure
+    T global_min;
+    MPI_Allreduce(&local_min, &global_min, 1, get_mpi_type<T>(), MPI_MIN, comm);
 
-    //   if (!std::isinf(lbx[i])) {
-    //     T comp = (x - lbx[i]) * zl[i];
-    //     partial_sum[0] += comp;
-    //     partial_sum[1] += 1.0;
-    //     local_min = A2D::min2(local_min, comp);
-    //   }
-    //   if (!std::isinf(ubx[i])) {
-    //     T comp = (ubx[i] - x) * zu[i];
-    //     partial_sum[0] += comp;
-    //     partial_sum[1] += 1.0;
-    //     local_min = A2D::min2(local_min, comp);
-    //   }
-    // }
-
-    // for (int i = 0; i < num_inequalities; i++) {
-    //   if (!std::isinf(lbc[i])) {
-    //     T comp_sl = sl[i] * zsl[i];
-    //     T comp_tl = tl[i] * ztl[i];
-    //     partial_sum[0] += comp_sl + comp_tl;
-    //     partial_sum[1] += 2.0;
-    //     local_min = A2D::min2(local_min, A2D::min2(comp_sl, comp_tl));
-    //   }
-
-    //   if (!std::isinf(ubc[i])) {
-    //     T comp_su = su[i] * zsu[i];
-    //     T comp_tu = tu[i] * ztu[i];
-    //     partial_sum[0] += comp_su + comp_tu;
-    //     partial_sum[1] += 2.0;
-    //     local_min = A2D::min2(local_min, A2D::min2(comp_su, comp_tu));
-    //   }
-    // }
-
-    // // Compute the complementarity value across all processors
-    // T sum[2];
-    // MPI_Allreduce(partial_sum, sum, 2, get_mpi_type<T>(), MPI_SUM, comm);
-
-    // // Compute average complementarity
-    // T avg_complementarity = (sum[1] == 0.0) ? 0.0 : sum[0] / sum[1];
-
-    // // Compute the uniformity measure
-    // T global_min;
-    // MPI_Allreduce(&local_min, &global_min, 1, get_mpi_type<T>(), MPI_MIN,
-    // comm);
-
-    // if (avg_complementarity <= 0.0) {
-    //   *uniformity_measure = 1.0;
-    // } else {
-    //   T uniformity = global_min / avg_complementarity;
-    //   *uniformity_measure = A2D::max2(0.0, A2D::min2(1.0, uniformity));
-    // }
-
-    T avg_complementarity = 0.0;
-
-    return avg_complementarity;
+    if (avg_complementarity <= 0.0) {
+      uniformity_measure = 1.0;
+    } else {
+      T uniformity = global_min / avg_complementarity;
+      uniformity_measure = A2D::max2(0.0, A2D::min2(1.0, uniformity));
+    }
   }
 
   /**

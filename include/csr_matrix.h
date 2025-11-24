@@ -483,9 +483,10 @@ class CSRMat {
    *
    * @param x The vector of diagonal elements
    */
+  template <ExecPolicy policy>
   void add_diagonal(const std::shared_ptr<Vector<T>>& x) {
-    if (mem_loc == MemoryLocation::HOST_ONLY ||
-        mem_loc == MemoryLocation::HOST_AND_DEVICE) {
+    if constexpr (policy == ExecPolicy::SERIAL ||
+                  policy == ExecPolicy::OPENMP) {
       int size = nrows;
       if (row_owners) {
         size = row_owners->get_local_size();
@@ -499,7 +500,7 @@ class CSRMat {
           data[diag[row]] += x_array[row];
         }
       }
-    } else {
+    } else if constexpr (policy == ExecPolicy::CUDA) {
       backend.add_diagonal(x->get_device_array());
     }
   }

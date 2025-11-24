@@ -669,6 +669,18 @@ class OptimizationProblem {
   }
 
   /**
+   * @brief Add diagonal terms to the Hessian matrix in a manner consistent with
+   * the execution policy
+   *
+   * @param x The diagonal values
+   * @param mat The Hessian matrix
+   */
+  void add_diagonal(std::shared_ptr<Vector<T>> diag,
+                    std::shared_ptr<CSRMat<T>> mat) {
+    mat->template add_diagonal<policy>(diag);
+  }
+
+  /**
    * @brief Update the design variables - needed for external components that
    * evaluate their terms independently
    *

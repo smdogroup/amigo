@@ -857,6 +857,160 @@ void compute_affine_start_point_cuda(T beta_min, const OptInfo<T>& info,
       info.num_inequalities, beta_min, info, pt, up, tmp);
 }
 
+#include <cuda_runtime.h>
+
+#include <limits>
+
+// Atomic min for float
+AMIGO_DEVICE inline void atomicMinT(float* addr, float val) {
+  int* addr_as_i = reinterpret_cast<int*>(addr);
+  int old = *addr_as_i, assumed;
+
+  while (true) {
+    assumed = old;
+    float old_val = __int_as_float(assumed);
+    if (val >= old_val) {
+      break;  // current min is already smaller or equal
+    }
+    old = atomicCAS(addr_as_i, assumed, __float_as_int(val));
+    if (old == assumed) {
+      break;
+    }
+  }
+}
+
+// Atomic min for double
+AMIGO_DEVICE inline void atomicMinT(double* addr, double val) {
+  unsigned long long* addr_as_ull = reinterpret_cast<unsigned long long*>(addr);
+  unsigned long long old = *addr_as_ull, assumed;
+
+  while (true) {
+    assumed = old;
+    double old_val = __longlong_as_double(assumed);
+    if (val >= old_val) {
+      break;
+    }
+    old = atomicCAS(addr_as_ull, assumed, __double_as_longlong(val));
+    if (old == assumed) {
+      break;
+    }
+  }
+}
+
+template <typename T>
+AMIGO_KERNEL void compute_complementarity_pairs_kernel(
+    const OptInfo<T> info, const OptStateData<const T> pt,
+    T* __restrict__ partial_sum_global, T* __restrict__ local_min_global,
+    const T max_init) {
+  extern __shared__ unsigned char shmem_raw[];
+  T* sh_sum0 = reinterpret_cast<T*>(shmem_raw);
+  T* sh_sum1 = sh_sum0 + blockDim.x;
+  T* sh_min = sh_sum1 + blockDim.x;
+
+  const int tid = threadIdx.x;
+  const int gid = blockIdx.x * blockDim.x + tid;
+  const int stride = blockDim.x * gridDim.x;
+
+  // Per-thread accumulators
+  T sum0 = T(0);
+  T sum1 = T(0);
+  T lmin = max_init;
+
+  // Loop over variables
+  for (int i = gid; i < info.num_variables; i += stride) {
+    int index = info.design_variable_indices[i];
+    T x = pt.xlam[index];
+
+    if (!isinf(info.lbx[i])) {
+      T comp = (x - info.lbx[i]) * pt.zl[i];
+      sum0 += comp;
+      sum1 += T(1);
+      lmin = A2D::min2(lmin, comp);
+    }
+    if (!isinf(info.ubx[i])) {
+      T comp = (info.ubx[i] - x) * pt.zu[i];
+      sum0 += comp;
+      sum1 += T(1);
+      lmin = A2D::min2(lmin, comp);
+    }
+  }
+
+  // Loop over inequalities
+  for (int i = gid; i < info.num_inequalities; i += stride) {
+    if (!isinf(info.lbc[i])) {
+      T comp_sl = pt.sl[i] * pt.zsl[i];
+      T comp_tl = pt.tl[i] * pt.ztl[i];
+      sum0 += comp_sl + comp_tl;
+      sum1 += T(2);
+      lmin = A2D::min2(lmin, A2D::min2(comp_sl, comp_tl));
+    }
+
+    if (!isinf(info.ubc[i])) {
+      T comp_su = pt.su[i] * pt.zsu[i];
+      T comp_tu = pt.tu[i] * pt.ztu[i];
+      sum0 += comp_su + comp_tu;
+      sum1 += T(2);
+      lmin = A2D::min2(lmin, A2D::min2(comp_su, comp_tu));
+    }
+  }
+
+  // Write to shared memory
+  sh_sum0[tid] = sum0;
+  sh_sum1[tid] = sum1;
+  sh_min[tid] = lmin;
+  __syncthreads();
+
+  // Block reduction
+  for (int offset = blockDim.x / 2; offset > 0; offset >>= 1) {
+    if (tid < offset) {
+      sh_sum0[tid] += sh_sum0[tid + offset];
+      sh_sum1[tid] += sh_sum1[tid + offset];
+      sh_min[tid] = A2D::min2(sh_min[tid], sh_min[tid + offset]);
+    }
+    __syncthreads();
+  }
+
+  // Block result -> global (atomic)
+  if (tid == 0) {
+    atomicAdd(&partial_sum_global[0], sh_sum0[0]);
+    atomicAdd(&partial_sum_global[1], sh_sum1[0]);
+    atomicMinT(local_min_global, sh_min[0]);
+  }
+}
+
+template <typename T>
+void compute_complementarity_pairs_cuda(const OptInfo<T>& info,
+                                        const OptStateData<const T>& pt,
+                                        T partial_sum[], T& local_min) {
+  int TPB = 256;
+  int blocks =
+      (std::max(info.num_variables, info.num_inequalities) + TPB - 1) / TPB;
+
+  T* d_partial_sum;
+  T* d_local_min;
+  AMIGO_CHECK_CUDA(cudaMalloc(&d_partial_sum, 2 * sizeof(T)));
+  AMIGO_CHECK_CUDA(cudaMalloc(&d_local_min, sizeof(T)));
+  AMIGO_CHECK_CUDA(cudaMemcpy(d_partial_sum, partial_sum, 2 * sizeof(T),
+                              cudaMemcpyHostToDevice));
+  AMIGO_CHECK_CUDA(
+      cudaMemcpy(d_local_min, &local_min, sizeof(T), cudaMemcpyHostToDevice));
+
+  // shared memory: 3 arrays of size blockDim.x
+  size_t shmem_bytes = 3 * TPB * sizeof(T);
+
+  compute_complementarity_pairs_kernel<T><<<blocks, TPB, shmem_bytes>>>(
+      info, pt, d_partial_sum, d_local_min, std::numeric_limits<T>::max());
+
+  // copy results back
+  AMIGO_CHECK_CUDA(cudaMemcpy(partial_sum, d_partial_sum, 2 * sizeof(T),
+                              cudaMemcpyDeviceToHost));
+  AMIGO_CHECK_CUDA(
+      cudaMemcpy(&local_min, d_local_min, sizeof(T), cudaMemcpyDeviceToHost));
+
+  cudaFree(d_partial_sum);
+  cudaFree(d_local_min);
+}
+
 /**
  *  Explicit instantiations for T = double
  */
@@ -915,6 +1069,10 @@ template void compute_affine_start_point_cuda<double>(
     OptStateData<const double>& pt, OptStateData<const double>& up,
     OptStateData<double>& tmp, cudaStream_t stream);
 
+template void compute_complementarity_pairs_cuda<double>(
+    const OptInfo<double>& info, const OptStateData<const double>& pt,
+    double partial_sum[], double& local_min);
+
 /**
  *  Explicit instantiations for T = float
  */
@@ -968,6 +1126,10 @@ template void compute_affine_start_point_cuda<float>(
     float beta_min, const OptInfo<float>& info, OptStateData<const float>& pt,
     OptStateData<const float>& up, OptStateData<float>& tmp,
     cudaStream_t stream);
+
+template void compute_complementarity_pairs_cuda<float>(
+    const OptInfo<float>& info, const OptStateData<const float>& pt,
+    float partial_sum[], float& local_min);
 
 }  // namespace detail
 
