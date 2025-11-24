@@ -118,7 +118,7 @@ class DirectCudaSolver:
 
     def factor(self, alpha, x, diag):
         self.problem.hessian(alpha, x, self.hess)
-        self.hess.add_diagonal(diag)
+        self.problem.add_diagonal(diag, self.hess)
         self.solver.factor()
         return
 
@@ -146,10 +146,9 @@ class DirectScipySolver:
 
         # Compute the Hessian and add the diagonal values
         self.problem.hessian(alpha, x, self.hess)
+        self.problem.add_diagonal(diag, self.hess)
 
         self.hess.copy_data_device_to_host()
-        diag.copy_device_to_host()
-        self.hess.add_diagonal(diag)
 
         # Build the CSR matrix and convert to CSC
         shape = (self.nrows, self.ncols)
@@ -178,7 +177,7 @@ class DirectScipySolver:
         """
         self.problem.hessian(alpha, x, self.hess)
         if diag is not None:
-            self.hess.add_diagonal(diag)
+            self.problem.add_diagonal(diag, self.hess)
 
         data = self.hess.get_data()
         H = csr_matrix((data, self.cols, self.rowp), shape=(self.nrows, self.ncols))
@@ -229,7 +228,7 @@ class LNKSInexactSolver:
 
         # Compute the Hessian
         self.problem.hessian(alpha, x, self.hess)
-        self.hess.add_diagonal(diag)
+        self.problem.add_diagonal(diag, self.hess)
 
         # Extract the submatrices
         self.Hmat = tocsr(self.hess)
@@ -295,7 +294,7 @@ class DirectPetscSolver:
     def factor(self, alpha, x, diag):
         # Compute the Hessian
         self.mpi_problem.hessian(alpha, x, self.hess)
-        self.hess.add_diagonal(diag)
+        self.mpi_problem.add_diagonal(diag, self.hess)
 
         # Extract the Hessian entries
         data = self.hess.get_data()
@@ -506,18 +505,6 @@ class Optimizer:
 
         return default
 
-    def _compute_complementarity_and_uniformity(self):
-        """
-        Compute both complementarity and uniformity measure in a single pass.
-        Returns (complementarity, uniformity) where:
-        - complementarity is the average: y^T w / m
-        - uniformity ξ = min_i [w_i y_i / (y^T w / m)]
-        """
-        complementarity, uniformity = self.optimizer.compute_complementarity(
-            self.vars, True
-        )
-        return complementarity, uniformity
-
     def _compute_barrier_heuristic(self, xi, complementarity, gamma, r):
         """
         Compute the heuristic barrier parameter.
@@ -606,7 +593,7 @@ class Optimizer:
         self.optimizer.copy_multipliers(x, xt)
 
         # Now, compute the updates based
-        barrier = self.optimizer.compute_complementarity(self.temp)
+        barrier, _ = self.optimizer.compute_complementarity(self.temp)
 
         self.vars.copy(self.temp)
 
@@ -720,20 +707,20 @@ class Optimizer:
                 "z_index": z_index_prev,
             }
 
-            if comm_rank == 0:
-                self.write_log(i, iter_data)
-
             # Compute and store xi and complementarity for heuristic (display table after optimization)
             if (
                 options["barrier_strategy"] == "heuristic"
                 and options["verbose_barrier"]
             ):
-                complementarity, xi = self._compute_complementarity_and_uniformity()
+                complementarity, xi = self.optimizer.compute_complementarity(self.vars)
                 iter_data["xi"] = xi
                 iter_data["complementarity"] = complementarity
                 heuristic_data.append(
                     {"iteration": i, "xi": xi, "complementarity": complementarity}
                 )
+
+            if comm_rank == 0:
+                self.write_log(i, iter_data)
 
             iter_data["x"] = {}
             if xview is not None:
@@ -869,24 +856,6 @@ class Optimizer:
             alpha_z_prev = alpha * alpha_z
             x_index_prev = x_index
             z_index_prev = z_index
-
-        # Print heuristic barrier table after optimization completes
-        if (
-            comm_rank == 0
-            and options["barrier_strategy"] == "heuristic"
-            and options["verbose_barrier"]
-        ):
-            if len(heuristic_data) > 0:
-                print()
-                print(f"{'iteration':>10s} {'xi':>15s} {'complementarity':>15s}")
-                for idx, data in enumerate(heuristic_data):
-                    if idx % 10 == 0 and idx > 0:
-                        print(
-                            f"{'iteration':>10s} {'xi':>15s} {'complementarity':>15s}"
-                        )
-                    print(
-                        f"{data['iteration']:10d} {data['xi']:15.6e} {data['complementarity']:15.6e}"
-                    )
 
         return opt_data
 

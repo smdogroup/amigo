@@ -335,7 +335,6 @@ PYBIND11_MODULE(amigo, mod) {
       .def("get_column_owners", &amigo::CSRMat<double>::get_column_owners)
       .def("gauss_seidel", &amigo::CSRMat<double>::gauss_seidel)
       .def("mult", &amigo::CSRMat<double>::mult)
-      .def("add_diagonal", &amigo::CSRMat<double>::add_diagonal)
       .def("copy_data_device_to_host",
            &amigo::CSRMat<double>::copy_data_device_to_host);
 
@@ -434,6 +433,8 @@ PYBIND11_MODULE(amigo, mod) {
           &amigo::OptimizationProblem<double,
                                       policy>::get_local_to_global_data_numbers)
       .def("update", &amigo::OptimizationProblem<double, policy>::update)
+      .def("add_diagonal",
+           &amigo::OptimizationProblem<double, policy>::add_diagonal)
       .def("lagrangian",
            &amigo::OptimizationProblem<double, policy>::lagrangian,
            py::arg("alpha"), py::arg("x"))
@@ -568,21 +569,12 @@ PYBIND11_MODULE(amigo, mod) {
           "compute_complementarity",
           [](const amigo::InteriorPointOptimizer<double, policy>& self,
              const std::shared_ptr<amigo::OptVector<double>> vars) {
+            double complementarity;
             double uniformity;
-            return self.compute_complementarity(vars, &uniformity);
-          },
-          py::arg("vars"))
-      .def(
-          "compute_complementarity",
-          [](const amigo::InteriorPointOptimizer<double, policy>& self,
-             const std::shared_ptr<amigo::OptVector<double>> vars,
-             bool compute_uniformity) {
-            double uniformity;
-            double complementarity =
-                self.compute_complementarity(vars, &uniformity);
+            self.compute_complementarity(vars, complementarity, uniformity);
             return py::make_tuple(complementarity, uniformity);
           },
-          py::arg("vars"), py::arg("compute_uniformity"))
+          py::arg("vars"))
       .def("compute_affine_start_point",
            &amigo::InteriorPointOptimizer<double,
                                           policy>::compute_affine_start_point)

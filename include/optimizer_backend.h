@@ -557,6 +557,48 @@ void apply_step_update(const T alpha_x, const T alpha_z, const OptInfo<T>& info,
 }
 
 template <typename T>
+void compute_complementarity_pairs(const OptInfo<T>& info,
+                                   OptStateData<const T>& pt, T partial_sum[],
+                                   T& local_min) {
+  for (int i = 0; i < info.num_variables; i++) {
+    // Extract the design variable value
+    int index = info.design_variable_indices[i];
+    T x = pt.xlam[index];
+
+    if (!std::isinf(info.lbx[i])) {
+      T comp = (x - info.lbx[i]) * pt.zl[i];
+      partial_sum[0] += comp;
+      partial_sum[1] += 1.0;
+      local_min = A2D::min2(local_min, comp);
+    }
+    if (!std::isinf(info.ubx[i])) {
+      T comp = (info.ubx[i] - x) * pt.zu[i];
+      partial_sum[0] += comp;
+      partial_sum[1] += 1.0;
+      local_min = A2D::min2(local_min, comp);
+    }
+  }
+
+  for (int i = 0; i < info.num_inequalities; i++) {
+    if (!std::isinf(info.lbc[i])) {
+      T comp_sl = pt.sl[i] * pt.zsl[i];
+      T comp_tl = pt.tl[i] * pt.ztl[i];
+      partial_sum[0] += comp_sl + comp_tl;
+      partial_sum[1] += 2.0;
+      local_min = A2D::min2(local_min, A2D::min2(comp_sl, comp_tl));
+    }
+
+    if (!std::isinf(info.ubc[i])) {
+      T comp_su = pt.su[i] * pt.zsu[i];
+      T comp_tu = pt.tu[i] * pt.ztu[i];
+      partial_sum[0] += comp_su + comp_tu;
+      partial_sum[1] += 2.0;
+      local_min = A2D::min2(local_min, A2D::min2(comp_su, comp_tu));
+    }
+  }
+}
+
+template <typename T>
 void compute_affine_start_point(T beta_min, const OptInfo<T>& info,
                                 OptStateData<const T>& pt,
                                 OptStateData<const T>& up,
