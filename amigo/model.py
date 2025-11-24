@@ -1059,10 +1059,16 @@ class Model:
         return
 
     def _build_module(
-        self, source_dir: str | Path, build_dir: str | Path = None, **kwargs
+        self, source_dir: str | Path, build_dir: str | Path | None = None
     ):
         """
-        Build an extension module, utilizing the"""
+        Build an extension module, utilizing the specified source and build directories.
+        If no build directory is specified, place it in source_dir/_amigo_build.
+
+        Args:
+            source_dir (str or Path): Location of the source for the module
+            build_dir (str, Path or None): Location of the build directory
+        """
 
         source_dir = Path(source_dir).resolve()
         if build_dir is None:
