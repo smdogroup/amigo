@@ -900,7 +900,8 @@ AMIGO_DEVICE inline void atomicMinT(double* addr, double val) {
 template <typename T>
 AMIGO_KERNEL void compute_complementarity_pairs_kernel(
     const OptInfo<T> info, const OptStateData<const T> pt,
-    T* __restrict__ partial_sum_global, T* __restrict__ local_min_global) {
+    T* __restrict__ partial_sum_global, T* __restrict__ local_min_global,
+    const T max_init) {
   extern __shared__ unsigned char shmem_raw[];
   T* sh_sum0 = reinterpret_cast<T*>(shmem_raw);
   T* sh_sum1 = sh_sum0 + blockDim.x;
@@ -913,7 +914,7 @@ AMIGO_KERNEL void compute_complementarity_pairs_kernel(
   // Per-thread accumulators
   T sum0 = T(0);
   T sum1 = T(0);
-  T lmin = std::numeric_limits<T>::max();
+  T lmin = max_init;
 
   // Loop over variables
   for (int i = gid; i < info.num_variables; i += stride) {
@@ -995,10 +996,10 @@ void compute_complementarity_pairs_cuda(const OptInfo<T>& info,
       cudaMemcpy(d_local_min, &local_min, sizeof(T), cudaMemcpyHostToDevice));
 
   // shared memory: 3 arrays of size blockDim.x
-  size_t shmem_bytes = 3 * threads * sizeof(T);
+  size_t shmem_bytes = 3 * TPB * sizeof(T);
 
-  compute_complementarity_pairs_kernel<T><<<blocks, threads, shmem_bytes>>>(
-      info_dev, pt_dev, d_partial_sum, d_local_min);
+  compute_complementarity_pairs_kernel<T><<<blocks, TPB, shmem_bytes>>>(
+      info, pt, d_partial_sum, d_local_min, std::numeric_limits<T>::max());
 
   // copy results back
   AMIGO_CHECK_CUDA(cudaMemcpy(partial_sum, d_partial_sum, 2 * sizeof(T),
@@ -1068,6 +1069,10 @@ template void compute_affine_start_point_cuda<double>(
     OptStateData<const double>& pt, OptStateData<const double>& up,
     OptStateData<double>& tmp, cudaStream_t stream);
 
+template void compute_complementarity_pairs_cuda<double>(
+    const OptInfo<double>& info, const OptStateData<const double>& pt,
+    double partial_sum[], double& local_min);
+
 /**
  *  Explicit instantiations for T = float
  */
@@ -1121,6 +1126,10 @@ template void compute_affine_start_point_cuda<float>(
     float beta_min, const OptInfo<float>& info, OptStateData<const float>& pt,
     OptStateData<const float>& up, OptStateData<float>& tmp,
     cudaStream_t stream);
+
+template void compute_complementarity_pairs_cuda<float>(
+    const OptInfo<float>& info, const OptStateData<const float>& pt,
+    float partial_sum[], float& local_min);
 
 }  // namespace detail
 

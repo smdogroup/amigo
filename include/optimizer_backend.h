@@ -687,6 +687,11 @@ void compute_affine_start_point_cuda(T beta_min, const OptInfo<T>& info,
                                      OptStateData<const T>& up,
                                      OptStateData<T>& tmp,
                                      cudaStream_t stream = 0);
+
+template <typename T>
+void compute_complementarity_pairs_cuda(const OptInfo<T>& info,
+                                        const OptStateData<const T>& pt,
+                                        T partial_sum[], T& local_min);
 #endif
 
 }  // namespace detail
