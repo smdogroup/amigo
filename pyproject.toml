@@ -2,7 +2,6 @@
 requires = [
   "scikit-build-core>=0.7",
   "pybind11>=2.12",
-  "ninja>=1.11",
   "mpi4py>=3.1"
 ]
 build-backend = "scikit_build_core.build"

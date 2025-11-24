@@ -9,7 +9,6 @@ typedef SSIZE_T ssize_t;
 #endif
 
 #include "alias_tracker.h"
-#include "amigo_include_paths.h"
 #include "csr_matrix.h"
 #include "external_component.h"
 #include "optimization_problem.h"
@@ -272,9 +271,6 @@ PYBIND11_MODULE(amigo, mod) {
 #else
   constexpr amigo::ExecPolicy policy = amigo::ExecPolicy::SERIAL;
 #endif
-
-  mod.attr("A2D_INCLUDE_PATH") = A2D_INCLUDE_PATH;
-  mod.attr("AMIGO_INCLUDE_PATH") = AMIGO_INCLUDE_PATH;
 
   py::enum_<amigo::OrderingType>(mod, "OrderingType")
       .value("NESTED_DISSECTION", amigo::OrderingType::NESTED_DISSECTION)

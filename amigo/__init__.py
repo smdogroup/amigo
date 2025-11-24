@@ -22,15 +22,3 @@ from .interfaces import (
     ExplicitOpenMDAOPostOptComponent,
     AmigoIndepVarComp,
 )
-
-
-def get_include():
-    from .amigo import AMIGO_INCLUDE_PATH
-
-    return AMIGO_INCLUDE_PATH
-
-
-def get_a2d_include():
-    from .amigo import A2D_INCLUDE_PATH
-
-    return A2D_INCLUDE_PATH

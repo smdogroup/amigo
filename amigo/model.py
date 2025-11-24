@@ -15,8 +15,6 @@ from .amigo import (
     OptimizationProblem,
     AliasTracker,
     NodeOwners,
-    AMIGO_INCLUDE_PATH,
-    A2D_INCLUDE_PATH,
     CSRMat,
     ExternalComponentGroup,
 )
@@ -1144,97 +1142,6 @@ amigo_add_python_module(
         p.wait()
 
         return
-
-    def _build_module_setuptools(
-        self, compile_args=[], link_args=[], define_macros=[], debug=False
-    ):
-        """
-        Quick setup for building the extension module. Some care is required with this.
-        """
-        from setuptools import setup, Extension
-        from subprocess import check_output
-        import pybind11
-        import sys
-        import os
-        from pybind11.setup_helpers import Pybind11Extension, build_ext
-
-        def get_mpi_flags():
-            # Windows-specific MPI handling
-            if sys.platform == "win32":
-                # Microsoft MPI SDK paths
-                mpi_sdk_base = r"C:\Program Files (x86)\Microsoft SDKs\MPI"
-                inc_dirs = [os.path.join(mpi_sdk_base, "Include")]
-                lib_dirs = [os.path.join(mpi_sdk_base, "Lib", "x64")]
-                libs = ["msmpi"]  # Microsoft MPI library name
-                return inc_dirs, lib_dirs, libs
-            else:
-                # Unix/Linux/Mac systems - use mpicxx
-                # Split the output from the mpicxx command
-                args = check_output(["mpicxx", "-show"]).decode("utf-8").split()
-
-                # Determine whether the output is an include/link/lib command
-                inc_dirs, lib_dirs, libs = [], [], []
-                for flag in args:
-                    if flag[:2] == "-I":
-                        inc_dirs.append(flag[2:])
-                    elif flag[:2] == "-L":
-                        lib_dirs.append(flag[2:])
-                    elif flag[:2] == "-l":
-                        libs.append(flag[2:])
-
-                return inc_dirs, lib_dirs, libs
-
-        # Append the extra compile args list based on system type (allows for
-        # compilaton on Windows vs. Linux/Mac)
-        if sys.platform == "win32":
-            compile_args += ["/std:c++17", "/permissive-"]
-        else:
-            compile_args += ["-std=c++17"]
-
-        if debug:
-            compile_args += ["-g", "-O0"]
-
-        pybind11_include = pybind11.get_include()
-        amigo_include = AMIGO_INCLUDE_PATH
-        a2d_include = A2D_INCLUDE_PATH
-
-        try:
-            import mpi4py
-
-            inc_dirs, lib_dirs, libs = get_mpi_flags()
-            inc_dirs.append(mpi4py.get_include())
-        except:
-            inc_dirs, lib_dirs, libs = [], [], []
-
-        # Add platform-specific libraries
-        if sys.platform == "win32":
-            openblas_root = r"C:\libs\openblas"
-            inc_dirs += [os.path.join(openblas_root, "include")]
-            lib_dirs += [os.path.join(openblas_root, "lib")]
-            libs += ["openblas"]
-
-        # Create the Extension
-        all_inc_dirs = inc_dirs + [pybind11_include, amigo_include, a2d_include]
-        ext_modules = [
-            Extension(
-                self.module_name,
-                sources=[f"{self.module_name}.cpp"],
-                depends=[f"{self.module_name}.h"],
-                include_dirs=all_inc_dirs,
-                libraries=libs,
-                library_dirs=lib_dirs,
-                extra_compile_args=compile_args,
-                extra_link_args=link_args,
-                define_macros=define_macros,
-            )
-        ]
-
-        setup(
-            name=f"{self.module_name}",
-            ext_modules=ext_modules,
-            script_args=["build_ext", "--inplace"],
-            include_dirs=[amigo_include, pybind11_include, a2d_include],
-        )
 
     def _build_tree_data(self, tree, name):
         subtree = {
