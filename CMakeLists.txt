@@ -18,6 +18,14 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+# Enable alternative operator keywords (and, or, not) for MSVC
+if(MSVC)
+  add_compile_options(/permissive-)
+endif()
+
+# Find Python early (needed for Windows auto-detection)
+find_package(Python3 REQUIRED COMPONENTS Development.Module Interpreter)
+
 # Look for CUDA if enabled
 if(AMIGO_ENABLE_CUDA)
   enable_language(CUDA)
@@ -27,7 +35,38 @@ if(AMIGO_ENABLE_CUDA)
   endif()
 endif()
 
-# ---------- Dependencies ----------
+#Windows-specific setup:
+if(WIN32)
+  # Auto-detect MKL in Python venv if BLAS/LAPACK not manually specified
+  if(NOT DEFINED BLAS_LIBRARIES OR NOT DEFINED LAPACK_LIBRARIES)
+    execute_process(
+      COMMAND "${Python3_EXECUTABLE}" -c "import os, sys; print(os.path.join(sys.prefix, 'Library'))"
+      OUTPUT_VARIABLE VENV_LIBRARY_PATH
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+      RESULT_VARIABLE VENV_RESULT
+    )
+    
+    if(VENV_RESULT EQUAL 0 AND EXISTS "${VENV_LIBRARY_PATH}/lib/mkl_rt.lib")
+      message(STATUS "Found MKL in venv: ${VENV_LIBRARY_PATH}")
+      set(BLAS_LIBRARIES "${VENV_LIBRARY_PATH}/lib/mkl_rt.lib" CACHE FILEPATH "BLAS library")
+      set(LAPACK_LIBRARIES "${VENV_LIBRARY_PATH}/lib/mkl_rt.lib" CACHE FILEPATH "LAPACK library")
+      list(APPEND CMAKE_PREFIX_PATH "${VENV_LIBRARY_PATH}")
+      set(BLA_VENDOR Intel10_64lp)
+    endif()
+  endif()
+  
+  # Auto-detect MS-MPI if not manually specified
+  if(NOT DEFINED MPI_CXX_INCLUDE_PATH OR NOT DEFINED MPI_CXX_LIBRARIES)
+    set(MSMPI_SDK_PATH "C:/Program Files (x86)/Microsoft SDKs/MPI")
+    if(EXISTS "${MSMPI_SDK_PATH}/Include/mpi.h")
+      message(STATUS "Found MS-MPI SDK: ${MSMPI_SDK_PATH}")
+      set(MPI_CXX_INCLUDE_PATH "${MSMPI_SDK_PATH}/Include" CACHE PATH "MPI include path")
+      set(MPI_CXX_LIBRARIES "${MSMPI_SDK_PATH}/Lib/x64/msmpi.lib" CACHE FILEPATH "MPI library")
+    endif()
+  endif()
+endif()
+
+# Dependencies:
 # Ask CMake to locate BLAS and LAPACK.
 find_package(BLAS REQUIRED)
 find_package(LAPACK REQUIRED)
@@ -46,8 +85,7 @@ if(AMIGO_ENABLE_OPENMP)
   endif()
 endif()
 
-# Python / pybind11 for the extension module
-find_package(Python3 REQUIRED COMPONENTS Development.Module Interpreter)
+# pybind11 for the extension module (Python3 already found earlier)
 find_package(pybind11 CONFIG REQUIRED)
 
 # Find mpi4py header file
