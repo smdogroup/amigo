@@ -9,10 +9,10 @@ const config: Config = {
   tagline: 'A friendly library for MDO on HPC',
   favicon: 'img/favicon.ico',
 
-  url: 'https://gjkennedy.github.io',
+  url: 'https://smdogroup.github.io',
   baseUrl: '/amigo/',
 
-  organizationName: 'gjkennedy', 
+  organizationName: 'smdogroup', 
   projectName: 'amigo',
 
   onBrokenLinks: 'warn',
@@ -76,7 +76,7 @@ const config: Config = {
           position: 'left',
         },
         {
-          href: 'https://github.com/gjkennedy/amigo',
+          href: 'https://github.com/smdogroup/amigo',
           label: 'Github',
           position: 'left',
         },
