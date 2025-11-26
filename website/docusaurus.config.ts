@@ -35,7 +35,7 @@ const config: Config = {
         },
         blog: {
           showReadingTime: true,
-          editUrl: 'https://github.com/your-org/amigo/tree/main/website/',
+          editUrl: undefined,
         },
         theme: {
           customCss: ['./src/css/fonts.css', './src/css/custom.css'],
@@ -76,12 +76,7 @@ const config: Config = {
           position: 'left',
         },
         {
-          to: '/docs/getting-started/citing',
-          label: 'Citing',
-          position: 'left',
-        },
-        {
-          href: 'https://github.com/your-org/amigo',
+          href: 'https://github.com/gjkennedy/amigo',
           label: 'Github',
           position: 'left',
         },

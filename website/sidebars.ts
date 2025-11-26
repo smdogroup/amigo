@@ -41,9 +41,7 @@ const sidebars: SidebarsConfig = {
       label: 'Examples Gallery',
       items: [
         'examples/overview',
-        'examples/optimization',
-        'examples/optimal-control',
-        'examples/multidisciplinary',
+        'examples/brachistochrone',
       ],
     },
     {
@@ -54,16 +52,6 @@ const sidebars: SidebarsConfig = {
         'api/component',
         'api/model',
         'api/optimizer',
-        'api/external-component',
-      ],
-    },
-    {
-      type: 'category',
-      label: 'Developers',
-      items: [
-        'developers/architecture',
-        'developers/contributing',
-        'developers/testing',
       ],
     },
   ],

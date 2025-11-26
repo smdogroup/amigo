@@ -123,17 +123,4 @@ class Rosenbrock(am.Component):
         self.constraints["con"] = x1**2 + x2**2 - 1.0
 ```
 
-## Component Applications
-
-Components can represent various types of analysis:
-
-- **Optimization problems**: Simple objective functions with constraints
-- **System dynamics**: Differential equations for optimal control
-- **Structural analysis**: Finite element models, stress calculations
-- **Aerodynamic analysis**: Lift, drag computations
-- **Thermal analysis**: Heat transfer models
-- **Coupling**: Interface models between disciplines
-- **Boundary conditions**: Initial/final conditions for trajectories
-
-The component-based design enables modular, reusable code that scales from simple problems to complex multidisciplinary systems.
 

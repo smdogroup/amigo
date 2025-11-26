@@ -36,7 +36,8 @@ options = {
     'print_level': 5,
 }
 
-opt.optimize(options)
+opt.set_options(options)
+opt.optimize()
 ```
 
 Common options include:
@@ -95,42 +96,11 @@ f_opt = model.get_objective("comp.f")
 print(f"Solution: x = {x_opt:.6f}, f(x) = {f_opt:.6f}")
 ```
 
-## Convergence Monitoring
-
-Check optimization status and convergence:
-
-```python
-# Optimize with custom options
-result = opt.optimize({'print_level': 5})
-
-# Check if converged
-if result.success:
-    print("Optimization converged!")
-else:
-    print(f"Optimization failed: {result.message}")
-```
-
 :::tip
 
 Set `print_level: 5` to see detailed iteration output during optimization.
 
 :::
 
-## Advanced Configuration
-
-For more control over the optimization process, you can specify solver-specific options:
-
-```python
-ipopt_options = {
-    'tol': 1e-7,
-    'max_iter': 1000,
-    'linear_solver': 'mumps',
-    'mu_strategy': 'adaptive',
-    'hessian_approximation': 'limited-memory',
-}
-
-opt.optimize(ipopt_options)
-```
-
-See the [Optimizer API documentation](../api/optimizer.md) for complete details.
+See the [Optimizer API documentation](../api/optimizer.md) for complete details on configuration options.
 
