@@ -342,8 +342,9 @@ class ConstantSet:
         lines = []
         for name in self.consts:
             node = self.consts[name]
+            vtype = _cpp_type_map[node.type]
             lines.append(
-                f"static constexpr {_cpp_type_map[node.type]} {name} = {node.value}"
+                f"inline static constexpr {vtype} {name} = static_cast<{vtype}>({node.value})"
             )
         return lines
 
@@ -668,7 +669,7 @@ class ConstraintSet:
         if obj_expr is None:
             expr = ""
         else:
-            expr = f"{obj_expr}"
+            expr = f"alpha__ * ({obj_expr})"
 
         if len(expr_list) > 0:
             if obj_expr is None:
@@ -1190,21 +1191,27 @@ class Component:
         pre = "  AMIGO_HOST_DEVICE static"
         if mode == "eval":
             cpp += (
-                f"{pre} {template_name} lagrange(Data<{template_name}>& {data_name}, "
-                + f"Input<{template_name}>& {input_name})"
-                + " {\n"
+                f"{pre} {template_name} lagrange({template_name} alpha__, "
+                + f"Data<{template_name}>& {data_name}, "
+                + f"Input<{template_name}>& {input_name}) "
+                + "{\n"
             )
         elif mode == "rev":
             cpp += (
-                f"{pre} void gradient(Data<{template_name}>& {data_name}, "
-                + f"Input<{template_name}>& {input_name}, Input<{template_name}>& {grad_name})"
+                f"{pre} void gradient({template_name} alpha__, "
+                + f"Data<{template_name}>& {data_name}, "
+                + f"Input<{template_name}>& {input_name}, "
+                + f"Input<{template_name}>& {grad_name})"
                 + " {\n"
             )
         elif mode == "hprod":
             cpp += (
-                f"{pre} void hessian(Data<{template_name}>& {data_name}, "
-                f"Input<{template_name}>& {input_name}, Input<{template_name}>& {prod_name}, "
-                f"Input<{template_name}>& {grad_name}, Input<{template_name}>& {hprod_name})"
+                f"{pre} void hessian({template_name} alpha__, "
+                + f"Data<{template_name}>& {data_name}, "
+                + f"Input<{template_name}>& {input_name}, "
+                + f"Input<{template_name}>& {prod_name}, "
+                + f"Input<{template_name}>& {grad_name}, "
+                + f"Input<{template_name}>& {hprod_name})"
                 + " {\n"
             )
 
@@ -1359,7 +1366,7 @@ class Component:
         # Collect all the group members together...
         group_type = "ComponentGroup"
 
-        cls = f"amigo::{group_type}<double"
+        cls = f"amigo::{group_type}<double, policy"
         for index, args in enumerate(self.args):
             if len(self.args) == 1:
                 class_name = self.name + "__"
@@ -1370,7 +1377,7 @@ class Component:
         cls += ">"
 
         module_class_name = f'"{self.name}"'
-        cpp = f"py::class_<{cls}, amigo::{group_type}Base<double>, std::shared_ptr<{cls}>>"
+        cpp = f"py::class_<{cls}, amigo::{group_type}Base<double, policy>, std::shared_ptr<{cls}>>"
         cpp += f"({mod_ident}, {module_class_name}).def("
 
         vec_cls = "std::shared_ptr<amigo::Vector<int>>"

@@ -9,7 +9,22 @@ namespace amigo {
  * @brief Store the node to processor assignments and the implicit mapping from
  * the local indices to the global indices
  *
- * The global node numbers on each processor are mapped to local indices.
+ * The global node numbers on each processor are mapped to local indices through
+ * the ext_nodes array. This is an array of sorted global node numbers. The
+ * local nodes on a processor are 0 <= node <= num_owned_nodes + num_ext_nodes,
+ * where
+ *
+ * num_owned_nodes = range[mpi_rank + 1] - range[mpi_rank],
+ *
+ * and num_ext_nodes is passed as an argument to NodeOwners.
+ *
+ * The mapping from the local node numbers corresponding global node numbers is:
+ *
+ * if 0 <= local_node <= num_owned_nodes
+ *    global_node = range[mpi_rank] + local_node
+ * else:
+ *    global_node = ext_nodes[local_node - num_owned_nodes]
+ *
  */
 class NodeOwners {
  public:

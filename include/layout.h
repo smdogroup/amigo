@@ -22,8 +22,9 @@ class IndexLayout {
   void get_values(int index, const Vector<T>& vec, ArrayType& values) const {
     const int* indx = indices->get_array();
     const T* vec_values = vec.get_array();
+    const int base = nodes_per_elem * index;
     for (int i = 0; i < nodes_per_elem; i++) {
-      values[i] = vec_values[indx[nodes_per_elem * index + i]];
+      values[i] = vec_values[indx[base + i]];
     }
   }
 
@@ -31,25 +32,83 @@ class IndexLayout {
   void add_values(int index, const ArrayType& values, Vector<T>& vec) const {
     const int* indx = indices->get_array();
     T* vec_values = vec.get_array();
+    const int base = nodes_per_elem * index;
     for (int i = 0; i < nodes_per_elem; i++) {
-      vec_values[indx[nodes_per_elem * index + i]] += values[i];
+      vec_values[indx[base + i]] += values[i];
     }
   }
 
   template <class ArrayType>
   void get_indices(int index, ArrayType& idx) const {
     const int* indx = indices->get_array();
+    const int base = nodes_per_elem * index;
     for (int i = 0; i < nodes_per_elem; i++) {
-      idx[i] = indx[nodes_per_elem * index + i];
+      idx[i] = indx[base + i];
     }
   }
 
   void get_data(int* num_elements_, int* nodes_per_elem_,
                 const int** array_) const {
-    *num_elements_ = num_elements;
-    *nodes_per_elem_ = nodes_per_elem;
-    *array_ = indices->get_array();
+    if (num_elements_) {
+      *num_elements_ = num_elements;
+    }
+    if (nodes_per_elem_) {
+      *nodes_per_elem_ = nodes_per_elem;
+    }
+    if (array_) {
+      *array_ = indices->get_array();
+    }
   }
+
+  void copy_host_to_device() { indices->copy_host_to_device(); }
+
+  void get_device_data(int* num_elements_, int* nodes_per_elem_,
+                       const int** array_) const {
+    if (num_elements_) {
+      *num_elements_ = num_elements;
+    }
+    if (nodes_per_elem_) {
+      *nodes_per_elem_ = nodes_per_elem;
+    }
+    if (array_) {
+      *array_ = indices->get_device_array();
+    }
+  }
+
+#ifdef AMIGO_USE_CUDA
+  template <typename T, class ArrayType>
+  static AMIGO_DEVICE void get_values_device(int index, const int* indx,
+                                             const T* AMIGO_RESTRICT global,
+                                             ArrayType& values) {
+    const int base = nodes_per_elem * index;
+#pragma unroll
+    for (int i = 0; i < nodes_per_elem; i++) {
+      values[i] = global[indx[base + i]];
+    }
+  }
+
+  template <typename T, class ArrayType>
+  static AMIGO_DEVICE void add_values_atomic(int index, const int* indx,
+                                             const ArrayType& values,
+                                             T* AMIGO_RESTRICT global) {
+    const int base = nodes_per_elem * index;
+#pragma unroll
+    for (int i = 0; i < nodes_per_elem; i++) {
+      atomicAdd(&global[indx[base + i]], values[i]);
+    }
+  }
+
+  template <typename T, class ArrayType>
+  static AMIGO_DEVICE void add_values(int index, const int* indx,
+                                      const ArrayType& values,
+                                      T* AMIGO_RESTRICT global) {
+    const int base = nodes_per_elem * index;
+#pragma unroll
+    for (int i = 0; i < nodes_per_elem; i++) {
+      global[indx[base + i]] += values[i];
+    }
+  }
+#endif
 
   /**
    * @brief Reorder the indices of this layout so that it is consistent with the

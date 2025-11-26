@@ -288,13 +288,6 @@ parser.add_argument(
     "--build", dest="build", action="store_true", default=False, help="Enable building"
 )
 parser.add_argument(
-    "--with-openmp",
-    dest="use_openmp",
-    action="store_true",
-    default=False,
-    help="Enable OpenMP",
-)
-parser.add_argument(
     "--order-type",
     choices=["amd", "nd", "natural"],
     default="nd",
@@ -405,17 +398,7 @@ model.link("src.u_res", "load.u_res", src_indices=nodes[-1, 0])
 model.link("src.v_res", "load.v_res", src_indices=nodes[-1, 0])
 
 if args.build:
-    compile_args = []
-    link_args = ["-lblas", "-llapack"]
-    define_macros = []
-    if args.use_openmp:
-        compile_args = ["-fopenmp"]
-        link_args += ["-fopenmp"]
-        define_macros = [("AMIGO_USE_OPENMP", "1")]
-
-    model.build_module(
-        compile_args=compile_args, link_args=link_args, define_macros=define_macros
-    )
+    model.build_module()
 
 start = time.perf_counter()
 

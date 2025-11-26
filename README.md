@@ -2,9 +2,33 @@
 
 Amigo is a python library that is designed for solving multidisciplinary analysis and optimization problems with high-performance computing resources through automatically generated c++ wrappers. 
 
-All application code is written in python and automatically compiled to c++. Automatic differentiation is used throughout to evaluate first and second derivatives using A2D. Different backend implementations are used depending on the computational environment: Serial, OpenMP and MPI are supported (a CUDA implementation for Nvidia GPUs is under development). The user python code and the model construction is independent of the target backend.
+All application code is written in python and automatically compiled to c++. Automatic differentiation is used throughout to evaluate first and second derivatives using A2D. Different backend implementations are used depending on the computational environment: Serial, OpenMP, MPI and CUDA implementations can be used. The user python code and the model construction is independent of the target backend.
 
 Integration with other MDO libraries is key for flexibility. Amigo contains interfaces to inject OpenMDAO models into Amigo models using `amigo.ExternalComponent`. Alternatively, Amigo can be used as a sub-optimization OpenMDAO component with accurate post-optimality derivatives.
+
+## Installing amigo
+
+Amigo uses CMake and scikit-build to build the primary amigo module and all model modules that comprise a multidisciplinary model.
+
+To build and install the primary amigo module and its python wrappers, you can build the module with
+
+```
+pip install -e .
+```
+
+By default the OpenMP and CUDA parallelization are turned off. You can turn on or off these modules with additional command line arguments to pip. To enable CUDA and disable OpenMP, you can use
+
+```
+pip install -e . -v \
+    -Ccmake.args="-DCMAKE_CXX_COMPILER=mpicxx" \
+    -Ccmake.args="-DAMIGO_ENABLE_OPENMP=OFF" \
+    -Ccmake.args="-DAMIGO_ENABLE_CUDA=ON" \
+    -Ccmake.args="-DCMAKE_CUDA_ARCHITECTURES=native"
+```
+
+Note that you cannot enable both CUDA and OpenMP at the same time. 
+
+Amigo model modules inherit the build options that are selected during the install phase.
 
 ## Rosenbrock example
 

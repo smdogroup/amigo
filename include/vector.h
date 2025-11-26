@@ -6,6 +6,10 @@
 
 #include "amigo.h"
 
+#ifdef AMIGO_USE_CUDA
+#include "cuda/vector_backend.cuh"
+#endif
+
 namespace amigo {
 
 template <typename T>
@@ -15,117 +19,41 @@ class SerialVecBackend {
   ~SerialVecBackend() {}
 
   void allocate(int size_) {}
-  void copy_to_host(T* host_dest) {}
-  void copy_to_device(T* host_src) {}
+  void copy_host_to_device(T* h_dest) {}
+  void copy_device_to_host(T* h_src) {}
+  void copy(const T* d_src) {}
+  T dot(const T* d_ptr) const { return T(0); }
+  void axpy(T alpha, const T* d_x) const {}
+  void scale(T alpha) {}
+  void zero() {}
   T* get_device_ptr() { return nullptr; }
   const T* get_device_ptr() const { return nullptr; }
-
-  // Kernel functions
-  void axpy_kernel(T alpha, const T* x_device_ptr) {}
 };
 
 #ifdef AMIGO_USE_CUDA
-
 template <typename T>
-AMIGO_KERNEL void zero_kernel(int size, T* x) {
-  int i = blockIdx.x * blockDim.x + threadIdx.x;
-  if (i < size) {
-    x[i] = 0.0;
-  }
-}
-
-template <typename T>
-AMIGO_KERNEL void axpy_kernel(int size, T alpha, const T* x, T* y) {
-  int i = blockIdx.x * blockDim.x + threadIdx.x;
-  if (i < size) {
-    y[i] = y[i] + alpha * x[i];
-  }
-}
-
-template <typename T>
-AMIGO_KERNEL T dot_kernel(int size, T* x, T* y) {
-  T value = 0.0;
-  int i = blockIdx.x * blockDim.x + threadIdx.x;
-  if (i < size) {
-    value += x[i] * y[i];
-  }
-  return value;
-}
-
-template <typename T>
-AMIGO_KERNEL void scale_kernel(int size, T alpha, T* x) {
-  int i = blockIdx.x * blockDim.x + threadIdx.x;
-  if (i < size) {
-    x[i] *= alpha;
-  }
-}
-
-template <typename T>
-class CudaBackend {
- public:
-  GpuVecBackend() : size(0), device_ptr(nullptr) {}
-  ~GpuVecBackend() {
-    if (device_ptr) {
-      cudaFree(device_ptr);
-    }
-  }
-
-  void allocate(int size_) {
-    if (device_ptr) {
-      cudaFree(device_ptr);
-    }
-    size = size_;
-    cudaMalloc(&device_ptr, size);
-  }
-
-  void copy_host_to_device(T* host_ptr) {
-    cudaMemcpy(device_ptr, host_ptr, size, cudaMemcpyHostToDevice);
-  }
-
-  void copy_device_to_host(T* host_ptr) {
-    cudaMemcpy(host_ptr, device_ptr, size, cudaMemcpyDeviceToHost);
-  }
-
-  T* get_device_ptr() { return device_ptr; }
-  const T* get_device_ptr() const { return device_ptr; }
-
-  // Launch vector-specific kernels
-  void axpy_kernel(T alpha, const T* x_device_ptr) {
-    int blockSize = 256;
-    int numBlocks = (N + blockSize - 1) / blockSize;
-    axpy_kernel<<<numBlocks, blockSize>>>(size, x_device_ptr, device_ptr);
-  }
-
- private:
-  int size;
-  T* device_ptr;
-};
-
-template <typename T>
-using DefaultVecBackend = CudaBackend<T>;
+using DefaultVecBackend = CudaVecBackend<T>;
 #else
 template <typename T>
 using DefaultVecBackend = SerialVecBackend<T>;
 #endif  // AMIGO_USE_CUDA
 
-enum class VectorLocation { HOST_ONLY, DEVICE_ONLY, HOST_AND_DEVICE };
-
 template <typename T, class Backend = DefaultVecBackend<T>>
 class Vector {
  public:
   Vector(int local_size, int ext_size = 0,
-         VectorLocation vtype = VectorLocation::HOST_AND_DEVICE)
+         MemoryLocation mem_loc = MemoryLocation::HOST_AND_DEVICE)
       : local_size(local_size),
         ext_size(ext_size),
         size(local_size + ext_size),
-        vtype(vtype) {
-    if (vtype == VectorLocation::HOST_AND_DEVICE ||
-        vtype == VectorLocation::HOST_ONLY) {
+        mem_loc(mem_loc) {
+    if (mem_loc == MemoryLocation::HOST_AND_DEVICE ||
+        mem_loc == MemoryLocation::HOST_ONLY) {
       array = new T[size];
       std::fill(array, array + size, T(0.0));
     }
-    if (vtype == VectorLocation::HOST_AND_DEVICE ||
-        vtype == VectorLocation::DEVICE_ONLY) {
+    if (mem_loc == MemoryLocation::HOST_AND_DEVICE ||
+        mem_loc == MemoryLocation::DEVICE_ONLY) {
       backend.allocate(size);
     }
   }
@@ -133,7 +61,7 @@ class Vector {
       : local_size(local_size),
         ext_size(ext_size),
         size(local_size + ext_size),
-        vtype(VectorLocation::HOST_ONLY) {
+        mem_loc(MemoryLocation::HOST_ONLY) {
     array = *array_;
     *array_ = nullptr;
   }
@@ -144,24 +72,16 @@ class Vector {
     }
   }
 
-  void copy_host_to_device() {
-    if (vtype == VectorLocation::HOST_ONLY) {
-      backend.allocate(size);
-      vtype = VectorLocation::HOST_AND_DEVICE;
-    }
+  MemoryLocation get_memory_location() const { return mem_loc; }
 
-    if (vtype == VectorLocation::HOST_AND_DEVICE) {
+  void copy_host_to_device() {
+    if (mem_loc == MemoryLocation::HOST_AND_DEVICE) {
       backend.copy_host_to_device(array);
     }
   }
 
   void copy_device_to_host() {
-    if (vtype == VectorLocation::DEVICE_ONLY) {
-      array = new T[size];
-      vtype = VectorLocation::HOST_AND_DEVICE;
-    }
-
-    if (vtype == VectorLocation::HOST_AND_DEVICE) {
+    if (mem_loc == MemoryLocation::HOST_AND_DEVICE) {
       backend.copy_device_to_host(array);
     }
   }
@@ -173,15 +93,17 @@ class Vector {
   }
 
   void copy(const Vector<T>& src) {
-    if (array) {
+    if (array && src.array) {
       std::copy(src.array, src.array + size, array);
     }
+    backend.copy(src.get_device_array());
   }
 
   void zero() {
     if (array) {
       std::fill(array, array + size, T(0.0));
     }
+    backend.zero();
   }
 
   void set_random(T low = -1.0, T high = 1.0) {
@@ -196,29 +118,62 @@ class Vector {
     }
   }
 
+  template <ExecPolicy policy>
   void axpy(T alpha, const Vector<T>& x) {
-    if (array && x.array) {
+    if constexpr (policy == ExecPolicy::SERIAL ||
+                  policy == ExecPolicy::OPENMP) {
       for (int i = 0; i < local_size; i++) {
         array[i] += alpha * x.array[i];
       }
+    } else {
+      backend.axpy(alpha, x.get_device_array());
     }
   }
 
+  template <ExecPolicy policy>
   T dot(const Vector<T>& x) const {
-    T value = 0.0;
-    if (array && x.array) {
-      for (int i = 0; i < local_size; i++) {
-        value += array[i] * x.array[i];
+    if constexpr (policy == ExecPolicy::SERIAL ||
+                  policy == ExecPolicy::OPENMP) {
+      T value = 0.0;
+      if (array && x.array) {
+        for (int i = 0; i < local_size; i++) {
+          value += array[i] * x.array[i];
+        }
       }
+      return value;
+    } else {
+      return backend.dot(x.get_device_array());
     }
-    return value;
   }
 
+  template <ExecPolicy policy>
   void scale(T alpha) {
-    if (array) {
+    if constexpr (policy == ExecPolicy::SERIAL ||
+                  policy == ExecPolicy::OPENMP) {
       for (int i = 0; i < size; i++) {
         array[i] *= alpha;
       }
+    } else {
+      backend.scale(alpha);
+    }
+  }
+
+  template <ExecPolicy policy>
+  T* get_array() {
+    if constexpr (policy == ExecPolicy::SERIAL ||
+                  policy == ExecPolicy::OPENMP) {
+      return array;
+    } else {
+      return backend.get_device_ptr();
+    }
+  }
+  template <ExecPolicy policy>
+  const T* get_array() const {
+    if constexpr (policy == ExecPolicy::SERIAL ||
+                  policy == ExecPolicy::OPENMP) {
+      return array;
+    } else {
+      return backend.get_device_ptr();
     }
   }
 
@@ -237,8 +192,10 @@ class Vector {
   int local_size;  // The locally owned nodes
   int ext_size;    // Size of externally owned nodes referenced on this proc
   int size;        // Total size of the vector
-  VectorLocation vtype;
-  T* array;  // Host array
+  MemoryLocation mem_loc;  // Location of the data
+  T* array;                // Host array
+
+  // Backend for the GPU implementation
   Backend backend;
 };
 

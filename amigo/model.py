@@ -2,21 +2,24 @@ import numpy as np
 import ast
 import sys
 import importlib
+import subprocess
+from pathlib import Path
+from scipy.sparse import spmatrix
+import pybind11
+import networkx as nx
 from .amigo import (
     OrderingType,
+    MemoryLocation,
     reorder_model,
     VectorInt,
     OptimizationProblem,
     AliasTracker,
     NodeOwners,
-    AMIGO_INCLUDE_PATH,
-    A2D_INCLUDE_PATH,
     CSRMat,
     ExternalComponentGroup,
 )
+from .cmake_helper import get_cmake_dir
 from .component import Component
-from scipy.sparse import spmatrix
-import networkx as nx
 
 try:
     from mpi4py.MPI import COMM_WORLD
@@ -949,13 +952,24 @@ class Model:
 
         return x
 
+    def _guess_source_dir(self):
+        """Make a guess for the source directory"""
+
+        for name in self.comp:
+            cls = self.comp[name].comp_obj
+            module = sys.modules[cls.__module__]
+            source = getattr(module, "__file__", None)
+
+            if source is not None:
+                return Path(source).resolve().parent
+
+        return None
+
     def build_module(
         self,
         comm=COMM_WORLD,
-        compile_args=[],
-        link_args=[],
-        define_macros=[],
-        debug=False,
+        source_dir: str | Path | None = None,
+        build_dir: str | Path | None = None,
     ):
         """
         Generate the model code and build it. Additional compile, link arguments and macros can be added here.
@@ -966,20 +980,18 @@ class Model:
             comm_rank = comm.rank
 
         if comm_rank == 0:
-            self._generate_cpp()
-            self._build_module(
-                compile_args=compile_args,
-                link_args=link_args,
-                define_macros=define_macros,
-                debug=debug,
-            )
+            if source_dir is None:
+                source_dir = self._guess_source_dir()
+
+            self.generate_cpp()
+            self._build_module(source_dir=source_dir, build_dir=build_dir)
 
         if comm is not None:
             comm.Barrier()
 
         return
 
-    def _generate_cpp(self):
+    def generate_cpp(self):
         """
         Generate the C++ header and pybind11 wrapper for the model.
 
@@ -990,7 +1002,8 @@ class Model:
         """
 
         # C++ file contents
-        cpp = '#include "a2dcore.h"\n'
+        cpp = '#include "amigo.h"\n'
+        cpp += '#include "a2dcore.h"\n'
         cpp += "namespace amigo {"
 
         # pybind11 file contents
@@ -1003,6 +1016,13 @@ class Model:
 
         mod_ident = "mod"
         py11 += f"PYBIND11_MODULE({self.module_name}, {mod_ident}) " + "{\n"
+        py11 += "#ifdef AMIGO_USE_OPENMP\n"
+        py11 += "  constexpr amigo::ExecPolicy policy = amigo::ExecPolicy::OPENMP;\n"
+        py11 += "#elif defined(AMIGO_USE_CUDA)\n"
+        py11 += "  constexpr amigo::ExecPolicy policy = amigo::ExecPolicy::CUDA;\n"
+        py11 += "#else\n"
+        py11 += "  constexpr amigo::ExecPolicy policy = amigo::ExecPolicy::SERIAL;\n"
+        py11 += "#endif\n"
 
         # Write out the classes needed - class names must be unique
         # so we don't duplicate code
@@ -1039,95 +1059,95 @@ class Model:
         return
 
     def _build_module(
-        self, compile_args=[], link_args=[], define_macros=[], debug=False
+        self, source_dir: str | Path, build_dir: str | Path | None = None
     ):
         """
-        Quick setup for building the extension module. Some care is required with this.
+        Build an extension module, utilizing the specified source and build directories.
+        If no build directory is specified, place it in source_dir/_amigo_build.
+
+        Args:
+            source_dir (str or Path): Location of the source for the module
+            build_dir (str, Path or None): Location of the build directory
         """
-        from setuptools import setup, Extension
-        from subprocess import check_output
-        import pybind11
-        import sys
-        import os
-        from pybind11.setup_helpers import Pybind11Extension, build_ext
 
-        def get_mpi_flags():
-            # Windows-specific MPI handling
-            if sys.platform == "win32":
-                # Microsoft MPI SDK paths
-                mpi_sdk_base = r"C:\Program Files (x86)\Microsoft SDKs\MPI"
-                inc_dirs = [os.path.join(mpi_sdk_base, "Include")]
-                lib_dirs = [os.path.join(mpi_sdk_base, "Lib", "x64")]
-                libs = ["msmpi"]  # Microsoft MPI library name
-                return inc_dirs, lib_dirs, libs
-            else:
-                # Unix/Linux/Mac systems - use mpicxx
-                # Split the output from the mpicxx command
-                args = check_output(["mpicxx", "-show"]).decode("utf-8").split()
+        source_dir = Path(source_dir).resolve()
+        if build_dir is None:
+            build_dir = source_dir / "_amigo_build"
 
-                # Determine whether the output is an include/link/lib command
-                inc_dirs, lib_dirs, libs = [], [], []
-                for flag in args:
-                    if flag[:2] == "-I":
-                        inc_dirs.append(flag[2:])
-                    elif flag[:2] == "-L":
-                        lib_dirs.append(flag[2:])
-                    elif flag[:2] == "-l":
-                        libs.append(flag[2:])
+        build_dir = build_dir.resolve()
+        build_dir.mkdir(parents=True, exist_ok=True)
+        cmake_pybind11_dir = pybind11.get_cmake_dir()
 
-                return inc_dirs, lib_dirs, libs
+        # Optionally drop a trivial CMakeLists.txt into the source_dir
+        cmakelists = source_dir / "CMakeLists.txt"
+        cmakelists.write_text(
+            f"""\
+cmake_minimum_required(VERSION 3.25)
+project({self.module_name} LANGUAGES CXX)
 
-        # Append the extra compile args list based on system type (allows for
-        # compilaton on Windows vs. Linux/Mac)
-        if sys.platform == "win32":
-            compile_args += ["/std:c++17", "/permissive-"]
-        else:
-            compile_args += ["-std=c++17"]
+find_package(amigo REQUIRED CONFIG)
 
-        if debug:
-            compile_args += ["-g", "-O0"]
+if(AMIGO_ENABLE_CUDA)
+    enable_language(CUDA) 
+endif()
 
-        pybind11_include = pybind11.get_include()
-        amigo_include = AMIGO_INCLUDE_PATH
-        a2d_include = A2D_INCLUDE_PATH
-
-        try:
-            import mpi4py
-
-            inc_dirs, lib_dirs, libs = get_mpi_flags()
-            inc_dirs.append(mpi4py.get_include())
-        except:
-            inc_dirs, lib_dirs, libs = [], [], []
-
-        # Add platform-specific libraries
-        if sys.platform == "win32":
-            openblas_root = r"C:\libs\openblas"
-            inc_dirs += [os.path.join(openblas_root, "include")]
-            lib_dirs += [os.path.join(openblas_root, "lib")]
-            libs += ["openblas"]
-
-        # Create the Extension
-        all_inc_dirs = inc_dirs + [pybind11_include, amigo_include, a2d_include]
-        ext_modules = [
-            Extension(
-                self.module_name,
-                sources=[f"{self.module_name}.cpp"],
-                depends=[f"{self.module_name}.h"],
-                include_dirs=all_inc_dirs,
-                libraries=libs,
-                library_dirs=lib_dirs,
-                extra_compile_args=compile_args,
-                extra_link_args=link_args,
-                define_macros=define_macros,
-            )
-        ]
-
-        setup(
-            name=f"{self.module_name}",
-            ext_modules=ext_modules,
-            script_args=["build_ext", "--inplace"],
-            include_dirs=[amigo_include, pybind11_include, a2d_include],
+amigo_add_python_module(
+    NAME {self.module_name}
+    SOURCES {self.module_name}.cpp
+)
+"""
         )
+
+        # Locate the installed Amigo CMake package inside the Python package
+        amigo_cmake_dir = get_cmake_dir()
+        print("amigo_cmake_dir = ", amigo_cmake_dir)
+
+        # Cmake command
+        cmake_cmd = [
+            "cmake",
+            "-S",
+            str(source_dir),
+            "-B",
+            str(build_dir),
+            f"-DCMAKE_PREFIX_PATH={amigo_cmake_dir}",
+            f"-DPython3_EXECUTABLE={sys.executable}",
+            f"-Dpybind11_DIR={cmake_pybind11_dir}",
+        ]
+        build_cmd = ["cmake", "--build", str(build_dir), "--config", "Release"]
+
+        print("Running CMake commands from amigo")
+        print(" ".join(cmake_cmd))
+        print(" ".join(build_cmd))
+
+        # Configure
+        p = subprocess.Popen(
+            cmake_cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+
+        for line in p.stdout:
+            print(line, end="")
+
+        p.wait()
+
+        # Build
+        p = subprocess.Popen(
+            build_cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+
+        for line in p.stdout:
+            print(line, end="")
+
+        p.wait()
+
+        return
 
     def _build_tree_data(self, tree, name):
         subtree = {

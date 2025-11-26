@@ -43,7 +43,7 @@ model.add_external_component(
     "openmdao", am.ExternalOpenMDAOComponent(prob, model), inputs, constraints
 )
 
-model.build_module(debug=True)
+model.build_module()
 model.initialize()
 
 # Create the design variable vector and provide an initial guess

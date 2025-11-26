@@ -1,0 +1,14 @@
+@PACKAGE_INIT@
+
+# Expose the options used when Amigo was built
+set(AMIGO_ENABLE_CUDA   @AMIGO_ENABLE_CUDA@)
+set(AMIGO_ENABLE_OPENMP @AMIGO_ENABLE_OPENMP@)
+
+# Optionally expose the CUDA architecture as a package variable
+if(AMIGO_ENABLE_CUDA)
+  set(CMAKE_CUDA_ARCHITECTURES @CMAKE_CUDA_ARCHITECTURES@)
+endif()
+
+get_filename_component(_AMIGO_CONFIG_DIR "${CMAKE_CURRENT_LIST_FILE}" PATH)
+include("${_AMIGO_CONFIG_DIR}/amigoTargets.cmake")
+include("${_AMIGO_CONFIG_DIR}/amigoAddModule.cmake")

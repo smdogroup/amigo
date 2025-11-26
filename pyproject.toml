@@ -1,23 +1,37 @@
 [build-system]
-requires = ["setuptools", "wheel", "pybind11", "mpi4py"]
-build-backend = "setuptools.build_meta"
+requires = [
+  "scikit-build-core>=0.7",
+  "pybind11>=2.12",
+  "mpi4py>=3.1"
+]
+build-backend = "scikit_build_core.build"
 
 [project]
 name = "amigo"
 version = "0.0.1"
 description = "A friendly library for multidisciplinary analysis and optimization."
 readme = "README.md"
-authors = [{name = "Graeme J. Kennedy", email = "graeme.kennedy@aerospace.gatech.edu"}]
-dependencies = ["black>=25.1.0", "pre-commit>=3.5.0", "numpy", "scipy", "pybind11", "matplotlib", "niceplots", "setuptools", "mpi4py", "networkx", "pyvis", "tabulate", "gmsh", "icecream"]
+authors = [{ name = "Graeme J. Kennedy", email = "graeme.kennedy@aerospace.gatech.edu" }]
+requires-python = ">=3.9"
+dependencies = [
+  "numpy", "scipy", "pybind11", "matplotlib", "niceplots", "setuptools", "mpi4py",
+  "black>=25.1.0", "pre-commit>=3.5.0", "networkx", "pyvis", "tabulate", "icecream"
+]
+# dependencies = ["gmsh"]
 
 [tool.setuptools.packages.find]
 where = ["."]
 
 [project.optional-dependencies]
-openmdao = [
-  "openmdao>=3.29",  # choose a sensible, tested range
-]
+openmdao = ["openmdao>=3.29"]
 
-# (Optional) mypy users:
+[tool.scikit-build]
+cmake.minimum-version = "3.25"
+wheel.packages = ["amigo"]
+
+# [tool.scikit-build.cmake]
+# Prefer passing args via pip (see below). Keep this table present only once.
+# args = ["-DAMIGO_ENABLE_OPENMP=ON", "-DAMIGO_ENABLE_CUDA=ON"]
+
 [tool.mypy]
-ignore_missing_imports = true  # or per-module overrides
+ignore_missing_imports = true

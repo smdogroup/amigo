@@ -361,24 +361,10 @@ parser.add_argument(
     "--build", dest="build", action="store_true", default=False, help="Enable building"
 )
 parser.add_argument(
-    "--with-openmp",
-    dest="use_openmp",
-    action="store_true",
-    default=False,
-    help="Enable OpenMP",
-)
-parser.add_argument(
     "--order-type",
     choices=["amd", "nd", "natural"],
     default="nd",
     help="Ordering strategy to use (default: amd)",
-)
-parser.add_argument(
-    "--with-debug",
-    dest="use_debug",
-    action="store_true",
-    default=False,
-    help="Enable debug flags",
 )
 args = parser.parse_args()
 
@@ -444,20 +430,7 @@ model.link("beam.D[1:]", "beam.D[0]")
 model.link("force.dof", f"src.v[{nodes[-1, 0]}]")
 
 if args.build:
-    compile_args = []
-    link_args = ["-lblas", "-llapack"]
-    define_macros = []
-    if args.use_openmp:
-        compile_args = ["-fopenmp"]
-        link_args += ["-fopenmp"]
-        define_macros = [("AMIGO_USE_OPENMP", "1")]
-
-    model.build_module(
-        compile_args=compile_args,
-        link_args=link_args,
-        define_macros=define_macros,
-        debug=args.use_debug,
-    )
+    model.build_module()
 
 model.initialize()
 

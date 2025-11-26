@@ -144,20 +144,6 @@ parser.add_argument(
     "--build", dest="build", action="store_true", default=False, help="Enable building"
 )
 parser.add_argument(
-    "--with-openmp",
-    dest="use_openmp",
-    action="store_true",
-    default=False,
-    help="Enable OpenMP",
-)
-parser.add_argument(
-    "--with-debug",
-    dest="use_debug",
-    action="store_true",
-    default=False,
-    help="Enable debug compiler flags",
-)
-parser.add_argument(
     "--order-type",
     choices=["amd", "nd", "natural"],
     default="amd",
@@ -218,20 +204,7 @@ model.link("helmholtz.x_coord", "src.x_coord", tgt_indices=conn)
 model.link("helmholtz.rho", "src.rho", tgt_indices=conn)
 
 if args.build:
-    compile_args = []
-    link_args = ["-lblas", "-llapack"]
-    define_macros = []
-    if args.use_openmp:
-        compile_args = ["-fopenmp"]
-        link_args += ["-fopenmp"]
-        define_macros = [("AMIGO_USE_OPENMP", "1")]
-
-    model.build_module(
-        compile_args=compile_args,
-        link_args=link_args,
-        define_macros=define_macros,
-        debug=args.use_debug,
-    )
+    model.build_module()
 
 start = time.perf_counter()
 

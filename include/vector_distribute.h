@@ -3,6 +3,9 @@
 
 #include <mpi.h>
 
+#include <memory>
+
+#include "amigo.h"
 #include "node_owners.h"
 #include "ordering_utils.h"
 #include "vector.h"
@@ -26,6 +29,19 @@ constexpr MPI_Datatype get_mpi_type() {
   }
 }
 
+namespace detail {
+
+template <typename T>
+void set_buffer_values_kernel_cuda(int nnodes, const int* nodes, const T* array,
+                                   T* buffer);
+
+template <typename T>
+void add_buffer_values_kernel_cuda(int nnodes, const int* nodes,
+                                   const T* buffer, T* array);
+
+}  // namespace detail
+
+template <ExecPolicy policy>
 class VectorDistribute {
  public:
   /**
@@ -36,36 +52,135 @@ class VectorDistribute {
   template <typename T>
   class VecDistributeContext {
    public:
-    VecDistributeContext(int nnodes, int nsends, int nrecvs, int tag = 0)
-        : tag(tag) {
-      buffer = new T[nnodes];
+    VecDistributeContext(int nsends, int nrecvs,
+                         std::shared_ptr<Vector<int>> send_indices,
+                         int num_recv_nodes, int num_owned_nodes, int tag = 0)
+        : send_indices(send_indices),
+          num_recv_nodes(num_recv_nodes),
+          num_owned_nodes(num_owned_nodes),
+          tag(tag),
+          send_buffer(nullptr),
+          recv_buffer(nullptr),
+          d_send_buffer(nullptr) {
+      int nnodes = send_indices->get_size();
+      send_buffer = new T[nnodes];
+      recv_buffer = nullptr;
+      d_send_buffer = nullptr;
+
+      if (policy == ExecPolicy::CUDA) {
+#ifdef AMIGO_USE_CUDA
+        recv_buffer = new T[num_recv_nodes];
+        AMIGO_CHECK_CUDA(cudaMalloc(&d_send_buffer, nnodes * sizeof(T)));
+#endif  // AMIGO_USE_CUDA
+      }
+
       send_requests = new MPI_Request[nsends];
       recv_requests = new MPI_Request[nrecvs];
     }
     ~VecDistributeContext() {
-      delete[] buffer;
+      delete[] send_buffer;
       delete[] send_requests;
       delete[] recv_requests;
-    }
-
-    void set_buffer_values(int nnodes, const int* nodes, const T* array) {
-      T* b = buffer;
-      const int* n = nodes;
-      for (int i = 0; i < nnodes; i++, b++, n++) {
-        b[0] = array[*n];
+      if (recv_buffer) {
+        delete[] recv_buffer;
+      }
+      if (d_send_buffer) {
+#ifdef AMIGO_USE_CUDA
+        cudaFree(d_send_buffer);
+#endif  // AMIGO_USE_CUDA
       }
     }
 
-    void add_buffer_values(int nnodes, const int* nodes, T* array) const {
-      const T* b = buffer;
-      const int* n = nodes;
-      for (int i = 0; i < nnodes; i++, b++, n++) {
-        array[*n] += b[0];
+    void set_buffer_values_kernel(int nnodes, const int* node, const T* array,
+                                  T* buffer) {
+      const int* node_end = node + nnodes;
+      for (; node < node_end; node++, buffer++) {
+        buffer[0] = array[*node];
       }
     }
 
+    void add_buffer_values_kernel(int nnodes, const int* node, const T* buffer,
+                                  T* array) const {
+      const int* node_end = node + nnodes;
+      for (; node < node_end; node++, buffer++) {
+        array[*node] += buffer[0];
+      }
+    }
+
+    T* forward_set_send_buffer(T* array) {
+      int nnodes = send_indices->get_size();
+      const int* nodes = send_indices->template get_array<policy>();
+
+      if constexpr (policy == ExecPolicy::SERIAL ||
+                    policy == ExecPolicy::OPENMP) {
+        set_buffer_values_kernel(nnodes, nodes, array, send_buffer);
+      } else {
+#ifdef AMIGO_USE_CUDA
+        detail::set_buffer_values_kernel_cuda(nnodes, nodes, array,
+                                              d_send_buffer);
+        AMIGO_CHECK_CUDA(cudaMemcpy(send_buffer, d_send_buffer,
+                                    nnodes * sizeof(T),
+                                    cudaMemcpyDeviceToHost));
+#endif  // AMIGO_USE_CUDA
+      }
+      return send_buffer;
+    }
+
+    T* forward_get_recv_buffer(T* array) {
+      if constexpr (policy == ExecPolicy::SERIAL ||
+                    policy == ExecPolicy::OPENMP) {
+        return &array[num_owned_nodes];
+      }
+      return recv_buffer;
+    }
+
+    void forward_set_recv_values(T* array) {
+      if constexpr (policy == ExecPolicy::CUDA) {
+#ifdef AMIGO_USE_CUDA
+        AMIGO_CHECK_CUDA(cudaMemcpy(&array + num_owned_nodes, recv_buffer,
+                                    num_recv_nodes * sizeof(T),
+                                    cudaMemcpyHostToDevice));
+#endif  // AMIGO_USE_CUDA
+      }
+    }
+
+    T* reverse_get_send_buffer() { return send_buffer; }
+
+    T* reverse_get_recv_buffer(T* array) {
+      if constexpr (policy == ExecPolicy::SERIAL ||
+                    policy == ExecPolicy::OPENMP) {
+        return &array[num_owned_nodes];
+      }
+      return recv_buffer;
+    }
+
+    void reverse_add_buffer_values(T* array) {
+      int nnodes = send_indices->get_size();
+      const int* nodes = send_indices->template get_array<policy>();
+
+      if constexpr (policy == ExecPolicy::SERIAL ||
+                    policy == ExecPolicy::OPENMP) {
+        add_buffer_values_kernel(nnodes, nodes, send_buffer, array);
+      } else {
+#ifdef AMIGO_USE_CUDA
+        AMIGO_CHECK_CUDA(cudaMemcpy(d_send_buffer, send_buffer,
+                                    nnodes * sizeof(T),
+                                    cudaMemcpyHostToDevice));
+        detail::add_buffer_values_kernel_cuda(nnodes, nodes, d_send_buffer,
+                                              array);
+#endif  // AMIGO_USE_CUDA
+      }
+    }
+
+    std::shared_ptr<Vector<int>> send_indices;
+    int num_recv_nodes;
+    int num_owned_nodes;
+
+    T* send_buffer;
+    T* recv_buffer;
+    T* d_send_buffer;
     int tag;
-    T* buffer;
+
     MPI_Request* send_requests;
     MPI_Request* recv_requests;
   };
@@ -162,7 +277,10 @@ class VectorDistribute {
     delete[] full_recv_count;
 
     // Indices of the data that we will send to the processors
-    send_indices = new int[send_ptr[num_sends]];
+    send_indices = std::make_shared<Vector<int>>(send_ptr[num_sends]);
+
+    // Get the host array for the indices
+    int* send_indices_ptr = send_indices->get_array();
 
     MPI_Request* send_requests = new MPI_Request[num_sends];
     MPI_Request* recv_requests = new MPI_Request[num_recvs];
@@ -174,7 +292,7 @@ class VectorDistribute {
                 tag, comm, &recv_requests[i]);
     }
     for (int i = 0; i < num_sends; i++) {
-      MPI_Irecv(&send_indices[send_ptr[i]], send_count[i], MPI_INT,
+      MPI_Irecv(&send_indices_ptr[send_ptr[i]], send_count[i], MPI_INT,
                 send_procs[i], tag, comm, &send_requests[i]);
     }
 
@@ -183,7 +301,12 @@ class VectorDistribute {
 
     // Convert to the local ordering
     for (int i = 0; i < send_ptr[num_sends]; i++) {
-      send_indices[i] -= range[mpi_rank];
+      send_indices_ptr[i] -= range[mpi_rank];
+    }
+
+    // Copy the send indices to the device
+    if constexpr (policy == ExecPolicy::CUDA) {
+      send_indices->copy_host_to_device();
     }
 
     delete[] send_requests;
@@ -193,7 +316,6 @@ class VectorDistribute {
     delete[] send_count;
     delete[] send_ptr;
     delete[] send_procs;
-    delete[] send_indices;
     delete[] recv_count;
     delete[] recv_ptr;
     delete[] recv_procs;
@@ -215,8 +337,8 @@ class VectorDistribute {
    */
   template <typename T>
   VecDistributeContext<T>* create_context() {
-    return new VecDistributeContext<T>(send_ptr[num_sends], num_sends,
-                                       num_recvs);
+    return new VecDistributeContext<T>(num_sends, num_recvs, send_indices,
+                                       recv_ptr[num_recvs], num_owned_nodes);
   }
 
   /**
@@ -229,21 +351,28 @@ class VectorDistribute {
   template <typename T>
   void begin_forward(std::shared_ptr<Vector<T>> vars,
                      VecDistributeContext<T>* ctx) {
-    T* array = vars->get_array();
+    // Get the array pointer based on the policy - this is either a host or
+    // device pointer, depending on the policy value
+    T* array = vars->template get_array<policy>();
 
-    // Copy the data to the buffer
-    ctx->set_buffer_values(send_ptr[num_sends], send_indices, array);
+    // Set values into the buffer. If this is on the CPU, this is a straight
+    // copy, if this is on the device, copy the values to a device buffer first,
+    // then copy those values to the host and return the host buffer.
+    T* send_buffer = ctx->forward_set_send_buffer(array);
 
     // Post the sends
     for (int i = 0; i < num_sends; i++) {
-      T* ptr = ctx->buffer + send_ptr[i];
+      T* ptr = send_buffer + send_ptr[i];
       MPI_Isend(ptr, send_count[i], get_mpi_type<T>(), send_procs[i], ctx->tag,
                 comm, &ctx->send_requests[i]);
     }
 
-    // Post the recvs
+    // Get the receive buffer
+    T* recv_buffer = ctx->forward_get_recv_buffer(array);
+
+    // Post the receives
     for (int i = 0; i < num_recvs; i++) {
-      T* ptr = array + (recv_ptr[i] + num_owned_nodes);
+      T* ptr = recv_buffer + recv_ptr[i];
       MPI_Irecv(ptr, recv_count[i], get_mpi_type<T>(), recv_procs[i], ctx->tag,
                 comm, &ctx->recv_requests[i]);
     }
@@ -259,8 +388,17 @@ class VectorDistribute {
   template <typename T>
   void end_forward(std::shared_ptr<Vector<T>> vars,
                    VecDistributeContext<T>* ctx) {
+    // Wait for everything to complete
     MPI_Waitall(num_sends, ctx->send_requests, MPI_STATUSES_IGNORE);
     MPI_Waitall(num_recvs, ctx->recv_requests, MPI_STATUSES_IGNORE);
+
+    // Get the array pointer based on the policy - this is either a host or
+    // device pointer, depending on the policy value
+    T* array = vars->template get_array<policy>();
+
+    // Set the values from the recv buffer into the array. This is only used
+    // when policy == CUDA
+    ctx->forward_set_recv_values(array);
   }
 
   /**
@@ -274,18 +412,21 @@ class VectorDistribute {
   template <typename T>
   void begin_reverse_add(std::shared_ptr<Vector<T>> vars,
                          VecDistributeContext<T>* ctx) {
-    T* array = vars->get_array();
+    // Get the array that depends on the policy
+    T* array = vars->template get_array<policy>();
 
     // Post the sends
+    T* send_buffer = ctx->reverse_get_send_buffer();
     for (int i = 0; i < num_sends; i++) {
-      T* ptr = ctx->buffer + send_ptr[i];
+      T* ptr = send_buffer + send_ptr[i];
       MPI_Irecv(ptr, send_count[i], get_mpi_type<T>(), send_procs[i], ctx->tag,
                 comm, &ctx->send_requests[i]);
     }
 
     // Post the recvs
+    T* recv_buffer = ctx->reverse_get_recv_buffer(array);
     for (int i = 0; i < num_recvs; i++) {
-      T* ptr = array + (recv_ptr[i] + num_owned_nodes);
+      T* ptr = recv_buffer + recv_ptr[i];
       MPI_Isend(ptr, recv_count[i], get_mpi_type<T>(), recv_procs[i], ctx->tag,
                 comm, &ctx->recv_requests[i]);
     }
@@ -306,8 +447,8 @@ class VectorDistribute {
     MPI_Waitall(num_recvs, ctx->recv_requests, MPI_STATUSES_IGNORE);
 
     // Add the data to the buffer
-    T* array = vars->get_array();
-    ctx->add_buffer_values(send_ptr[num_sends], send_indices, array);
+    T* array = vars->template get_array<policy>();
+    ctx->reverse_add_buffer_values(array);
   }
 
  private:
@@ -320,13 +461,15 @@ class VectorDistribute {
   int* send_count;
   int* send_ptr;
   int* send_procs;
-  int* send_indices;  // Indices of the data from this proc
 
   // Data that will be recieved by this processor
   int num_recvs;
   int* recv_count;
   int* recv_ptr;
   int* recv_procs;
+
+  // Store the send_indices as a vector
+  std::shared_ptr<Vector<int>> send_indices;
 };
 
 }  // namespace amigo

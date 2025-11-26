@@ -1,19 +1,16 @@
 #ifndef AMIGO_OPTIMIZATION_PROBLEM_H
 #define AMIGO_OPTIMIZATION_PROBLEM_H
 
-// #ifdef AMIGO_USE_MPI
 #include <mpi.h>
 
-#include "matrix_distribute.h"
-#include "vector_distribute.h"
-// #endif
-
 #include "component_group_base.h"
+#include "matrix_distribute.h"
 #include "node_owners.h"
+#include "vector_distribute.h"
 
 namespace amigo {
 
-template <typename T>
+template <typename T, ExecPolicy policy>
 class OptimizationProblem {
  public:
   /**
@@ -31,7 +28,8 @@ class OptimizationProblem {
       std::shared_ptr<NodeOwners> var_owners,
       std::shared_ptr<NodeOwners> output_owners,
       std::shared_ptr<Vector<int>> is_multiplier_,
-      const std::vector<std::shared_ptr<ComponentGroupBase<T>>>& components)
+      const std::vector<std::shared_ptr<ComponentGroupBase<T, policy>>>&
+          components)
       : comm(comm),
         data_owners(data_owners),
         var_owners(var_owners),
@@ -41,9 +39,9 @@ class OptimizationProblem {
         data_dist(data_owners),
         var_dist(var_owners),
         output_dist(output_owners) {
-    data_ctx = data_dist.create_context<T>();
-    var_ctx = var_dist.create_context<T>();
-    output_ctx = output_dist.create_context<T>();
+    data_ctx = data_dist.template create_context<T>();
+    var_ctx = var_dist.template create_context<T>();
+    output_ctx = output_dist.template create_context<T>();
 
     data_vec = create_data_vector();
 
@@ -127,9 +125,10 @@ class OptimizationProblem {
    *
    * @return std::shared_ptr<Vector<T>> The vector object
    */
-  std::shared_ptr<Vector<T>> create_vector() const {
+  std::shared_ptr<Vector<T>> create_vector(
+      MemoryLocation loc = MemoryLocation::HOST_AND_DEVICE) const {
     return std::make_shared<Vector<T>>(var_owners->get_local_size(),
-                                       var_owners->get_ext_size());
+                                       var_owners->get_ext_size(), loc);
   }
 
   /**
@@ -137,9 +136,10 @@ class OptimizationProblem {
    *
    * @return std::shared_ptr<Vector<T>> The output vector object
    */
-  std::shared_ptr<Vector<T>> create_output_vector() const {
+  std::shared_ptr<Vector<T>> create_output_vector(
+      MemoryLocation loc = MemoryLocation::HOST_AND_DEVICE) const {
     return std::make_shared<Vector<T>>(output_owners->get_local_size(),
-                                       output_owners->get_ext_size());
+                                       output_owners->get_ext_size(), loc);
   }
 
   /**
@@ -161,9 +161,10 @@ class OptimizationProblem {
    *
    * @return std::shared_ptr<Vector<T>> The data vector object
    */
-  std::shared_ptr<Vector<T>> create_data_vector() const {
+  std::shared_ptr<Vector<T>> create_data_vector(
+      MemoryLocation loc = MemoryLocation::HOST_AND_DEVICE) const {
     return std::make_shared<Vector<T>>(data_owners->get_local_size(),
-                                       data_owners->get_ext_size());
+                                       data_owners->get_ext_size(), loc);
   }
 
   /**
@@ -208,7 +209,8 @@ class OptimizationProblem {
    * @param root Rank of the root processor
    * @return OptimizationProblem<T> The new OptimizationProblem on all procs
    */
-  std::shared_ptr<OptimizationProblem<T>> partition_from_root(int root = 0) {
+  std::shared_ptr<OptimizationProblem<T, policy>> partition_from_root(
+      int root = 0) {
     int mpi_size, mpi_rank;
     MPI_Comm_size(comm, &mpi_size);
     MPI_Comm_rank(comm, &mpi_rank);
@@ -366,7 +368,7 @@ class OptimizationProblem {
                                      ext_output_nodes.data());
 
     // Allocate space to store the new components
-    std::vector<std::shared_ptr<ComponentGroupBase<T>>> new_comps(
+    std::vector<std::shared_ptr<ComponentGroupBase<T, policy>>> new_comps(
         components.size());
 
     // Make the new component with the new ordering
@@ -380,8 +382,8 @@ class OptimizationProblem {
       delete[] partition;
     }
 
-    std::shared_ptr<OptimizationProblem<T>> opt =
-        std::make_shared<OptimizationProblem<T>>(
+    std::shared_ptr<OptimizationProblem<T, policy>> opt =
+        std::make_shared<OptimizationProblem<T, policy>>(
             comm, new_data_owners, new_var_owners, new_output_owners, nullptr,
             new_comps);
 
@@ -403,10 +405,11 @@ class OptimizationProblem {
    * @param distribute Boolean indicating whether to distribute external values
    */
   template <typename T1>
-  void scatter_vector(const std::shared_ptr<Vector<T1>> root_vec,
-                      const std::shared_ptr<OptimizationProblem<T>> dist_prob,
-                      std::shared_ptr<Vector<T1>> dist_vec, int root = 0,
-                      bool distribute = true) {
+  void scatter_vector(
+      const std::shared_ptr<Vector<T1>> root_vec,
+      const std::shared_ptr<OptimizationProblem<T, policy>> dist_prob,
+      std::shared_ptr<Vector<T1>> dist_vec, int root = 0,
+      bool distribute = true) {
     int mpi_rank, mpi_size;
     MPI_Comm_rank(comm, &mpi_rank);
     MPI_Comm_size(comm, &mpi_size);
@@ -445,8 +448,12 @@ class OptimizationProblem {
     }
 
     if (distribute) {
-      VectorDistribute::VecDistributeContext<T1>* ctx =
-          dist_prob->var_dist.template create_context<T1>();
+      auto ctx = dist_prob->var_dist.template create_context<T1>();
+
+      // If policy == CUDA, copy the vector to the device
+      if constexpr (policy == ExecPolicy::CUDA) {
+        dist_vec->copy_host_to_device();
+      }
 
       dist_prob->var_dist.begin_forward(dist_vec, ctx);
       dist_prob->var_dist.end_forward(dist_vec, ctx);
@@ -465,9 +472,10 @@ class OptimizationProblem {
    * @param root The rank of the root processor
    */
   template <typename T1>
-  void gather_vector(const std::shared_ptr<OptimizationProblem<T>> dist_prob,
-                     const std::shared_ptr<Vector<T1>> dist_vec,
-                     std::shared_ptr<Vector<T1>> root_vec, int root = 0) {
+  void gather_vector(
+      const std::shared_ptr<OptimizationProblem<T, policy>> dist_prob,
+      const std::shared_ptr<Vector<T1>> dist_vec,
+      std::shared_ptr<Vector<T1>> root_vec, int root = 0) {
     int mpi_rank, mpi_size;
     MPI_Comm_rank(comm, &mpi_rank);
     MPI_Comm_size(comm, &mpi_size);
@@ -523,7 +531,7 @@ class OptimizationProblem {
   template <typename T1>
   void scatter_data_vector(
       const std::shared_ptr<Vector<T1>> root_vec,
-      const std::shared_ptr<OptimizationProblem<T>> dist_prob,
+      const std::shared_ptr<OptimizationProblem<T, policy>> dist_prob,
       std::shared_ptr<Vector<T1>> dist_vec, int root = 0,
       bool distribute = true) {
     int mpi_rank, mpi_size;
@@ -564,8 +572,11 @@ class OptimizationProblem {
     }
 
     if (distribute) {
-      VectorDistribute::VecDistributeContext<T1>* ctx =
-          dist_prob->data_dist.template create_context<T1>();
+      auto ctx = dist_prob->data_dist.template create_context<T1>();
+
+      if constexpr (policy == ExecPolicy::CUDA) {
+        dist_vec->copy_host_to_device();
+      }
 
       dist_prob->data_dist.begin_forward(dist_vec, ctx);
       dist_prob->data_dist.end_forward(dist_vec, ctx);
@@ -579,7 +590,8 @@ class OptimizationProblem {
    *
    * @return std::shared_ptr<CSRMat<T>>
    */
-  std::shared_ptr<CSRMat<T>> create_matrix() {
+  std::shared_ptr<CSRMat<T>> create_matrix(
+      MemoryLocation mem_loc = MemoryLocation::HOST_AND_DEVICE) {
     if (mat) {
       return mat->duplicate();
     } else {
@@ -639,16 +651,33 @@ class OptimizationProblem {
       }
 
       // Distribute the pattern across matrices
-      mat_dist =
-          new MatrixDistribute(comm, var_owners, var_owners, num_variables,
-                               num_variables, rowp, cols, mat);
-      mat_dist_ctx = mat_dist->create_context<T>();
+      mat_dist = new MatrixDistribute<policy>(comm, mem_loc, var_owners,
+                                              var_owners, num_variables,
+                                              num_variables, rowp, cols, mat);
+      mat_dist_ctx = mat_dist->template create_context<T>();
 
       delete[] rowp;
       delete[] cols;
 
+      // Perform any component group initializations with the Hessian matrix
+      for (size_t i = 0; i < components.size(); i++) {
+        components[i]->initialize_hessian_pattern(*var_owners, *mat);
+      }
+
       return mat;
     }
+  }
+
+  /**
+   * @brief Add diagonal terms to the Hessian matrix in a manner consistent with
+   * the execution policy
+   *
+   * @param x The diagonal values
+   * @param mat The Hessian matrix
+   */
+  void add_diagonal(std::shared_ptr<Vector<T>> diag,
+                    std::shared_ptr<CSRMat<T>> mat) {
+    mat->template add_diagonal<policy>(diag);
   }
 
   /**
@@ -669,16 +698,17 @@ class OptimizationProblem {
   /**
    * @brief Compute the value of the Lagrangian
    *
+   * @param alpha Scalar multiplier for the objective function
    * @param x The design variable values
    * @return The value of the Lagrangian
    */
-  T lagrangian(std::shared_ptr<Vector<T>> x) {
+  T lagrangian(T alpha, std::shared_ptr<Vector<T>> x) {
     var_dist.begin_forward(x, var_ctx);
     var_dist.end_forward(x, var_ctx);
 
     T lagrange = 0.0;
     for (size_t i = 0; i < components.size(); i++) {
-      lagrange += components[i]->lagrangian(*data_vec, *x);
+      lagrange += components[i]->lagrangian(alpha, *data_vec, *x);
     }
 
     T value = lagrange;
@@ -689,17 +719,18 @@ class OptimizationProblem {
   /**
    * @brief Compute the gradient of the Lagrangian for all components
    *
+   * @param alpha Scalar multiplier for the objective function
    * @param x The design variable vector
    * @param g The output gradient vector
    */
-  void gradient(const std::shared_ptr<Vector<T>> x,
+  void gradient(T alpha, const std::shared_ptr<Vector<T>> x,
                 std::shared_ptr<Vector<T>> g) {
     var_dist.begin_forward(x, var_ctx);
     var_dist.end_forward(x, var_ctx);
 
     g->zero();
     for (size_t i = 0; i < components.size(); i++) {
-      components[i]->add_gradient(*data_vec, *x, *g);
+      components[i]->add_gradient(alpha, *data_vec, *x, *g);
     }
 
     var_dist.begin_reverse_add(g, var_ctx);
@@ -709,11 +740,12 @@ class OptimizationProblem {
   /**
    * @brief Compute a Hessian-vector product with the Lagrangian
    *
+   * @param alpha Scalar multiplier for the objective function
    * @param x The design variable vector
    * @param p The product direction
    * @param h The output Hessian-vector product
    */
-  void hessian_product(const std::shared_ptr<Vector<T>> x,
+  void hessian_product(T alpha, const std::shared_ptr<Vector<T>> x,
                        const std::shared_ptr<Vector<T>> p,
                        std::shared_ptr<Vector<T>> h) {
     var_dist.begin_forward(x, var_ctx);
@@ -724,7 +756,7 @@ class OptimizationProblem {
 
     h->zero();
     for (size_t i = 0; i < components.size(); i++) {
-      components[i]->add_hessian_product(*data_vec, *x, *p, *h);
+      components[i]->add_hessian_product(alpha, *data_vec, *x, *p, *h);
     }
 
     var_dist.begin_reverse_add(h, var_ctx);
@@ -734,36 +766,19 @@ class OptimizationProblem {
   /**
    * @brief Compute the full Hessian matrix
    *
+   * @param alpha Scalar multiplier for the objective function
    * @param x The design variable values
    * @param mat The full Hessian matrix
    */
-  void hessian(const std::shared_ptr<Vector<T>> x,
-               std::shared_ptr<CSRMat<T>> matrix,
-               bool zero_design_contrib = false) {
+  void hessian(T alpha, const std::shared_ptr<Vector<T>> x,
+               std::shared_ptr<CSRMat<T>> matrix) {
     var_dist.begin_forward(x, var_ctx);
     var_dist.end_forward(x, var_ctx);
 
+    // Compute the Hessian matrix entries
     matrix->zero();
     for (size_t i = 0; i < components.size(); i++) {
-      components[i]->add_hessian(*data_vec, *x, *var_owners, *matrix);
-    }
-
-    if (zero_design_contrib) {
-      int nrows, ncols, nnz;
-      const int *rowp, *cols;
-      T* A;
-      matrix->get_data(&nrows, &ncols, &nnz, &rowp, &cols, &A);
-
-      // Zero the diagonal entries
-      const int* is_mult = is_multiplier->get_array();
-      for (int i = 0; i < nrows; i++) {
-        for (int jp = rowp[i]; jp < rowp[i + 1]; jp++) {
-          int j = cols[jp];
-          if (!is_mult[i] && !is_mult[j]) {
-            A[jp] = 0.0;
-          }
-        }
-      }
+      components[i]->add_hessian(alpha, *data_vec, *x, *var_owners, *matrix);
     }
 
     mat_dist->begin_assembly(matrix, mat_dist_ctx);
@@ -841,10 +856,11 @@ class OptimizationProblem {
                                                  element_output, &rowp, &cols);
 
       // Distribute the pattern across matrices
-      grad_jac_dist =
-          new MatrixDistribute(comm, var_owners, data_owners, num_variables,
-                               num_data, rowp, cols, grad_jac);
-      grad_jac_dist_ctx = grad_jac_dist->create_context<T>();
+      MemoryLocation mem_loc = MemoryLocation::HOST_AND_DEVICE;
+      grad_jac_dist = new MatrixDistribute<policy>(
+          comm, mem_loc, var_owners, data_owners, num_variables, num_data, rowp,
+          cols, grad_jac);
+      grad_jac_dist_ctx = grad_jac_dist->template create_context<T>();
 
       delete[] rowp;
       delete[] cols;
@@ -965,10 +981,11 @@ class OptimizationProblem {
                                                  element_output, &rowp, &cols);
 
       // Distribute the pattern across matrices
-      input_jac_dist =
-          new MatrixDistribute(comm, output_owners, var_owners, num_outputs,
-                               num_variables, rowp, cols, input_jac);
-      input_jac_dist_ctx = input_jac_dist->create_context<T>();
+      MemoryLocation mem_loc = MemoryLocation::HOST_AND_DEVICE;
+      input_jac_dist = new MatrixDistribute<policy>(
+          comm, mem_loc, output_owners, var_owners, num_outputs, num_variables,
+          rowp, cols, input_jac);
+      input_jac_dist_ctx = input_jac_dist->template create_context<T>();
 
       delete[] rowp;
       delete[] cols;
@@ -1029,10 +1046,11 @@ class OptimizationProblem {
                                                  element_output, &rowp, &cols);
 
       // Distribute the pattern across matrices
-      data_jac_dist =
-          new MatrixDistribute(comm, output_owners, data_owners, num_outputs,
-                               num_data, rowp, cols, data_jac);
-      data_jac_dist_ctx = data_jac_dist->create_context<T>();
+      MemoryLocation mem_loc = MemoryLocation::HOST_AND_DEVICE;
+      data_jac_dist = new MatrixDistribute<policy>(
+          comm, mem_loc, output_owners, data_owners, num_outputs, num_data,
+          rowp, cols, data_jac);
+      data_jac_dist_ctx = data_jac_dist->template create_context<T>();
 
       delete[] rowp;
       delete[] cols;
@@ -1253,17 +1271,18 @@ class OptimizationProblem {
   std::shared_ptr<Vector<int>> is_multiplier;
 
   // Component groups for the optimization problem
-  std::vector<std::shared_ptr<ComponentGroupBase<T>>> components;
+  std::vector<std::shared_ptr<ComponentGroupBase<T, policy>>> components;
 
   // Variable information
-  VectorDistribute data_dist;
-  VectorDistribute var_dist;
-  VectorDistribute::VecDistributeContext<T>* data_ctx;
-  VectorDistribute::VecDistributeContext<T>* var_ctx;
+  VectorDistribute<policy> data_dist;
+  VectorDistribute<policy> var_dist;
+  typename VectorDistribute<policy>::template VecDistributeContext<T>* data_ctx;
+  typename VectorDistribute<policy>::template VecDistributeContext<T>* var_ctx;
 
   // Output information
-  VectorDistribute output_dist;
-  VectorDistribute::VecDistributeContext<T>* output_ctx;
+  VectorDistribute<policy> output_dist;
+  typename VectorDistribute<policy>::template VecDistributeContext<T>*
+      output_ctx;
 
   // The shared data vector
   std::shared_ptr<Vector<T>> data_vec;
@@ -1275,21 +1294,25 @@ class OptimizationProblem {
 
   // Information about the Hessian matrix
   std::shared_ptr<CSRMat<T>> mat;
-  MatrixDistribute* mat_dist;
-  MatrixDistribute::MatDistributeContext<T>* mat_dist_ctx;
+  MatrixDistribute<policy>* mat_dist;
+  typename MatrixDistribute<policy>::template MatDistributeContext<T>*
+      mat_dist_ctx;
 
   // Information about the output Jacobian
   std::shared_ptr<CSRMat<T>> input_jac;
-  MatrixDistribute* input_jac_dist;
-  MatrixDistribute::MatDistributeContext<T>* input_jac_dist_ctx;
+  MatrixDistribute<policy>* input_jac_dist;
+  typename MatrixDistribute<policy>::template MatDistributeContext<T>*
+      input_jac_dist_ctx;
 
   std::shared_ptr<CSRMat<T>> data_jac;
-  MatrixDistribute* data_jac_dist;
-  MatrixDistribute::MatDistributeContext<T>* data_jac_dist_ctx;
+  MatrixDistribute<policy>* data_jac_dist;
+  typename MatrixDistribute<policy>::template MatDistributeContext<T>*
+      data_jac_dist_ctx;
 
   std::shared_ptr<CSRMat<T>> grad_jac;
-  MatrixDistribute* grad_jac_dist;
-  MatrixDistribute::MatDistributeContext<T>* grad_jac_dist_ctx;
+  MatrixDistribute<policy>* grad_jac_dist;
+  typename MatrixDistribute<policy>::template MatDistributeContext<T>*
+      grad_jac_dist_ctx;
 };
 
 }  // namespace amigo

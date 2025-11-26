@@ -76,7 +76,12 @@ class OpNode(ExprNode):
         a = self.left.generate_cpp(index)
         b = self.right.generate_cpp(index)
         if self.op == "**":
-            return f"A2D::pow({a}, {b})"
+            # Specialize pow for case with constant integer powers
+            rnode = self.right.node
+            if isinstance(rnode, ConstNode) and rnode.type == int and rnode.value > 0:
+                return " * ".join([f"({a})"] * rnode.value)
+            else:
+                return f"A2D::pow({a}, {b})"
         elif self.op == "atan2":
             return f"A2D::atan2({a}, {b})"
         elif self.op == "min2":
@@ -113,10 +118,12 @@ class UnaryNegNode(ExprNode):
 def _to_expr(val):
     if isinstance(val, Expr):
         return val
-    if isinstance(val, ExprNode):
+    elif isinstance(val, ExprNode):
         return Expr(val)
-    if isinstance(val, (int, float)):
-        return Expr(ConstNode(value=val))
+    elif isinstance(val, int):
+        return Expr(ConstNode(value=val, type=int))
+    elif isinstance(val, float):
+        return Expr(ConstNode(value=val, type=float))
     raise TypeError(f"Unsupported value: {val}")
 
 

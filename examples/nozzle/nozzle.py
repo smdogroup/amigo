@@ -1,5 +1,6 @@
 import argparse
 import json
+from pathlib import Path
 import amigo as am
 import numpy as np
 import matplotlib.pylab as plt
@@ -13,7 +14,6 @@ class RoeFlux(am.Component):
         super().__init__()
 
         # Add the constants
-        self.add_constant("gamma", value=gamma)
         self.add_constant("gam1", value=(gamma - 1.0))
         self.add_constant("ggam1", value=gamma / (gamma - 1.0))
 
@@ -494,13 +494,6 @@ parser.add_argument(
     "--build", dest="build", action="store_true", default=False, help="Enable building"
 )
 parser.add_argument(
-    "--with-openmp",
-    dest="use_openmp",
-    action="store_true",
-    default=False,
-    help="Enable OpenMP",
-)
-parser.add_argument(
     "--show-sparsity",
     dest="show_sparsity",
     action="store_true",
@@ -508,18 +501,18 @@ parser.add_argument(
     help="Show the sparsity pattern",
 )
 parser.add_argument(
-    "--with-debug",
-    dest="use_debug",
-    action="store_true",
-    default=False,
-    help="Enable debug flags",
-)
-parser.add_argument(
     "--with-lnks",
     dest="use_lnks",
     action="store_true",
     default=False,
     help="Enable the Largrange-Newton-Krylov-Schur inexact solver",
+)
+parser.add_argument(
+    "--with-cuda",
+    dest="use_cuda",
+    action="store_true",
+    default=False,
+    help="Enable the CUDA solver",
 )
 
 args = parser.parse_args()
@@ -561,7 +554,7 @@ p_outlet = p_back
 nctrl = 10
 
 # Create the model
-model = am.Model("nozzle")
+model = am.Model("nozzle_module")
 
 # Add the flux computations at the interior points
 model.add_component("flux", num_cells - 1, RoeFlux(gamma=gamma))
@@ -633,20 +626,8 @@ model.link("area.output[-1]", "calc.A_outlet")
 model.link("inlet.M_inlet", "calc.M_inlet")
 
 if args.build:
-    compile_args = []
-    link_args = []
-    define_macros = []
-    if args.use_openmp:
-        compile_args = ["-fopenmp"]
-        link_args = ["-fopenmp"]
-        define_macros = [("AMIGO_USE_OPENMP", "1")]
-
-    model.build_module(
-        compile_args=compile_args,
-        link_args=link_args,
-        define_macros=define_macros,
-        debug=args.use_debug,
-    )
+    source_dir = Path(__file__).resolve().parent
+    model.build_module(source_dir=source_dir)
 
 model.initialize(order_type=am.OrderingType.NATURAL)
 
@@ -739,6 +720,9 @@ if args.use_lnks:
         residuals=residuals,
     )
 
+if args.use_cuda:
+    solver = am.DirectCudaSolver(model.get_problem())
+
 # Set up the optimizer
 opt = am.Optimizer(model, x, lower=lower, upper=upper, solver=solver)
 
@@ -758,7 +742,7 @@ with open("nozzle_history.json", "w") as fp:
 inputs, cons, _, _ = model.get_names()
 
 res = model.create_vector()
-model.problem.gradient(x.get_vector(), res.get_vector())
+model.problem.gradient(1.0, x.get_vector(), res.get_vector())
 inputs.extend(cons)
 
 print("Variable summary")

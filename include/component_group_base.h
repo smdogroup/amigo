@@ -7,12 +7,12 @@
 
 namespace amigo {
 
-template <typename T>
+template <typename T, ExecPolicy policy>
 class ComponentGroupBase {
  public:
   virtual ~ComponentGroupBase() {}
 
-  virtual std::shared_ptr<ComponentGroupBase<T>> clone(
+  virtual std::shared_ptr<ComponentGroupBase<T, policy>> clone(
       int num_elements, std::shared_ptr<Vector<int>> data_idx,
       std::shared_ptr<Vector<int>> layout_idx,
       std::shared_ptr<Vector<int>> output_idx) const = 0;
@@ -21,14 +21,18 @@ class ComponentGroupBase {
   virtual void update(const Vector<T>& x) {}
 
   // Group analysis functions
-  virtual T lagrangian(const Vector<T>& data, const Vector<T>& x) const {
+  virtual T lagrangian(T alpha, const Vector<T>& data,
+                       const Vector<T>& x) const {
     return T(0.0);
   }
-  virtual void add_gradient(const Vector<T>& data, const Vector<T>& x,
+  virtual void add_gradient(T alpha, const Vector<T>& data, const Vector<T>& x,
                             Vector<T>& g) const {}
-  virtual void add_hessian_product(const Vector<T>& data, const Vector<T>& x,
-                                   const Vector<T>& p, Vector<T>& h) const {}
-  virtual void add_hessian(const Vector<T>& data, const Vector<T>& x,
+  virtual void add_hessian_product(T alpha, const Vector<T>& data,
+                                   const Vector<T>& x, const Vector<T>& p,
+                                   Vector<T>& h) const {}
+  virtual void initialize_hessian_pattern(const NodeOwners& owners,
+                                          CSRMat<T>& mat) {}
+  virtual void add_hessian(T alpha, const Vector<T>& data, const Vector<T>& x,
                            const NodeOwners& owners, CSRMat<T>& mat) const {}
 
   // Gradient coupling function
@@ -130,12 +134,12 @@ struct __get_collection_input_type;
 
 template <typename R, class T>
 struct __get_collection_input_type<R, T> {
-  using Input = typename T::template Input<R>;
+  using type = typename T::template Input<R>;
 };
 
 template <typename R, class T, class... Ts>
 struct __get_collection_input_type<R, T, Ts...> {
-  using Input = typename __get_collection_input_type<R, Ts...>::Input;
+  using type = typename __get_collection_input_type<R, Ts...>::type;
 };
 
 template <class... Ts>
@@ -156,12 +160,12 @@ struct __get_collection_data_type;
 
 template <typename R, class T>
 struct __get_collection_data_type<R, T> {
-  using Data = typename T::template Data<R>;
+  using type = typename T::template Data<R>;
 };
 
 template <typename R, class T, class... Ts>
 struct __get_collection_data_type<R, T, Ts...> {
-  using Data = typename __get_collection_data_type<R, Ts...>::Data;
+  using type = typename __get_collection_data_type<R, Ts...>::type;
 };
 
 template <class... Ts>
@@ -182,12 +186,12 @@ struct __get_collection_output_type;
 
 template <typename R, class T>
 struct __get_collection_output_type<R, T> {
-  using Output = typename T::template Output<R>;
+  using type = typename T::template Output<R>;
 };
 
 template <typename R, class T, class... Ts>
 struct __get_collection_output_type<R, T, Ts...> {
-  using Output = typename __get_collection_output_type<R, Ts...>::Output;
+  using type = typename __get_collection_output_type<R, Ts...>::type;
 };
 
 template <class... Ts>

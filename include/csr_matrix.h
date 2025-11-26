@@ -1,13 +1,54 @@
 #ifndef AMIGO_CSR_MATRIX_H
 #define AMIGO_CSR_MATRIX_H
 
+#include <memory>
+
+#include "amigo.h"
 #include "node_owners.h"
 #include "ordering_utils.h"
 #include "vector.h"
 
+#ifdef AMIGO_USE_CUDA
+#include "cuda/csr_matrix_backend.cuh"
+#endif
+
 namespace amigo {
 
 template <typename T>
+class SerialCSRMatBackend {
+ public:
+  SerialCSRMatBackend() {}
+  ~SerialCSRMatBackend() {}
+
+  void allocate(int nrows_, int ncols_, int nnz_) {}
+  void copy_pattern_host_to_device(const int* rowp, const int* cols,
+                                   const int* diag) {}
+  void copy_data_device_to_host(T* data) {}
+  void copy_data_device_to_host(int ext_offset, int ext_size, T* ext_data) {}
+  void zero() {}
+  void add_diagonal(const T* values) {}
+  void get_device_data(const int* rowp[], const int* cols[], T* data[]) {
+    if (rowp) {
+      *rowp = nullptr;
+    }
+    if (cols) {
+      *cols = nullptr;
+    }
+    if (data) {
+      *data = nullptr;
+    }
+  }
+};
+
+#ifdef AMIGO_USE_CUDA
+template <typename T>
+using DefaultCSRMatBackend = CudaCSRMatBackend<T>;
+#else
+template <typename T>
+using DefaultCSRMatBackend = SerialCSRMatBackend<T>;
+#endif  // AMIGO_USE_CUDA
+
+template <typename T, class Backend = DefaultCSRMatBackend<T>>
 class CSRMat {
  public:
   /**
@@ -21,6 +62,7 @@ class CSRMat {
         rowp(nullptr),
         cols(nullptr),
         data(nullptr),
+        mem_loc(MemoryLocation::HOST_AND_DEVICE),
         sqdef_index(-1) {}
   ~CSRMat() {
     if (rowp) {
@@ -49,6 +91,7 @@ class CSRMat {
    * @param nnz Number of non-zeros
    * @param rowp Pointer into the rows of the matrix
    * @param cols Column indices
+   * @param mem_loc Memory location
    * @param row_owners Distribution of the rows
    * @param col_owners Distribution of the columns
    * @param sqdef_index Index at which 2x2 negative definite block matrix begins
@@ -56,14 +99,16 @@ class CSRMat {
   template <class ArrayType>
   static std::shared_ptr<CSRMat<T>> create_from_csr_data(
       int nrows, int ncols, int nnz, const ArrayType rowp_,
-      const ArrayType cols_, std::shared_ptr<NodeOwners> row_owners = nullptr,
+      const ArrayType cols_,
+      MemoryLocation mem_loc = MemoryLocation::HOST_AND_DEVICE,
+      std::shared_ptr<NodeOwners> row_owners = nullptr,
       std::shared_ptr<NodeOwners> col_owners = nullptr, int sqdef_index = -1) {
     int* rowp = new int[nrows + 1];
     int* cols = new int[nnz];
     std::copy(rowp_, rowp_ + (nrows + 1), rowp);
     std::copy(cols_, cols_ + nnz, cols);
 
-    return std::make_shared<CSRMat<T>>(nrows, ncols, nnz, rowp, cols,
+    return std::make_shared<CSRMat<T>>(nrows, ncols, nnz, rowp, cols, mem_loc,
                                        row_owners, col_owners, sqdef_index);
   }
 
@@ -84,6 +129,7 @@ class CSRMat {
    * @param ncols Number of columns
    * @param nelems Number of elements in the connectivity matrix
    * @param element_nodes Functor returning the number of nodes and node numbers
+   * @param mem_loc Memory location
    * @param row_owners Distribution of the rows
    * @param col_owners Distribution of the columns
    * @param sqdef_index Index at which 2x2 negative definite block matrix begins
@@ -91,6 +137,7 @@ class CSRMat {
   template <class Functor>
   static std::shared_ptr<CSRMat<T>> create_from_element_conn(
       int nrows, int ncols, int nelems, const Functor& element_nodes,
+      MemoryLocation mem_loc = MemoryLocation::HOST_AND_DEVICE,
       std::shared_ptr<NodeOwners> row_owners = nullptr,
       std::shared_ptr<NodeOwners> col_owners = nullptr, int sqdef_index = -1) {
     // Create the CSR structure
@@ -102,7 +149,7 @@ class CSRMat {
                                                 sort_columns, &rowp, &cols);
 
     int nnz = rowp[nrows];
-    return std::make_shared<CSRMat<T>>(nrows, ncols, nnz, rowp, cols,
+    return std::make_shared<CSRMat<T>>(nrows, ncols, nnz, rowp, cols, mem_loc,
                                        row_owners, col_owners, sqdef_index);
   }
 
@@ -118,6 +165,7 @@ class CSRMat {
   template <class Functor>
   static std::shared_ptr<CSRMat<T>> create_from_output_data(
       int nrows, int ncols, int nelems, const Functor& elements,
+      MemoryLocation mem_loc = MemoryLocation::HOST_AND_DEVICE,
       std::shared_ptr<NodeOwners> row_owners = nullptr,
       std::shared_ptr<NodeOwners> col_owners = nullptr) {
     int *rowp, *cols;
@@ -125,7 +173,7 @@ class CSRMat {
                                                &rowp, &cols);
     int nnz = rowp[nrows];
     int sqdef_index = -1;
-    return std::make_shared<CSRMat<T>>(nrows, ncols, nnz, rowp, cols,
+    return std::make_shared<CSRMat<T>>(nrows, ncols, nnz, rowp, cols, mem_loc,
                                        row_owners, col_owners, sqdef_index);
   }
 
@@ -141,13 +189,19 @@ class CSRMat {
     std::copy(cols, cols + nnz, dup_cols);
 
     return std::make_shared<CSRMat<T>>(nrows, ncols, nnz, dup_rowp, dup_cols,
-                                       row_owners, col_owners, sqdef_index);
+                                       mem_loc, row_owners, col_owners,
+                                       sqdef_index);
   }
 
   /**
    * @brief Zero the numerical values
    */
-  void zero() { std::fill(data, data + nnz, 0.0); }
+  void zero() {
+    if (data) {
+      std::fill(data, data + nnz, 0.0);
+    }
+    backend.zero();
+  }
 
   /**
    * @brief Extract a submatrix from the CSRMat class given the row and column
@@ -339,8 +393,8 @@ class CSRMat {
     new_rowp[0] = 0;
 
     return std::make_shared<CSRMat<T>>(new_nrows, new_ncols, new_nnz, new_rowp,
-                                       new_cols, row_owners, col_owners,
-                                       sqdef_index);
+                                       new_cols, mem_loc, row_owners,
+                                       col_owners, sqdef_index);
   }
 
   /**
@@ -429,19 +483,25 @@ class CSRMat {
    *
    * @param x The vector of diagonal elements
    */
+  template <ExecPolicy policy>
   void add_diagonal(const std::shared_ptr<Vector<T>>& x) {
-    int size = nrows;
-    if (row_owners) {
-      size = row_owners->get_local_size();
-    }
-    if (nrows < size) {
-      size = nrows;
-    }
-    const T* x_array = x->get_array();
-    for (int row = 0; row < size; row++) {
-      if (diag[row] != -1) {
-        data[diag[row]] += x_array[row];
+    if constexpr (policy == ExecPolicy::SERIAL ||
+                  policy == ExecPolicy::OPENMP) {
+      int size = nrows;
+      if (row_owners) {
+        size = row_owners->get_local_size();
       }
+      if (nrows < size) {
+        size = nrows;
+      }
+      const T* x_array = x->get_array();
+      for (int row = 0; row < size; row++) {
+        if (diag[row] != -1) {
+          data[diag[row]] += x_array[row];
+        }
+      }
+    } else if constexpr (policy == ExecPolicy::CUDA) {
+      backend.add_diagonal(x->get_device_array());
     }
   }
 
@@ -470,31 +530,33 @@ class CSRMat {
   }
 
   /**
-   * @brief Add a sorted row to the matrix
+   * @brief Get the locations in the data array of the sorted list of column
+   * indices in the specified row
    *
-   * @tparam ArrayType
-   * @param row
-   * @param nvalues
-   * @param indices
-   * @param values
+   * For this code to work corrrectly, the indices array must be sorted
+   *
+   * @param row Row that the search is performed in
+   * @param nindices Number of column indices to find
+   * @param indices Column indices to find (sorted in ascending order)
+   * @param loc Return locations within the CSR matrx
    */
-  template <class ArrayType>
-  void add_row_sorted(int row, int nvalues, const int indices[],
-                      const ArrayType values) {
-    int size = rowp[row + 1] - rowp[row];
+  void get_sorted_locations(int row, int nindices, const int indices[],
+                            int loc[]) {
+    int offset = rowp[row];
+    int size = rowp[row + 1] - offset;
     int* col_ptr = &cols[rowp[row]];
     T* data_ptr = &data[rowp[row]];
 
     int i = 0;  // index into input indices
-    int j = 0;  // index into col_ptr
+    int j = 0;  // index into col_ptr (the column indices for this row)
 
-    while (i < nvalues && j < size) {
+    while (i < nindices && j < size) {
       if (indices[i] < col_ptr[j]) {
         i++;
       } else if (indices[i] > col_ptr[j]) {
         j++;
       } else {
-        data_ptr[j] += values[i];
+        loc[i] = offset + j;
         i++;
         j++;
       }
@@ -585,6 +647,17 @@ class CSRMat {
   }
 
   /**
+   * @brief Get the device data from the CSR object
+   *
+   * @param rowp Pointer into each row
+   * @param cols Column indices
+   * @param data Numerical entries
+   */
+  void get_device_data(const int* rowp_[], const int* cols_[], T* data_[]) {
+    backend.get_device_data(rowp_, cols_, data_);
+  }
+
+  /**
    * @brief Get the index of the first sqdef element
    *
    */
@@ -604,7 +677,29 @@ class CSRMat {
    */
   std::shared_ptr<NodeOwners> get_column_owners() { return col_owners; }
 
+  /**
+   * @brief Copy the non-zero pattern to the device
+   */
+  void copy_pattern_host_to_device() {
+    backend.copy_pattern_host_to_device(rowp, cols, diag);
+  }
+
+  /**
+   * @brief Copy data computed on the device back to the host
+   */
+  void copy_data_device_to_host() { backend.copy_data_device_to_host(data); }
+
+  /**
+   * @brief Copy external data computed on the device back to the host
+   */
+  void copy_ext_data_device_to_host(int num_local_rows, T* ext_data) {
+    int ext_offset = rowp[num_local_rows];
+    int ext_size = nnz - ext_offset;
+    backend.copy_data_device_to_host(ext_offset, ext_size, ext_data);
+  }
+
   CSRMat(int nrows, int ncols, int nnz, int* rowp, int* cols,
+         MemoryLocation mem_loc = MemoryLocation::HOST_AND_DEVICE,
          std::shared_ptr<NodeOwners> row_owners = nullptr,
          std::shared_ptr<NodeOwners> col_owners = nullptr, int sqdef_index = -1)
       : nrows(nrows),
@@ -612,12 +707,14 @@ class CSRMat {
         nnz(nnz),
         rowp(rowp),
         cols(cols),
+        data(nullptr),
+        mem_loc(mem_loc),
         row_owners(row_owners),
         col_owners(col_owners),
         sqdef_index(sqdef_index) {
     diag = new int[nrows];
 
-    int nrows_local = nrows;
+    int num_local_rows = nrows;
     int offset = 0;
 
     if (row_owners) {
@@ -625,11 +722,11 @@ class CSRMat {
       int rank;
       MPI_Comm_rank(row_owners->get_mpi_comm(), &rank);
       const int* row_ranges = row_owners->get_range();
-      nrows_local = row_owners->get_local_size();
+      num_local_rows = row_owners->get_local_size();
       offset = row_ranges[rank];
     }
 
-    for (int i = 0; i < nrows_local; i++) {
+    for (int i = 0; i < num_local_rows; i++) {
       int size = rowp[i + 1] - rowp[i];
       int* start = &cols[rowp[i]];
       int* end = start + size;
@@ -643,23 +740,32 @@ class CSRMat {
         diag[i] = -1;
       }
     }
-    for (int i = nrows_local; i < nrows; i++) {
+    for (int i = num_local_rows; i < nrows; i++) {
       diag[i] = -1;
     }
 
-    // Don't forget to allocate the space
-    data = new T[nnz];
-    std::fill(data, data + nnz, 0.0);
+    // Allocate space for the data on the host
+    if (mem_loc != MemoryLocation::DEVICE_ONLY) {
+      data = new T[nnz];
+      std::fill(data, data + nnz, 0.0);
+    }
+
+    // Allocate space on the GPU
+    if (mem_loc != MemoryLocation::HOST_ONLY) {
+      backend.allocate(nrows, ncols, nnz);
+      backend.copy_pattern_host_to_device(rowp, cols, diag);
+    }
   }
 
  private:
-  int nrows;  // Number of rows in the matrix
-  int ncols;  // Number of columns in the matrix
-  int nnz;    // Number of non-zeros in the matrix
-  int* diag;  // The diagonal entry
-  int* rowp;  // Pointer into the column array
-  int* cols;  // Column indices
-  T* data;    // Matrix values
+  int nrows;               // Number of rows in the matrix
+  int ncols;               // Number of columns in the matrix
+  int nnz;                 // Number of non-zeros in the matrix
+  int* diag;               // The diagonal entry
+  int* rowp;               // Pointer into the column array
+  int* cols;               // Column indices
+  T* data;                 // Matrix values
+  MemoryLocation mem_loc;  // Memory location
 
   // For parallel matrices
   std::shared_ptr<NodeOwners> row_owners;
@@ -671,6 +777,9 @@ class CSRMat {
   //     [ B   -C    ]
   int sqdef_index;  // Index at which C starts. Negative value indicates
   // that the matrix is not SQD.
+
+  // Backend for the GPU
+  Backend backend;
 };
 
 }  // namespace amigo

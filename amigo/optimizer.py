@@ -1,10 +1,11 @@
 import warnings
+import sys
 import numpy as np
 from scipy.sparse.linalg import MatrixRankWarning
 from scipy.sparse import csr_matrix
 from scipy.sparse.linalg import splu, eigsh
 
-from .amigo import InteriorPointOptimizer
+from .amigo import InteriorPointOptimizer, MemoryLocation
 from .model import ModelVector
 from .utils import tocsr
 
@@ -102,10 +103,35 @@ def gmres(mult, precon, b, x, msub=20, rtol=1e-2, atol=1e-30):
     return
 
 
+class DirectCudaSolver:
+    def __init__(self, problem):
+        self.problem = problem
+
+        try:
+            from .amigo import CSRMatFactorCuda
+        except:
+            raise NotImplementedError("Amigo compiled without CUDA support")
+
+        loc = MemoryLocation.DEVICE_ONLY
+        self.hess = self.problem.create_matrix(loc)
+        self.solver = CSRMatFactorCuda(self.hess)
+
+    def factor(self, alpha, x, diag):
+        self.problem.hessian(alpha, x, self.hess)
+        self.problem.add_diagonal(diag, self.hess)
+        self.solver.factor()
+        return
+
+    def solve(self, bx, px):
+        self.solver.solve(bx, px)
+        return
+
+
 class DirectScipySolver:
     def __init__(self, problem):
         self.problem = problem
-        self.hess = self.problem.create_matrix()
+        loc = MemoryLocation.HOST_AND_DEVICE
+        self.hess = self.problem.create_matrix(loc)
         self.nrows, self.ncols, self.nnz, self.rowp, self.cols = (
             self.hess.get_nonzero_structure()
         )
@@ -113,14 +139,16 @@ class DirectScipySolver:
         self.lu = None
         return
 
-    def factor(self, x, diag, zero_design_contrib=False):
+    def factor(self, alpha, x, diag):
         """
         Compute and factor the Hessian matrix
         """
 
-        # Compute the Hessian
-        self.problem.hessian(x, self.hess, zero_design_contrib=zero_design_contrib)
-        self.hess.add_diagonal(diag)
+        # Compute the Hessian and add the diagonal values
+        self.problem.hessian(alpha, x, self.hess)
+        self.problem.add_diagonal(diag, self.hess)
+
+        self.hess.copy_data_device_to_host()
 
         # Build the CSR matrix and convert to CSC
         shape = (self.nrows, self.ncols)
@@ -137,17 +165,19 @@ class DirectScipySolver:
         Solve the KKT system
         """
 
+        bx.copy_device_to_host()
         px.get_array()[:] = self.lu.solve(bx.get_array())
+        px.copy_host_to_device()
 
         return
 
-    def compute_eigenvalues(self, x, diag=None, k=20, sigma=0.0, which="LM"):
+    def compute_eigenvalues(self, alpha, x, diag=None, k=20, sigma=0.0, which="LM"):
         """
         Compute the eigenvalues and eigenvectors
         """
-        self.problem.hessian(x, self.hess, zero_design_contrib=False)
+        self.problem.hessian(alpha, x, self.hess)
         if diag is not None:
-            self.hess.add_diagonal(diag)
+            self.problem.add_diagonal(diag, self.hess)
 
         data = self.hess.get_data()
         H = csr_matrix((data, self.cols, self.rowp), shape=(self.nrows, self.ncols))
@@ -194,11 +224,11 @@ class LNKSInexactSolver:
 
         return
 
-    def factor(self, x, diag, zero_design_contrib=False):
+    def factor(self, alpha, x, diag):
 
         # Compute the Hessian
-        self.problem.hessian(x, self.hess, zero_design_contrib=zero_design_contrib)
-        self.hess.add_diagonal(diag)
+        self.problem.hessian(alpha, x, self.hess)
+        self.problem.add_diagonal(diag, self.hess)
 
         # Extract the submatrices
         self.Hmat = tocsr(self.hess)
@@ -261,10 +291,10 @@ class DirectPetscSolver:
 
         return
 
-    def factor(self, x, diag):
+    def factor(self, alpha, x, diag):
         # Compute the Hessian
-        self.mpi_problem.hessian(x, self.hess)
-        self.hess.add_diagonal(diag)
+        self.mpi_problem.hessian(alpha, x, self.hess)
+        self.mpi_problem.add_diagonal(diag, self.hess)
 
         # Extract the Hessian entries
         data = self.hess.get_data()
@@ -392,11 +422,17 @@ class Optimizer:
             self.optimizer = InteriorPointOptimizer(
                 self.mpi_problem, self.mpi_lower, self.mpi_upper
             )
+            data_vec = self.mpi_problem.get_data_vector()
         else:
             x_vec = self.x
             self.optimizer = InteriorPointOptimizer(
                 self.problem, self.lower, self.upper
             )
+            data_vec = self.problem.get_data_vector()
+
+        # Copy the essential information from host to device
+        x_vec.copy_host_to_device()
+        data_vec.copy_host_to_device()
 
         # Create data that will be used in conjunction with the optimizer
         self.vars = self.optimizer.create_opt_vector(x_vec)
@@ -435,6 +471,7 @@ class Optimizer:
                 else:
                     line += f"{iter_data[name]:15.6e} "
         print(line)
+        sys.stdout.flush()
 
         return
 
@@ -468,18 +505,6 @@ class Optimizer:
 
         return default
 
-    def _compute_complementarity_and_uniformity(self):
-        """
-        Compute both complementarity and uniformity measure in a single pass.
-        Returns (complementarity, uniformity) where:
-        - complementarity is the average: y^T w / m
-        - uniformity ξ = min_i [w_i y_i / (y^T w / m)]
-        """
-        complementarity, uniformity = self.optimizer.compute_complementarity(
-            self.vars, True
-        )
-        return complementarity, uniformity
-
     def _compute_barrier_heuristic(self, xi, complementarity, gamma, r):
         """
         Compute the heuristic barrier parameter.
@@ -501,35 +526,31 @@ class Optimizer:
         [ A     0  ][ lambda ] =   [             0 ]
 
         Note that the w components are discarded.
+
+        On input to the function, the design variables stored in self.vars.get_solution() are
+        at the initial point and the multipliers are initialized to zero.
         """
 
-        # Get which variables are multipliers/constraints
-        if self.distribute:
-            is_mult = self.mpi_problem.get_multiplier_indicator()
-        else:
-            is_mult = self.problem.get_multiplier_indicator()
-        is_mult_array = is_mult.get_array()
-
-        # Set the diagonal entries of the matrix
-        diag_array = self.diag.get_array()
-        diag_array[:] = 1.0
-        diag_array[is_mult_array != 0] = 0.0
-
-        # Compute the residual
+        # Compute the residual based on the gradient. At this point the multipliers are zero
+        x = self.vars.get_solution()
         self.optimizer.compute_residual(0.0, 0.0, self.vars, self.grad, self.res)
 
-        # Zero the constraint contributions
-        res_array = self.res.get_array()
-        res_array[is_mult_array != 0] = 0.0
+        # Zero out the constraint contributions from the right-hand-side
+        self.optimizer.set_multipliers_value(0.0, self.res)
 
-        # Find the solution values
-        x = self.vars.get_solution()
-        self.solver.factor(x, self.diag, zero_design_contrib=True)
+        # Set the diagonal entries - zero everywhere except in entries with the design variables
+        # where the diagonal = 1.0
+        self.diag.zero()
+        self.optimizer.set_design_vars_value(1.0, self.diag)
+
+        # Set up the system above (Note that alpha = 0.0, zeroing the objective contributions
+        # to the Hessian. Since the multipliers are also zero, they contribute nothing to the
+        # design-variable Hessian. Only the constraint Jacobians remain.)
+        self.solver.factor(0.0, x, self.diag)
         self.solver.solve(self.res, self.px)
 
-        # Update the multiplier values
-        x_array = x.get_array()
-        x_array[is_mult_array != 0] = self.px.get_array()[is_mult_array != 0]
+        # Copy the multipiler values from self.px to x
+        self.optimizer.copy_multipliers(x, self.px)
 
         return
 
@@ -541,9 +562,9 @@ class Optimizer:
         # Compute the gradient at the new point with the updated multipliers
         x = self.vars.get_solution()
         if self.distribute:
-            self.mpi_problem.gradient(x, self.grad)
+            self.mpi_problem.gradient(1.0, x, self.grad)
         else:
-            self.problem.gradient(x, self.grad)
+            self.problem.gradient(1.0, x, self.grad)
 
         # Compute the residual
         mu = 0.0
@@ -555,7 +576,7 @@ class Optimizer:
         self.optimizer.compute_diagonal(self.vars, self.diag)
 
         # Solve the KKT system
-        self.solver.factor(x, self.diag)
+        self.solver.factor(1.0, x, self.diag)
         self.solver.solve(self.res, self.px)
 
         # Compute the full update based on the reduced variable update
@@ -567,42 +588,26 @@ class Optimizer:
             beta_min, self.vars, self.update, self.temp
         )
 
-        # Copy over the design point
-        xt_array = self.temp.get_solution().get_array()
-        x_array = self.vars.get_solution().get_array()
-        xt_array[:] = x_array[:]
+        # Copy the multipliers to the solution
+        xt = self.temp.get_solution()
+        self.optimizer.copy_multipliers(x, xt)
 
         # Now, compute the updates based
-        barrier = self.optimizer.compute_complementarity(self.temp)
+        barrier, _ = self.optimizer.compute_complementarity(self.temp)
 
         self.vars.copy(self.temp)
 
         return barrier
 
     def _add_regularization_terms(self, diag, eps_x=1e-4, eps_z=1e-4):
-        if self.distribute:
-            is_mult = self.mpi_problem.get_multiplier_indicator()
-        else:
-            is_mult = self.problem.get_multiplier_indicator()
-        is_mult_array = is_mult.get_array()
-
-        # Add regularization terms
-        diag_array = diag.get_array()
-        diag_array[is_mult_array == 0] += eps_x
-        diag_array[is_mult_array == 1] -= eps_z
+        self.optimizer.set_design_vars_value(eps_x, diag)
+        self.optimizer.set_multipliers_value(-eps_z, diag)
 
         return
 
     def _zero_multipliers(self, x):
         # Zero the multiplier contributions
-        if self.distribute:
-            is_mult = self.mpi_problem.get_multiplier_indicator()
-        else:
-            is_mult = self.problem.get_multiplier_indicator()
-        is_mult_array = is_mult.get_array()
-
-        x_array = x.get_array()
-        x_array[is_mult_array != 0] = 0.0
+        self.optimizer.set_multipliers_value(0.0, x)
 
         return
 
@@ -644,10 +649,10 @@ class Optimizer:
         # Compute the gradient
         if self.distribute:
             self.mpi_problem.update(x)
-            self.mpi_problem.gradient(x, self.grad)
+            self.mpi_problem.gradient(1.0, x, self.grad)
         else:
             self.problem.update(x)
-            self.problem.gradient(x, self.grad)
+            self.problem.gradient(1.0, x, self.grad)
 
         # Set the initial point and slack variable
         self.optimizer.initialize_multipliers_and_slacks(
@@ -656,10 +661,9 @@ class Optimizer:
 
         # Initialize the multipliers
         if options["init_affine_step_multipliers"]:
-            # Compute the
             self._compute_least_squares_multipliers()
 
-            # Compute the affine step multipliers and
+            # Compute the affine step multipliers and the new barrier parameter
             self.barrier_param = self._compute_affine_multipliers(
                 beta_min=self.barrier_param, gamma_penalty=self.gamma_penalty
             )
@@ -669,10 +673,10 @@ class Optimizer:
         # Compute the gradient
         if self.distribute:
             self.mpi_problem.update(x)
-            self.mpi_problem.gradient(x, self.grad)
+            self.mpi_problem.gradient(1.0, x, self.grad)
         else:
             self.problem.update(x)
-            self.problem.gradient(x, self.grad)
+            self.problem.gradient(1.0, x, self.grad)
 
         line_iters = 0
         alpha_x_prev = 0.0
@@ -703,20 +707,20 @@ class Optimizer:
                 "z_index": z_index_prev,
             }
 
-            if comm_rank == 0:
-                self.write_log(i, iter_data)
-
             # Compute and store xi and complementarity for heuristic (display table after optimization)
             if (
                 options["barrier_strategy"] == "heuristic"
                 and options["verbose_barrier"]
             ):
-                complementarity, xi = self._compute_complementarity_and_uniformity()
+                complementarity, xi = self.optimizer.compute_complementarity(self.vars)
                 iter_data["xi"] = xi
                 iter_data["complementarity"] = complementarity
                 heuristic_data.append(
                     {"iteration": i, "xi": xi, "complementarity": complementarity}
                 )
+
+            if comm_rank == 0:
+                self.write_log(i, iter_data)
 
             iter_data["x"] = {}
             if xview is not None:
@@ -774,7 +778,7 @@ class Optimizer:
             self.optimizer.compute_diagonal(self.vars, self.diag)
 
             # Solve the KKT system with the computed diagonal entries
-            self.solver.factor(x, self.diag)
+            self.solver.factor(1.0, x, self.diag)
             self.solver.solve(self.res, self.px)
 
             # Compute the full update based on the reduced variable update
@@ -825,10 +829,10 @@ class Optimizer:
                 xt = self.temp.get_solution()
                 if self.distribute:
                     self.mpi_problem.update(xt)
-                    self.mpi_problem.gradient(xt, self.grad)
+                    self.mpi_problem.gradient(1.0, xt, self.grad)
                 else:
                     self.problem.update(xt)
-                    self.problem.gradient(xt, self.grad)
+                    self.problem.gradient(1.0, xt, self.grad)
 
                 # Compute the residual at the perturbed point
                 res_norm_new = self.optimizer.compute_residual(
@@ -852,24 +856,6 @@ class Optimizer:
             alpha_z_prev = alpha * alpha_z
             x_index_prev = x_index
             z_index_prev = z_index
-
-        # Print heuristic barrier table after optimization completes
-        if (
-            comm_rank == 0
-            and options["barrier_strategy"] == "heuristic"
-            and options["verbose_barrier"]
-        ):
-            if len(heuristic_data) > 0:
-                print()
-                print(f"{'iteration':>10s} {'xi':>15s} {'complementarity':>15s}")
-                for idx, data in enumerate(heuristic_data):
-                    if idx % 10 == 0 and idx > 0:
-                        print(
-                            f"{'iteration':>10s} {'xi':>15s} {'complementarity':>15s}"
-                        )
-                    print(
-                        f"{data['iteration']:10d} {data['xi']:15.6e} {data['complementarity']:15.6e}"
-                    )
 
         return opt_data
 
@@ -911,7 +897,7 @@ class Optimizer:
         self.optimizer.compute_diagonal(self.vars, self.diag)
 
         # Factor the KKT system
-        self.solver.factor(x, self.diag)
+        self.solver.factor(1.0, x, self.diag)
 
         if method == "adjoint":
             for i in range(len(of_indices)):

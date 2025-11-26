@@ -65,7 +65,7 @@ inputs = ["src.x1", "src.x2", "src.x3"]
 constraints = ["src.c1", "src.c2"]
 model.add_external_component("extrn", ExternalQuadratic(), inputs, constraints)
 
-model.build_module(debug=True)
+model.build_module()
 model.initialize()
 
 # Create the design variable vector and provide an initial guess

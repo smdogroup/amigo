@@ -51,7 +51,7 @@ class Quadratic(am.Component):
 model = am.Model("paraboloid")
 model.add_component("quad", 1, Quadratic())
 
-model.build_module(debug=True)
+model.build_module()
 model.initialize()
 
 x = model.create_vector()
@@ -71,6 +71,8 @@ prob.model.add_subsystem(
     am.ExplicitOpenMDAOPostOptComponent(
         data=["quad.a", "quad.b"],  # The Amigo names
         output=["quad.f"],
+        data_mapping={"quad.a": "a", "quad.b": "b"},
+        output_mapping={"quad.f": "f"},
         model=model,
         x=x,
         lower=lower,
@@ -81,13 +83,13 @@ prob.model.add_subsystem(
 prob.model.add_subsystem("paraboloid", Paraboloid())
 
 # Note that I'm adding an underscore here to the amigo names - this is a bit annoying
-prob.model.connect("indeps.x", "optimizer.quad_a")
+prob.model.connect("indeps.x", "optimizer.a")
 prob.model.connect("indeps.x", "paraboloid.x")
 
-prob.model.connect("indeps.y", "optimizer.quad_b")
+prob.model.connect("indeps.y", "optimizer.b")
 prob.model.connect("indeps.y", "paraboloid.y")
 
-prob.model.connect("optimizer.quad_f", "paraboloid.z")
+prob.model.connect("optimizer.f", "paraboloid.z")
 
 # setup the optimization
 prob.driver = om.ScipyOptimizeDriver()
