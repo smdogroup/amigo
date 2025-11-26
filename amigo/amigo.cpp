@@ -256,6 +256,16 @@ py::array_t<int> reorder_model(amigo::OrderingType order_type,
   return iperm_output;
 }
 
+namespace detail {
+#ifdef AMIGO_USE_OPENMP
+inline constexpr amigo::ExecPolicy policy = amigo::ExecPolicy::OPENMP;
+#elif defined(AMIGO_USE_CUDA)
+inline constexpr amigo::ExecPolicy policy = amigo::ExecPolicy::CUDA;
+#else
+inline constexpr amigo::ExecPolicy policy = amigo::ExecPolicy::SERIAL;
+#endif
+}  // namespace detail
+
 PYBIND11_MODULE(amigo, mod) {
   mod.doc() = "Amigo: A friendly library for MDO on HPC";
 
@@ -263,14 +273,6 @@ PYBIND11_MODULE(amigo, mod) {
   if (import_mpi4py() < 0) {
     throw pybind11::error_already_set();
   }
-
-#ifdef AMIGO_USE_OPENMP
-  constexpr amigo::ExecPolicy policy = amigo::ExecPolicy::OPENMP;
-#elif defined(AMIGO_USE_CUDA)
-  constexpr amigo::ExecPolicy policy = amigo::ExecPolicy::CUDA;
-#else
-  constexpr amigo::ExecPolicy policy = amigo::ExecPolicy::SERIAL;
-#endif
 
   py::enum_<amigo::OrderingType>(mod, "OrderingType")
       .value("NESTED_DISSECTION", amigo::OrderingType::NESTED_DISSECTION)
@@ -337,22 +339,25 @@ PYBIND11_MODULE(amigo, mod) {
   bind_vector<int>(mod, "VectorInt");
   bind_vector<double>(mod, "Vector");
 
-  py::class_<amigo::ComponentGroupBase<double, policy>,
-             std::shared_ptr<amigo::ComponentGroupBase<double, policy>>>(
+  py::class_<
+      amigo::ComponentGroupBase<double, detail::policy>,
+      std::shared_ptr<amigo::ComponentGroupBase<double, detail::policy>>>(
       mod, "ComponentGroupBase");
 
-  py::class_<amigo::ExternalComponentGroup<double, policy>,
-             amigo::ComponentGroupBase<double, policy>,
-             std::shared_ptr<amigo::ExternalComponentGroup<double, policy>>>(
+  py::class_<
+      amigo::ExternalComponentGroup<double, detail::policy>,
+      amigo::ComponentGroupBase<double, detail::policy>,
+      std::shared_ptr<amigo::ExternalComponentGroup<double, detail::policy>>>(
       mod, "ExternalComponentGroup")
-      .def(py::init([policy](py::array_t<int> vars, py::array_t<int> cons,
-                             py::array_t<int> rowp, py::array_t<int> cols,
-                             py::object cb) {
+      .def(py::init([](py::array_t<int> vars, py::array_t<int> cons,
+                       py::array_t<int> rowp, py::array_t<int> cols,
+                       py::object cb) {
         std::shared_ptr<PyExternalCallback<double>> extrn =
             std::make_shared<PyExternalCallback<double>>(
                 vars.size(), cons.size(), rowp.data(), cols.data(), cb);
 
-        return std::make_shared<amigo::ExternalComponentGroup<double, policy>>(
+        return std::make_shared<
+            amigo::ExternalComponentGroup<double, detail::policy>>(
             vars.size(), vars.data(), cons.size(), cons.data(), extrn);
       }));
 
@@ -384,100 +389,109 @@ PYBIND11_MODULE(amigo, mod) {
            })
       .def("get_local_size", &amigo::NodeOwners::get_local_size);
 
-  py::class_<amigo::OptimizationProblem<double, policy>,
-             std::shared_ptr<amigo::OptimizationProblem<double, policy>>>(
+  py::class_<
+      amigo::OptimizationProblem<double, detail::policy>,
+      std::shared_ptr<amigo::OptimizationProblem<double, detail::policy>>>(
       mod, "OptimizationProblem")
       .def(py::init(
-          [policy](
-              py::object pyobj, std::shared_ptr<amigo::NodeOwners> data_owners,
-              std::shared_ptr<amigo::NodeOwners> var_owners,
-              std::shared_ptr<amigo::NodeOwners> output_owners,
-              std::shared_ptr<amigo::Vector<int>> is_multiplier,
-              const std::vector<std::shared_ptr<
-                  amigo::ComponentGroupBase<double, policy>>>& components) {
+          [](py::object pyobj, std::shared_ptr<amigo::NodeOwners> data_owners,
+             std::shared_ptr<amigo::NodeOwners> var_owners,
+             std::shared_ptr<amigo::NodeOwners> output_owners,
+             std::shared_ptr<amigo::Vector<int>> is_multiplier,
+             const std::vector<std::shared_ptr<amigo::ComponentGroupBase<
+                 double, detail::policy>>>& components) {
             MPI_Comm comm = MPI_COMM_SELF;
             if (!pyobj.is_none()) {
               comm = *PyMPIComm_Get(pyobj.ptr());
             }
-            return std::make_shared<amigo::OptimizationProblem<double, policy>>(
+            return std::make_shared<
+                amigo::OptimizationProblem<double, detail::policy>>(
                 comm, data_owners, var_owners, output_owners, is_multiplier,
                 components);
           }))
       .def("get_num_variables",
-           &amigo::OptimizationProblem<double, policy>::get_num_variables)
+           &amigo::OptimizationProblem<double,
+                                       detail::policy>::get_num_variables)
       .def("partition_from_root",
-           &amigo::OptimizationProblem<double, policy>::partition_from_root,
+           &amigo::OptimizationProblem<double,
+                                       detail::policy>::partition_from_root,
            py::arg("root") = 0)
       .def("create_vector",
-           &amigo::OptimizationProblem<double, policy>::create_vector,
+           &amigo::OptimizationProblem<double, detail::policy>::create_vector,
            py::arg("loc") = amigo::MemoryLocation::HOST_AND_DEVICE)
       .def("create_data_vector",
-           &amigo::OptimizationProblem<double, policy>::create_data_vector,
+           &amigo::OptimizationProblem<double,
+                                       detail::policy>::create_data_vector,
            py::arg("loc") = amigo::MemoryLocation::HOST_AND_DEVICE)
       .def("get_data_vector",
-           &amigo::OptimizationProblem<double, policy>::get_data_vector)
+           &amigo::OptimizationProblem<double, detail::policy>::get_data_vector)
       .def("set_data_vector",
-           &amigo::OptimizationProblem<double, policy>::set_data_vector)
+           &amigo::OptimizationProblem<double, detail::policy>::set_data_vector)
       .def(
           "get_multiplier_indicator",
-          &amigo::OptimizationProblem<double, policy>::get_multiplier_indicator)
-      .def(
-          "get_local_to_global_node_numbers",
           &amigo::OptimizationProblem<double,
-                                      policy>::get_local_to_global_node_numbers)
-      .def(
-          "get_local_to_global_data_numbers",
-          &amigo::OptimizationProblem<double,
-                                      policy>::get_local_to_global_data_numbers)
-      .def("update", &amigo::OptimizationProblem<double, policy>::update)
+                                      detail::policy>::get_multiplier_indicator)
+      .def("get_local_to_global_node_numbers",
+           &amigo::OptimizationProblem<
+               double, detail::policy>::get_local_to_global_node_numbers)
+      .def("get_local_to_global_data_numbers",
+           &amigo::OptimizationProblem<
+               double, detail::policy>::get_local_to_global_data_numbers)
+      .def("update",
+           &amigo::OptimizationProblem<double, detail::policy>::update)
       .def("add_diagonal",
-           &amigo::OptimizationProblem<double, policy>::add_diagonal)
+           &amigo::OptimizationProblem<double, detail::policy>::add_diagonal)
       .def("lagrangian",
-           &amigo::OptimizationProblem<double, policy>::lagrangian,
+           &amigo::OptimizationProblem<double, detail::policy>::lagrangian,
            py::arg("alpha"), py::arg("x"))
-      .def("gradient", &amigo::OptimizationProblem<double, policy>::gradient,
+      .def("gradient",
+           &amigo::OptimizationProblem<double, detail::policy>::gradient,
            py::arg("alpha"), py::arg("x"), py::arg("grad"))
       .def("create_matrix",
-           &amigo::OptimizationProblem<double, policy>::create_matrix,
+           &amigo::OptimizationProblem<double, detail::policy>::create_matrix,
            py::arg("loc") = amigo::MemoryLocation::HOST_AND_DEVICE)
-      .def("hessian", &amigo::OptimizationProblem<double, policy>::hessian,
+      .def("hessian",
+           &amigo::OptimizationProblem<double, detail::policy>::hessian,
            py::arg("alpha"), py::arg("x"), py::arg("hess"))
       .def("scatter_vector",
-           &amigo::OptimizationProblem<double, policy>::scatter_vector<double>,
+           &amigo::OptimizationProblem<double,
+                                       detail::policy>::scatter_vector<double>,
            py::arg("root_vec"), py::arg("dist_problem"), py::arg("dist_vec"),
            py::arg("root") = 0, py::arg("distribute") = true)
       .def("gather_vector",
-           &amigo::OptimizationProblem<double, policy>::gather_vector<double>,
+           &amigo::OptimizationProblem<double,
+                                       detail::policy>::gather_vector<double>,
            py::arg("dist_problem"), py::arg("dist_vec"), py::arg("root_vec"),
            py::arg("root") = 0)
       .def("scatter_data_vector",
-           &amigo::OptimizationProblem<double,
-                                       policy>::scatter_data_vector<double>,
+           &amigo::OptimizationProblem<
+               double, detail::policy>::scatter_data_vector<double>,
            py::arg("root_vec"), py::arg("dist_problem"), py::arg("dist_vec"),
            py::arg("root") = 0, py::arg("distribute") = true)
       .def("create_output_vector",
-           &amigo::OptimizationProblem<double, policy>::create_output_vector)
+           &amigo::OptimizationProblem<double,
+                                       detail::policy>::create_output_vector)
       .def("compute_output",
-           &amigo::OptimizationProblem<double, policy>::compute_output)
-      .def(
-          "create_output_jacobian_wrt_input",
-          &amigo::OptimizationProblem<double,
-                                      policy>::create_output_jacobian_wrt_input)
+           &amigo::OptimizationProblem<double, detail::policy>::compute_output)
+      .def("create_output_jacobian_wrt_input",
+           &amigo::OptimizationProblem<
+               double, detail::policy>::create_output_jacobian_wrt_input)
       .def("create_output_jacobian_wrt_data",
-           &amigo::OptimizationProblem<double,
-                                       policy>::create_output_jacobian_wrt_data)
+           &amigo::OptimizationProblem<
+               double, detail::policy>::create_output_jacobian_wrt_data)
       .def("output_jacobian_wrt_input",
-           &amigo::OptimizationProblem<double,
-                                       policy>::output_jacobian_wrt_input)
+           &amigo::OptimizationProblem<
+               double, detail::policy>::output_jacobian_wrt_input)
       .def(
           "output_jacobian_wrt_data",
-          &amigo::OptimizationProblem<double, policy>::output_jacobian_wrt_data)
+          &amigo::OptimizationProblem<double,
+                                      detail::policy>::output_jacobian_wrt_data)
       .def("create_gradient_jacobian_wrt_data",
            &amigo::OptimizationProblem<
-               double, policy>::create_gradient_jacobian_wrt_data)
+               double, detail::policy>::create_gradient_jacobian_wrt_data)
       .def("gradient_jacobian_wrt_data",
-           &amigo::OptimizationProblem<double,
-                                       policy>::gradient_jacobian_wrt_data);
+           &amigo::OptimizationProblem<
+               double, detail::policy>::gradient_jacobian_wrt_data);
 
   py::class_<amigo::AliasTracker<int>>(mod, "AliasTracker")
       .def(py::init<int>(), py::arg("size"))
@@ -513,15 +527,17 @@ PYBIND11_MODULE(amigo, mod) {
       .def("zero", &amigo::OptVector<double>::zero)
       .def("copy", &amigo::OptVector<double>::copy);
 
-  py::class_<amigo::InteriorPointOptimizer<double, policy>,
-             std::shared_ptr<amigo::InteriorPointOptimizer<double, policy>>>(
+  py::class_<
+      amigo::InteriorPointOptimizer<double, detail::policy>,
+      std::shared_ptr<amigo::InteriorPointOptimizer<double, detail::policy>>>(
       mod, "InteriorPointOptimizer")
-      .def(py::init<std::shared_ptr<amigo::OptimizationProblem<double, policy>>,
-                    std::shared_ptr<amigo::Vector<double>>,
-                    std::shared_ptr<amigo::Vector<double>>>())
+      .def(py::init<
+           std::shared_ptr<amigo::OptimizationProblem<double, detail::policy>>,
+           std::shared_ptr<amigo::Vector<double>>,
+           std::shared_ptr<amigo::Vector<double>>>())
       .def(
           "create_opt_vector",
-          [](const amigo::InteriorPointOptimizer<double, policy>& self,
+          [](const amigo::InteriorPointOptimizer<double, detail::policy>& self,
              py::object x = py::none()) {
             if (!x.is_none()) {
               return self.create_opt_vector(
@@ -532,25 +548,32 @@ PYBIND11_MODULE(amigo, mod) {
           py::arg("x") = py::none())
       .def(
           "set_multipliers_value",
-          &amigo::InteriorPointOptimizer<double, policy>::set_multipliers_value)
+          &amigo::InteriorPointOptimizer<double,
+                                         detail::policy>::set_multipliers_value)
       .def(
           "set_design_vars_value",
-          &amigo::InteriorPointOptimizer<double, policy>::set_design_vars_value)
+          &amigo::InteriorPointOptimizer<double,
+                                         detail::policy>::set_design_vars_value)
       .def("copy_multipliers",
-           &amigo::InteriorPointOptimizer<double, policy>::copy_multipliers)
+           &amigo::InteriorPointOptimizer<double,
+                                          detail::policy>::copy_multipliers)
       .def("copy_design_vars",
-           &amigo::InteriorPointOptimizer<double, policy>::copy_design_vars)
+           &amigo::InteriorPointOptimizer<double,
+                                          detail::policy>::copy_design_vars)
       .def("initialize_multipliers_and_slacks",
            &amigo::InteriorPointOptimizer<
-               double, policy>::initialize_multipliers_and_slacks)
+               double, detail::policy>::initialize_multipliers_and_slacks)
       .def("compute_residual",
-           &amigo::InteriorPointOptimizer<double, policy>::compute_residual)
+           &amigo::InteriorPointOptimizer<double,
+                                          detail::policy>::compute_residual)
       .def("compute_update",
-           &amigo::InteriorPointOptimizer<double, policy>::compute_update)
+           &amigo::InteriorPointOptimizer<double,
+                                          detail::policy>::compute_update)
       .def("compute_diagonal",
-           &amigo::InteriorPointOptimizer<double, policy>::compute_diagonal)
+           &amigo::InteriorPointOptimizer<double,
+                                          detail::policy>::compute_diagonal)
       .def("compute_max_step",
-           [](const amigo::InteriorPointOptimizer<double, policy>& self,
+           [](const amigo::InteriorPointOptimizer<double, detail::policy>& self,
               const double tau,
               const std::shared_ptr<amigo::OptVector<double>> vars,
               const std::shared_ptr<amigo::OptVector<double>> update) {
@@ -561,10 +584,11 @@ PYBIND11_MODULE(amigo, mod) {
              return py::make_tuple(alpha_x, x_index, alpha_z, z_index);
            })
       .def("apply_step_update",
-           &amigo::InteriorPointOptimizer<double, policy>::apply_step_update)
+           &amigo::InteriorPointOptimizer<double,
+                                          detail::policy>::apply_step_update)
       .def(
           "compute_complementarity",
-          [](const amigo::InteriorPointOptimizer<double, policy>& self,
+          [](const amigo::InteriorPointOptimizer<double, detail::policy>& self,
              const std::shared_ptr<amigo::OptVector<double>> vars) {
             double complementarity;
             double uniformity;
@@ -573,8 +597,9 @@ PYBIND11_MODULE(amigo, mod) {
           },
           py::arg("vars"))
       .def("compute_affine_start_point",
-           &amigo::InteriorPointOptimizer<double,
-                                          policy>::compute_affine_start_point)
-      .def("check_update",
-           &amigo::InteriorPointOptimizer<double, policy>::check_update);
+           &amigo::InteriorPointOptimizer<
+               double, detail::policy>::compute_affine_start_point)
+      .def(
+          "check_update",
+          &amigo::InteriorPointOptimizer<double, detail::policy>::check_update);
 }
