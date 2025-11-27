@@ -16,13 +16,26 @@ To build and install the primary amigo module and its python wrappers, you can b
 pip install -e .
 ```
 
-By default the OpenMP and CUDA parallelization are turned off. You can turn on or off these modules with additional command line arguments to pip. To enable CUDA and disable OpenMP, you can use
+By default the OpenMP and CUDA parallelization are turned off. You can turn on or off these modules with additional command line arguments to pip. For an OpenMP and MPI install, use the pip command
+
+```
+pip install -e . -v \
+    -Ccmake.args="-DCMAKE_CXX_COMPILER=mpicxx" \
+    -Ccmake.args="-DAMIGO_ENABLE_OPENMP=ON" \
+    -Ccmake.args="-DAMIGO_ENABLE_CUDA=OFF"
+```
+
+For CUDA, we recommend using the NVIDIA CUDSS library that amigo can use to solve linear systems. Locally installing CUDSS is straightforward. It can be downloaded from NVIDIA webpage. Add the `$CUDSS_HOME/lib` and `$CUDSS_HOME/lib64` to your `LD_LIBRARY_PATH`. 
+
+To enable CUDA and CUDSS and disable OpenMP, use the pip command
 
 ```
 pip install -e . -v \
     -Ccmake.args="-DCMAKE_CXX_COMPILER=mpicxx" \
     -Ccmake.args="-DAMIGO_ENABLE_OPENMP=OFF" \
     -Ccmake.args="-DAMIGO_ENABLE_CUDA=ON" \
+    -Ccmake.args="-DCUDSS_HOME=/path/to/cudss" \
+    -Ccmake.args="-DAMIGO_ENABLE_CUDSS=ON" \
     -Ccmake.args="-DCMAKE_CUDA_ARCHITECTURES=native"
 ```
 
