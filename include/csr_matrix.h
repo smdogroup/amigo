@@ -27,7 +27,7 @@ class SerialCSRMatBackend {
   void copy_data_device_to_host(int ext_offset, int ext_size, T* ext_data) {}
   void zero() {}
   void add_diagonal(const T* values) {}
-  void get_device_data(const int* rowp[], const int* cols[], T* data[]) {
+  void get_device_data(int* rowp[], int* cols[], T* data[]) {
     if (rowp) {
       *rowp = nullptr;
     }
@@ -653,7 +653,7 @@ class CSRMat {
    * @param cols Column indices
    * @param data Numerical entries
    */
-  void get_device_data(const int* rowp_[], const int* cols_[], T* data_[]) {
+  void get_device_data(int* rowp_[], int* cols_[], T* data_[]) {
     backend.get_device_data(rowp_, cols_, data_);
   }
 

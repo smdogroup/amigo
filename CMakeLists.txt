@@ -11,12 +11,16 @@ include(CMakePackageConfigHelpers)
 set(AMIGO_PY_PACKAGE_DIR "amigo")
 
 # Package options
-option(AMIGO_ENABLE_CUDA   "Build with CUDA (nvcc) support" OFF)
-option(AMIGO_ENABLE_OPENMP "Build with OpenMP support"     ON)
+option(AMIGO_ENABLE_OPENMP "Build with OpenMP support" ON)
+option(AMIGO_ENABLE_CUDA "Build with CUDA (nvcc) support" OFF)
+option(AMIGO_ENABLE_CUDSS "Build with CUDSS support" OFF)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
+# Set the CUDSS directory
+set(CUDSS_HOME "$ENV{CUDSS_HOME}" CACHE PATH "Path to cuDSS installation")
 
 # Enable alternative operator keywords (and, or, not) for MSVC
 if(MSVC)
@@ -32,6 +36,29 @@ if(AMIGO_ENABLE_CUDA)
   find_package(CUDAToolkit REQUIRED)
   if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
     set(CMAKE_CUDA_ARCHITECTURES 80)
+  endif()
+
+  if (AMIGO_ENABLE_CUDSS)
+    find_path(CUDSS_INCLUDE_DIR cudss.h
+      HINTS ${CUDSS_HOME}/include)
+
+    find_library(CUDSS_LIBRARY cudss
+      HINTS ${CUDSS_HOME}/lib ${CUDSS_HOME}/lib64)
+        
+    include(FindPackageHandleStandardArgs)
+    find_package_handle_standard_args(CUDSS DEFAULT_MSG
+      CUDSS_INCLUDE_DIR CUDSS_LIBRARY)
+
+    if(CUDSS_FOUND)
+      add_library(cudss::cudss UNKNOWN IMPORTED)
+      set_target_properties(cudss::cudss PROPERTIES
+        IMPORTED_LOCATION "${CUDSS_LIBRARY}"
+        INTERFACE_INCLUDE_DIRECTORIES "${CUDSS_INCLUDE_DIR}"
+      )
+    else()
+      message(WARNING "cuDSS requested but not found — disabling cuDSS.")
+      set(AMIGO_ENABLE_CUDSS OFF)
+    endif()
   endif()
 endif()
 
@@ -85,7 +112,7 @@ if(AMIGO_ENABLE_OPENMP)
   endif()
 endif()
 
-# pybind11 for the extension module (Python3 already found earlier)
+# Python / pybind11 for the extension module
 find_package(pybind11 CONFIG REQUIRED)
 
 # Find mpi4py header file
@@ -107,6 +134,7 @@ add_library(amigo::headers ALIAS headers)
 target_compile_definitions(headers INTERFACE
   $<$<BOOL:${AMIGO_ENABLE_CUDA}>:AMIGO_USE_CUDA>
   $<$<BOOL:${AMIGO_ENABLE_OPENMP}>:AMIGO_USE_OPENMP>
+  $<$<BOOL:${AMIGO_ENABLE_CUDSS}>:AMIGO_USE_CUDSS>
 )
 
 # MPI / OpenMP linkage for any TU that includes headers and calls MPI/OpenMP
@@ -160,6 +188,7 @@ if(AMIGO_ENABLE_CUDA)
   target_compile_definitions(backend PUBLIC
     $<$<BOOL:${AMIGO_ENABLE_CUDA}>:AMIGO_USE_CUDA>
     $<$<BOOL:${AMIGO_ENABLE_OPENMP}>:AMIGO_USE_OPENMP>
+    $<$<BOOL:${AMIGO_ENABLE_CUDSS}>:AMIGO_USE_CUDSS>
   )
 
   set_target_properties(backend PROPERTIES
@@ -168,8 +197,11 @@ if(AMIGO_ENABLE_CUDA)
     CUDA_RESOLVE_DEVICE_SYMBOLS ON
   )
 
-  target_link_libraries(backend PUBLIC headers)
+  if(AMIGO_ENABLE_CUDSS)
+    target_link_libraries(backend PUBLIC cudss::cudss)
+  endif()
 
+  target_link_libraries(backend PUBLIC headers)
   target_link_libraries(amigo PRIVATE backend)
 endif()
 

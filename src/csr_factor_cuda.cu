@@ -3,6 +3,22 @@
 #include <cusolverSp_LOWLEVEL_PREVIEW.h>
 #include <cusparse.h>
 
+#ifdef AMIGO_USE_CUDSS
+#include <cudss.h>
+
+#ifndef AMIGO_CHECK_CUDSS
+#define AMIGO_CHECK_CUDSS(call)                                           \
+  do {                                                                    \
+    auto err__ = (call);                                                  \
+    if (err__ != CUDSS_STATUS_SUCCESS) {                                  \
+      std::fprintf(stderr, "cuDSS error %s:%d: %d\n", __FILE__, __LINE__, \
+                   int(err__));                                           \
+      std::abort();                                                       \
+    }                                                                     \
+  } while (0)
+#endif
+#endif
+
 #include "amigo.h"
 #include "cuda/csr_factor_cuda.h"
 
@@ -19,63 +35,59 @@ class CudssFactorBackend {
     // Handle for cudss
     AMIGO_CHECK_CUDSS(cudssCreate(&handle));
 
+    // Create the data object
+    AMIGO_CHECK_CUDSS(cudssDataCreate(handle, &data));
+
     // Create matrix
-    const int *d_rowp, *d_cols;
-    double* d_data;
+    int* d_rowp = nullptr;
+    int* d_cols = nullptr;
+    double* d_data = nullptr;
     mat->get_device_data(&d_rowp, &d_cols, &d_data);
-    AMIGO_CHECK_CUDSS(cudssCreateCsr(&A, n, n, nnz, d_rowp, d_cols, d_data,
-                                     CUDSS_INDEX_32I, CUDSS_R_64F,
-                                     CUDSS_INDEX_BASE_ZERO));
+    AMIGO_CHECK_CUDSS(cudssMatrixCreateCsr(
+        &A, n, n, nnz, d_rowp, d_rowp + 1, d_cols, d_data, CUDA_R_32I,
+        CUDA_R_64F, CUDSS_MTYPE_SYMMETRIC, CUDSS_MVIEW_FULL, CUDSS_BASE_ZERO));
 
     // Create the configuration settings
-    AMIGO_CHECK_CUDSS(cudssCreateConfig(&config));
+    AMIGO_CHECK_CUDSS(cudssConfigCreate(&config));
 
-    // Set configuration options
-    cudssAlgSolverType_t solver_type = CUDSS_ALG_SOLVER_TYPE_LU;
-    AMIGO_CHECK_CUDSS(cudssConfigSet(handle, config,
-                                     CUDSS_CONFIG_ALG_SOLVER_TYPE, &solver_type,
-                                     sizeof(solver_type)));
+    // Example configuration: reordering algorithm, etc.
+    cudssAlgType_t reorder = CUDSS_ALG_DEFAULT;
+    AMIGO_CHECK_CUDSS(cudssConfigSet(config, CUDSS_CONFIG_REORDERING_ALG,
+                                     &reorder, sizeof(reorder)));
 
-    cudssMatrixType_t mat_type = CUDSS_MATRIX_TYPE_GENERAL;
-    AMIGO_CHECK_CUDSS(cudssConfigSet(handle, config, CUDSS_CONFIG_MATRIX_TYPE,
-                                     &mat_type, sizeof(mat_type)));
+    AMIGO_CHECK_CUDSS(cudssConfigSet(config, CUDSS_CONFIG_PIVOT_EPSILON,
+                                     &pivot_tol, sizeof(pivot_tol)));
 
-    cudssReorderMethod_t reorder = CUDSS_REORDER_METIS;
-    AMIGO_CHECK_CUDSS(cudssConfigSet(handle, config,
-                                     CUDSS_CONFIG_REORDER_METHOD, &reorder,
-                                     sizeof(reorder)));
+    AMIGO_CHECK_CUDA(cudaMalloc(&d_X, n * sizeof(double)));
+    AMIGO_CHECK_CUDA(cudaMalloc(&d_B, n * sizeof(double)));
+    AMIGO_CHECK_CUDSS(cudssMatrixCreateDn(&X, n, 1, n, d_X, CUDA_R_64F,
+                                          CUDSS_LAYOUT_COL_MAJOR));
+    AMIGO_CHECK_CUDSS(cudssMatrixCreateDn(&B, n, 1, n, d_B, CUDA_R_64F,
+                                          CUDSS_LAYOUT_COL_MAJOR));
 
-    AMIGO_CHECK_CUDSS(cudssConfigSet(handle, config,
-                                     CUDSS_CONFIG_PIVOT_TOLERANCE, &pivot_eps,
-                                     sizeof(pivot_eps)));
+    AMIGO_CHECK_CUDSS(
+        cudssExecute(handle, CUDSS_PHASE_ANALYSIS, config, data, A, X, B));
 
-    // Symbolic analysis
-    AMIGO_CHECK_CUDSS(cudssCreateAnalysisInfo(&info));
-    AMIGO_CHECK_CUDSS(cudssAnalyze(handle, A, config, info));
 #endif  // AMIGO_USE_CUDSS
   }
 
   ~CudssFactorBackend() {
 #ifdef AMIGO_USE_CUDSS
-    if (config) {
-      cudssDestroyConfig(config);
-    }
-    if (info) {
-      cudssDestroyAnalysisInfo(info);
-    }
-    if (A) {
-      cudssDestroyMatrix(A);
-    }
-    if (handle) {
-      cudssDestroy(handle);
-    }
+    cudssMatrixDestroy(A);
+    cudssMatrixDestroy(B);
+    cudssMatrixDestroy(X);
+    cudaFree(d_X);
+    cudaFree(d_B);
+    cudssConfigDestroy(config);
+    cudssDataDestroy(handle, data);
+    cudssDestroy(handle);
 #endif
   }
 
   void factor() {
 #ifdef AMIGO_USE_CUDSS
-    // Numerical factorization
-    AMIGO_CHECK_CUDSS(cudssFactorize(handle, A, config, info));
+    AMIGO_CHECK_CUDSS(
+        cudssExecute(handle, CUDSS_PHASE_FACTORIZATION, config, data, A, X, B));
 #endif
   }
 
@@ -85,14 +97,14 @@ class CudssFactorBackend {
     double* d_b = b->get_device_array();
     double* d_x = x->get_device_array();
 
-    cudssDense_t B, X;
-    AMIGO_CHECK_CUDSS(cudssCreateDn(&B, n, 1, d_b, CUDSS_R_64F));
-    AMIGO_CHECK_CUDSS(cudssCreateDn(&X, n, 1, d_x, CUDSS_R_64F));
+    AMIGO_CHECK_CUDA(
+        cudaMemcpy(d_B, d_b, n * sizeof(double), cudaMemcpyDeviceToDevice));
 
-    AMIGO_CHECK_CUDSS(cudssSolve(handle, CUDSS_OP_N, A, B, X, config, info));
+    AMIGO_CHECK_CUDSS(
+        cudssExecute(handle, CUDSS_PHASE_SOLVE, config, data, A, X, B));
 
-    cudssDestroyDense(B);
-    cudssDestroyDense(X);
+    AMIGO_CHECK_CUDA(
+        cudaMemcpy(d_x, d_X, n * sizeof(double), cudaMemcpyDeviceToDevice));
 #endif
   }
 
@@ -107,14 +119,16 @@ class CudssFactorBackend {
   // Handle for the matrix
   cudssHandle_t handle;
 
-  // The matrix itself
-  cudssMatrix_t A;
-
-  // Info about the analysis
-  cudssAnalysisInfo_t info;
-
   // Set the configuration options
   cudssConfig_t config;
+
+  // Data created during the different phases
+  cudssData_t data;
+
+  // The matrix itself
+  cudssMatrix_t A;
+  cudssMatrix_t X, B;
+  double *d_X, *d_B;
 #endif  // AMIGO_USE_CUDSS
 };
 
@@ -146,8 +160,8 @@ class CuSolverFactorBackend {
   void solve(std::shared_ptr<Vector<double>> b,
              std::shared_ptr<Vector<double>> x) {
     // Get device-side data
-    const int* d_rowp = nullptr;
-    const int* d_cols = nullptr;
+    int* d_rowp = nullptr;
+    int* d_cols = nullptr;
     double* d_data = nullptr;
     mat->get_device_data(&d_rowp, &d_cols, &d_data);
 

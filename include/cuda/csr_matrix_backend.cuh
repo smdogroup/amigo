@@ -97,7 +97,7 @@ class CudaCSRMatBackend {
     detail::add_diagonal_cuda(nrows, d_diag, d_values, d_data);
   }
 
-  void get_device_data(const int* rowp[], const int* cols[], T* data[]) {
+  void get_device_data(int* rowp[], int* cols[], T* data[]) {
     if (rowp) {
       *rowp = d_rowp;
     }

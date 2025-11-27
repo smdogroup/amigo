@@ -35,11 +35,6 @@ inline bool check_consistent_policy_and_location(ExecPolicy policy,
 #include <cublas_v2.h>
 #include <cuda_runtime.h>
 
-#if __has_include(<cudss.h>)
-#include <cudss.h>
-#define AMIGO_USE_CUDSS 1
-#endif
-
 #ifndef AMIGO_CHECK_CUDA
 #define AMIGO_CHECK_CUDA(call)                                           \
   do {                                                                   \
@@ -74,20 +69,6 @@ inline bool check_consistent_policy_and_location(ExecPolicy policy,
       std::abort();                                                          \
     }                                                                        \
   } while (0)
-#endif
-
-#ifdef AMIGO_USE_CUDSS
-#ifndef AMIGO_CHECK_CUDSS
-#define AMIGO_CHECK_CUDSS(call)                                           \
-  do {                                                                    \
-    auto err__ = (call);                                                  \
-    if (err__ != CUDSS_STATUS_SUCCESS) {                                  \
-      std::fprintf(stderr, "cuDSS error %s:%d: %d\n", __FILE__, __LINE__, \
-                   int(err__));                                           \
-      std::abort();                                                       \
-    }                                                                     \
-  } while (0)
-#endif
 #endif
 
 #ifndef AMIGO_CHECK_CUBLAS

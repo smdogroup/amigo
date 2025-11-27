@@ -3,6 +3,9 @@
 # Expose the options used when Amigo was built
 set(AMIGO_ENABLE_CUDA   @AMIGO_ENABLE_CUDA@)
 set(AMIGO_ENABLE_OPENMP @AMIGO_ENABLE_OPENMP@)
+set(AMIGO_ENABLE_CUDSS  @AMIGO_ENABLE_CUDSS@)
+set(CUDSS_INCLUDE_DIR   @CUDSS_INCLUDE_DIR@)
+set(CUDSS_LIBRARY       @CUDSS_LIBRARY@)
 
 # Optionally expose the CUDA architecture as a package variable
 if(AMIGO_ENABLE_CUDA)

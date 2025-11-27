@@ -745,6 +745,10 @@ res = model.create_vector()
 model.problem.gradient(1.0, x.get_vector(), res.get_vector())
 inputs.extend(cons)
 
+# Copy the info to the host
+x.get_vector().copy_device_to_host()
+res.get_vector().copy_device_to_host()
+
 print("Variable summary")
 for name in inputs:
     print(f"{name:<30} {np.linalg.norm(x[name])}")

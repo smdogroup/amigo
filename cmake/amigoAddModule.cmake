@@ -35,6 +35,20 @@ function(amigo_add_python_module)
   find_package(LAPACK REQUIRED)
   find_package(MPI REQUIRED COMPONENTS CXX)
 
+  if (AMIGO_ENABLE_CUDSS)
+    include(FindPackageHandleStandardArgs)
+    find_package_handle_standard_args(CUDSS DEFAULT_MSG
+      CUDSS_INCLUDE_DIR CUDSS_LIBRARY)
+
+    if(CUDSS_FOUND)
+      add_library(cudss::cudss UNKNOWN IMPORTED)
+      set_target_properties(cudss::cudss PROPERTIES
+        IMPORTED_LOCATION "${CUDSS_LIBRARY}"
+        INTERFACE_INCLUDE_DIRECTORIES "${CUDSS_INCLUDE_DIR}"
+      )
+    endif()
+  endif()
+
   pybind11_add_module(${AMIGO_NAME} MODULE ${AMIGO_SOURCES})
   set_target_properties(${AMIGO_NAME} PROPERTIES
     PREFIX ""

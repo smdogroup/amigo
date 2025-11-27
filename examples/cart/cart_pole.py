@@ -543,7 +543,11 @@ opt_options = {
 # Set up the optimizer
 opt = am.Optimizer(model, x, lower=lower, upper=upper, comm=comm, distribute=distribute)
 
+# Optimize
 opt_data = opt.optimize(opt_options)
+
+# Copy the solution from the device to host
+x.get_vector().copy_device_to_host()
 
 with open("cart_opt_data.json", "w") as fp:
     json.dump(opt_data, fp, indent=2)
