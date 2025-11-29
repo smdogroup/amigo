@@ -6,6 +6,8 @@ All application code is written in python and automatically compiled to c++. Aut
 
 Integration with other MDO libraries is key for flexibility. Amigo contains interfaces to inject OpenMDAO models into Amigo models using `amigo.ExternalComponent`. Alternatively, Amigo can be used as a sub-optimization OpenMDAO component with accurate post-optimality derivatives.
 
+A tutorial on how to use amigo and documentation can be found here: [https://smdogroup.github.io/amigo/](https://smdogroup.github.io/amigo/).
+
 ## Installing amigo
 
 Amigo uses CMake and scikit-build to build the primary amigo module and all model modules that comprise a multidisciplinary model.
