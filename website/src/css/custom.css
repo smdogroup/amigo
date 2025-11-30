@@ -718,3 +718,19 @@ li[class*="category"] {
   border-radius: 0 !important;
 }
 
+/* Reference links - black with teal hover */
+.markdown a:has(.ref-link) {
+  color: #000000;
+  text-decoration: none;
+  transition: color 0.2s ease;
+}
+
+.markdown a:has(.ref-link):hover {
+  color: #007FA2;
+  text-decoration: none;
+}
+
+.ref-link {
+  color: inherit;
+}
+

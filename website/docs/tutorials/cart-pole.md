@@ -115,9 +115,11 @@ g = 9.81   # gravity [m/s²]
 
 The problem is discretized into a finite number of time steps. For each time interval, we create state variables at the grid points and enforce the dynamics through collocation constraints.
 
-## Direct Method
+## Direct Collocation Method
 
-We solve the problem using Amigo's direct transcription approach. The key idea is to discretize the continuous-time problem into a finite-dimensional nonlinear programming (NLP) problem by representing the state and control trajectories at discrete time points.
+To solve this optimal control problem, we convert the infinite-dimensional continuous problem into a finite-dimensional **nonlinear programming (NLP) problem** using direct collocation. Instead of trying to find continuous functions for the state and control, we discretize time into a finite number of nodes and treat the state and control values at those nodes as optimization variables. 
+
+The dynamics are enforced using the trapezoidal rule, which creates piecewise linear approximations between consecutive nodes. This turns the differential equations into algebraic constraints that the NLP solver can handle. For more details on direct collocation methods, see [1] and [2].
 
 ### Component 1: Cart Dynamics
 
@@ -188,9 +190,14 @@ The `compute()` method operates on symbolic variables, not numeric values. When 
 
 :::
 
-### Component 2: Time Integration
+### Component 2: Time Integration (Collocation)
 
-The `TrapezoidRule` component enforces trapezoidal collocation constraints for time integration. This provides second-order accuracy and implicit stability.
+The `TrapezoidRule` component enforces the **collocation constraints** that discretize the continuous dynamics. The trapezoidal rule is a first-order implicit collocation method that:
+
+- Approximates the integral using the average of function values at interval endpoints
+- Provides second-order accuracy in the state approximation
+- Creates piecewise linear interpolation between discrete nodes
+- Ensures implicit stability for the NLP problem
 
 ```python
 class TrapezoidRule(am.Component):
@@ -585,64 +592,94 @@ u = x["cart.x[:]"]          # Control force [N]
 
 The `ModelVector` class provides dictionary-like access with NumPy slicing. This allows you to extract entire trajectories or specific variables efficiently.
 
-## Plot of the solution
+## Visualization of the NLP Solution
 
-The optimal state trajectories and control are visualized below.
+The optimal trajectories are visualized below. The plots show:
+- **Solid lines**: Piecewise linear interpolation between NLP nodes
+- **Hollow circles**: The discrete NLP solution points (knot points/collocation nodes)
 
 ```python
 import matplotlib.pyplot as plt
 
 # Extract solution
 time = np.linspace(0, final_time, num_time_steps + 1)
-q1 = x["cart.q[:, 0]"]      # Cart position
-q2 = x["cart.q[:, 1]"]      # Pole angle  
-q1dot = x["cart.q[:, 2]"]   # Cart velocity
-q2dot = x["cart.q[:, 3]"]   # Angular velocity
-u = x["cart.x[:]"]          # Control force
+position = x["cart.q[:, 0]"]   # Cart position
+angle = x["cart.q[:, 1]"]      # Pole angle  
+force = x["cart.x[:]"]         # Control force
 
-# Create 2x2 grid of subplots for states
-fig, axes = plt.subplots(2, 2, figsize=(12, 8))
+# Colors
+blue_color = "#0072BD"    # State variables
+purple_color = "#8242A2"  # Control variable
 
-# Cart position
-axes[0, 0].plot(time, q1, 'b-', linewidth=2)
-axes[0, 0].set_ylabel(r'$q_1$ (cart position)', fontsize=11)
-axes[0, 0].grid(True, alpha=0.3)
-axes[0, 0].set_title('State Variables', fontsize=12, fontweight='bold')
+# Plot every Nth knot point for clarity
+knot_step = 5  # Show every 5th NLP node
 
-# Pole angle
-axes[0, 1].plot(time, q2, 'b-', linewidth=2)
-axes[0, 1].set_ylabel(r'$q_2$ (pole angle)', fontsize=11)
-axes[0, 1].axhline(y=np.pi, color='gray', linestyle='--', alpha=0.5)
-axes[0, 1].grid(True, alpha=0.3)
+# Create figure with 3 subplots
+fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(12, 9))
 
-# Cart velocity
-axes[1, 0].plot(time, q1dot, 'b-', linewidth=2)
-axes[1, 0].set_ylabel(r'$\dot{q}_1$ (cart velocity)', fontsize=11)
-axes[1, 0].set_xlabel('Time [s]', fontsize=11)
-axes[1, 0].grid(True, alpha=0.3)
+# Position plot
+ax1.plot(time, position, color=blue_color, linewidth=2.5)
+ax1.plot(
+    time[::knot_step],
+    position[::knot_step],
+    "o",
+    color="black",
+    markersize=5,
+    markerfacecolor="none",
+    markeredgewidth=1,
+)
+ax1.set_ylabel("Position (m)", fontsize=12)
+ax1.grid(True, alpha=0.25, linewidth=0.5)
+ax1.tick_params(labelsize=10)
+ax1.set_title("State", fontsize=14, fontweight="bold", pad=10)
 
-# Angular velocity
-axes[1, 1].plot(time, q2dot, 'b-', linewidth=2)
-axes[1, 1].set_ylabel(r'$\dot{q}_2$ (angular velocity)', fontsize=11)
-axes[1, 1].set_xlabel('Time [s]', fontsize=11)
-axes[1, 1].grid(True, alpha=0.3)
+# Angle plot
+ax2.plot(time, angle, color=blue_color, linewidth=2.5)
+ax2.plot(
+    time[::knot_step],
+    angle[::knot_step],
+    "o",
+    color="black",
+    markersize=5,
+    markerfacecolor="none",
+    markeredgewidth=1,
+)
+ax2.set_ylabel("Angle (rad)", fontsize=12)
+ax2.grid(True, alpha=0.25, linewidth=0.5)
+ax2.tick_params(labelsize=10)
+
+# Force plot (purple color)
+ax3.plot(time, force, color=purple_color, linewidth=2.5)
+ax3.plot(
+    time[::knot_step],
+    force[::knot_step],
+    "o",
+    color="black",
+    markersize=5,
+    markerfacecolor="none",
+    markeredgewidth=1,
+)
+ax3.set_xlabel("Time (s)", fontsize=11)
+ax3.set_ylabel("Force (N)", fontsize=12)
+ax3.grid(True, alpha=0.25, linewidth=0.5)
+ax3.tick_params(labelsize=10)
+ax3.set_title("Control", fontsize=14, fontweight="bold", pad=10)
+
+# Set font
+fontname = "Helvetica"
+for ax in [ax1, ax2, ax3]:
+    ax.xaxis.label.set_fontname(fontname)
+    ax.yaxis.label.set_fontname(fontname)
+    for tick in ax.get_xticklabels():
+        tick.set_fontname(fontname)
+    for tick in ax.get_yticklabels():
+        tick.set_fontname(fontname)
 
 plt.tight_layout()
-plt.savefig('cart_pole_states.png', dpi=300)
-
-# Create separate plot for control
-fig, ax = plt.subplots(1, 1, figsize=(12, 4))
-
-ax.plot(time, u, 'b-', linewidth=2)
-ax.set_xlabel('Time [s]', fontsize=11)
-ax.set_ylabel(r'$x$ (control force)', fontsize=11)
-ax.set_title('Control', fontsize=12, fontweight='bold')
-ax.grid(True, alpha=0.3)
-
-plt.tight_layout()
-plt.savefig('cart_pole_control.png', dpi=300)
+plt.savefig('cart_pole_solution.png', dpi=300, bbox_inches="tight", facecolor="white")
 plt.show()
 ```
+
 
 <div style={{textAlign: 'center', margin: '1rem 0'}}>
   <img src={require('./cart_pole_solution.png').default} alt="Cart-Pole Solution" />
@@ -650,7 +687,7 @@ plt.show()
 
 <div align="center">
 
-**Figure 3.** Optimal state trajectories and control for the cart-pole swing-up problem.
+**Figure 3.** Optimal state trajectories and control for the cart-pole problem.
 
 </div>
 
