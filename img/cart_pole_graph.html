@@ -30,19 +30,52 @@
           <h1></h1>
         </center>
         <style type="text/css">
+             body {
+                 margin: 0;
+                 padding: 0;
+                 background-color: #ffffff;
+                 transition: background-color 0.2s ease;
+             }
+
+             body.dark-mode {
+                 background-color: #18181b;
+             }
 
              #mynetwork {
                  width: 100%;
                  height: 1000px;
                  background-color: #ffffff;
-                 border: 1px solid lightgray;
+                 border: 1px solid #e5e7eb;
                  position: relative;
                  float: left;
                  overflow: hidden;
+                 transition: background-color 0.2s ease, border-color 0.2s ease;
+             }
+
+             body.dark-mode #mynetwork {
+                 background-color: #27272a;
+                 border: 1px solid #52525b;
              }
              
              #mynetwork canvas {
                  position: absolute;
+             }
+
+             .card {
+                 background-color: transparent !important;
+                 border: none !important;
+             }
+
+             #themeToggle {
+                 transition: all 0.2s ease;
+             }
+
+             #themeToggle:hover {
+                 transform: scale(1.05);
+             }
+
+             #themeToggle:active {
+                 transform: scale(0.95);
              }
 
              
@@ -56,10 +89,74 @@
 
     <body>
         <div class="card" style="width: 100%">
+            <!-- Dark/Light Mode Toggle -->
+            <button 
+                id="themeToggle"
+                onclick="toggleTheme(); return false;"
+                style="
+                    position: fixed;
+                    top: 18px;
+                    right: 18px;
+                    z-index: 1000;
+                    background-color: transparent;
+                    border: none;
+                    padding: 4px;
+                    cursor: pointer;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    transition: all 0.2s ease;
+                    color: #4b5563;
+                "
+                onmouseover="themeToggleHover(true);"
+                onmouseout="themeToggleHover(false);"
+                title="Toggle dark mode"
+            >
+                <!-- Sun icon (shown in dark mode) -->
+                <svg 
+                    id="sunIcon"
+                    width="20" 
+                    height="20" 
+                    viewBox="0 0 24 24" 
+                    fill="none" 
+                    stroke="currentColor" 
+                    strokeWidth="2.5" 
+                    strokeLinecap="round" 
+                    strokeLinejoin="round"
+                    style="display: none; transition: all 0.2s ease;"
+                >
+                    <circle cx="12" cy="12" r="5"></circle>
+                    <line x1="12" y1="1" x2="12" y2="3"></line>
+                    <line x1="12" y1="21" x2="12" y2="23"></line>
+                    <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+                    <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+                    <line x1="1" y1="12" x2="3" y2="12"></line>
+                    <line x1="21" y1="12" x2="23" y2="12"></line>
+                    <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+                    <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+                </svg>
+                <!-- Moon icon (shown in light mode) -->
+                <svg 
+                    id="moonIcon"
+                    width="20" 
+                    height="20" 
+                    viewBox="0 0 24 24" 
+                    fill="none" 
+                    stroke="currentColor" 
+                    strokeWidth="2.5" 
+                    strokeLinecap="round" 
+                    strokeLinejoin="round"
+                    style="display: block; transition: all 0.2s ease;"
+                >
+                    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                </svg>
+            </button>
+
+            <!-- Expand icon (only shown when in iframe) -->
             <a 
                 id="expandIcon"
                 href="#" 
-                onclick="window.open(window.location.href, '_blank'); return false;"
+                onclick="openInNewWindow(); return false;"
                 style="
                     position: fixed;
                     top: 18px;
@@ -101,10 +198,186 @@
         </div>
         
         <script>
-            // Only show expand icon if page is in an iframe
-            if (window.self !== window.top) {
+            // Check if page is in an iframe
+            const isInIframe = window.self !== window.top;
+            
+            // Show/hide buttons based on context
+            if (isInIframe) {
+                // In iframe: show expand button, hide theme toggle
                 document.getElementById('expandIcon').style.display = 'flex';
+                document.getElementById('themeToggle').style.display = 'none';
+            } else {
+                // Standalone: hide expand button, show theme toggle
+                document.getElementById('expandIcon').style.display = 'none';
+                document.getElementById('themeToggle').style.display = 'flex';
             }
+
+            // Dark mode detection and update
+            let currentTheme = 'light';
+            let manualThemeSet = false;
+            
+            // Get theme from URL parameter
+            function getThemeFromURL() {
+                const urlParams = new URLSearchParams(window.location.search);
+                return urlParams.get('theme');
+            }
+            
+            // Function to update UI elements based on theme
+            function updateThemeUI(isDark) {
+                document.body.classList.toggle('dark-mode', isDark);
+                
+                // Update toggle button icons
+                document.getElementById('sunIcon').style.display = isDark ? 'block' : 'none';
+                document.getElementById('moonIcon').style.display = isDark ? 'none' : 'block';
+                
+                // Update button colors for dark mode
+                const toggleBtn = document.getElementById('themeToggle');
+                const expandBtn = document.getElementById('expandIcon');
+                if (isDark) {
+                    toggleBtn.style.color = '#a0aec0';
+                    expandBtn.style.color = '#a0aec0';
+                } else {
+                    toggleBtn.style.color = '#4b5563';
+                    expandBtn.style.color = '#4b5563';
+                }
+            }
+            
+            // Hover effect for theme toggle button
+            function themeToggleHover(isHover) {
+                const sunIcon = document.getElementById('sunIcon');
+                const moonIcon = document.getElementById('moonIcon');
+                const toggleBtn = document.getElementById('themeToggle');
+                
+                if (isHover) {
+                    sunIcon.style.strokeWidth = '3';
+                    moonIcon.style.strokeWidth = '3';
+                    toggleBtn.style.color = '#1793a3';
+                } else {
+                    sunIcon.style.strokeWidth = '2.5';
+                    moonIcon.style.strokeWidth = '2.5';
+                    const isDark = document.body.classList.contains('dark-mode');
+                    toggleBtn.style.color = isDark ? '#a0aec0' : '#4b5563';
+                }
+            }
+            
+            function checkDarkMode() {
+                // If user manually set theme, use that
+                if (manualThemeSet) {
+                    const storedTheme = localStorage.getItem('vis-theme');
+                    return storedTheme === 'dark';
+                }
+                
+                try {
+                    // Check parent window's theme (when embedded in iframe)
+                    if (isInIframe && window.parent && window.parent.document) {
+                        const isDark = window.parent.document.documentElement.getAttribute('data-theme') === 'dark';
+                        const newTheme = isDark ? 'dark' : 'light';
+                        updateThemeUI(isDark);
+                        
+                        // If theme changed and network exists, update node colors
+                        if (newTheme !== currentTheme && typeof network !== 'undefined' && network !== null) {
+                            currentTheme = newTheme;
+                            updateNodeColors(isDark);
+                        } else if (typeof network === 'undefined') {
+                            currentTheme = newTheme;
+                        }
+                        
+                        return isDark;
+                    }
+                } catch (e) {
+                    // Cross-origin or error
+                }
+                
+                // Standalone mode: check URL parameter first
+                const urlTheme = getThemeFromURL();
+                if (urlTheme) {
+                    const isDark = urlTheme === 'dark';
+                    updateThemeUI(isDark);
+                    // Save to localStorage for future visits
+                    localStorage.setItem('vis-theme', urlTheme);
+                    return isDark;
+                }
+                
+                // Then check localStorage
+                const storedTheme = localStorage.getItem('vis-theme');
+                if (storedTheme) {
+                    const isDark = storedTheme === 'dark';
+                    updateThemeUI(isDark);
+                    return isDark;
+                }
+                
+                // Default to system preference
+                const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+                updateThemeUI(prefersDark);
+                return prefersDark;
+            }
+
+            // Function to toggle theme manually
+            function toggleTheme() {
+                manualThemeSet = true;
+                const isDark = !document.body.classList.contains('dark-mode');
+                
+                // Save preference
+                localStorage.setItem('vis-theme', isDark ? 'dark' : 'light');
+                
+                // Update UI
+                updateThemeUI(isDark);
+                currentTheme = isDark ? 'dark' : 'light';
+                
+                // Update node colors
+                updateNodeColors(isDark);
+            }
+
+            // Function to update node colors when theme changes
+            function updateNodeColors(isDark) {
+                if (!nodes) return;
+                
+                const fontColor = isDark ? '#e4e4e7' : 'black';
+                
+                // Update all nodes with new font color
+                const allNodeIds = nodes.getIds();
+                allNodeIds.forEach(nodeId => {
+                    nodes.update({
+                        id: nodeId,
+                        font: { color: fontColor }
+                    });
+                });
+            }
+
+            // Function to open in new window with current theme
+            function openInNewWindow() {
+                const isDark = document.body.classList.contains('dark-mode');
+                // Save current theme before opening
+                localStorage.setItem('vis-theme', isDark ? 'dark' : 'light');
+                
+                // Add theme parameter to URL
+                const url = new URL(window.location.href);
+                url.searchParams.set('theme', isDark ? 'dark' : 'light');
+                window.open(url.toString(), '_blank');
+            }
+
+            // Initial check
+            const initialDark = checkDarkMode();
+            currentTheme = initialDark ? 'dark' : 'light';
+
+            // Listen for theme changes in parent (only if in iframe and not manually set)
+            if (isInIframe) {
+                setInterval(() => {
+                    if (!manualThemeSet) {
+                        checkDarkMode();
+                    }
+                }, 100);
+            }
+
+            // Also listen to system preference changes
+            window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
+                if (!manualThemeSet && !isInIframe) {
+                    const isDark = e.matches;
+                    updateThemeUI(isDark);
+                    currentTheme = isDark ? 'dark' : 'light';
+                    updateNodeColors(isDark);
+                }
+            });
         </script>
 
         
@@ -136,10 +409,29 @@
               function drawGraph() {
                   var container = document.getElementById('mynetwork');
 
-                  
+                  // Function to update node colors based on theme
+                  function getNodeColor(originalColor, isDark) {
+                      if (!isDark) return originalColor;
+                      
+                      // Map light colors to dark theme colors
+                      const colorMap = {
+                          '#97c2fc': '#6b8afb',  // blue
+                          '#fed9a6': '#fbbf24',  // orange
+                          '#decbe4': '#c084fc'   // purple
+                      };
+                      return colorMap[originalColor] || originalColor;
+                  }
+
+                  function getFontColor(isDark) {
+                      return isDark ? '#e4e4e7' : 'black';
+                  }
+
+                  // Check if dark mode is active
+                  const isDarkMode = document.body.classList.contains('dark-mode');
+                  const fontColor = getFontColor(isDarkMode);
 
                   // parsing and collecting nodes and edges from the python
-                  nodes = new vis.DataSet([{"color": "#97c2fc", "font": {"color": "black"}, "id": 0, "label": "cart.x[0, ]", "shape": "dot", "size": 10, "title": "cart.x[0, ]"}, {"color": "#fed9a6", "font": {"color": "black"}, "id": 60, "label": "cart[0]", "shape": "square", "size": 10, "title": "cart[0]"}, {"color": "#97c2fc", "font": {"color": "black"}, "id": 1, "label": "obj.x1[0, ]", "shape": "dot", "size": 10, "title": "obj.x1[0, ]"}, {"color": "#fed9a6", "font": {"color": "black"}, "id": 64, "label": "obj[0]", "shape": "square", "size": 10, "title": "obj[0]"}, {"color": "#97c2fc", "font": {"color": "black"}, "id": 2, "label": "cart.x[5, ]", "shape": "dot", "size": 10, "title": "cart.x[5, ]"}, {"color": "#fed9a6", "font": {"color": "black"}, "id": 61, "label": "cart[5]", "shape": "square", "size": 10, "title": "cart[5]"}, {"color": "#97c2fc", "font": {"color": "black"}, "id": 3, "label": "obj.x1[5, ]", "shape": "dot", "size": 10, "title": "obj.x1[5, ]"}, {"color": "#fed9a6", "font": {"color": "black"}, "id": 65, "label": "obj[5]", "shape": "square", "size": 10, "title": "obj[5]"}, {"color": "#97c2fc", "font": {"color": "black"}, "id": 4, "label": "cart.q[0, 0]", "shape": "dot", "size": 10, "title": "cart.q[0, 0]"}, {"color": "#97c2fc", "font": {"color": "black"}, "id": 5, "label": "trap.q1[0, ]", "shape": "dot", "size": 10, "title": "trap.q1[0, ]"}, {"color": "#97c2fc", "font": {"color": "black"}, "id": 6, "label": "ic.q[0, 0]", "shape": "dot", "size": 10, "title": "ic.q[0, 0]"}, {"color": "#fed9a6", "font": {"color": "black"}, "id": 62, "label": "trap[0]", "shape": "square", "size": 10, "title": "trap[0]"}, {"color": "#fed9a6", "font": {"color": "black"}, "id": 66, "label": "ic[0]", "shape": "square", "size": 10, "title": "ic[0]"}, {"color": "#97c2fc", "font": {"color": "black"}, "id": 7, "label": "cart.q[0, 1]", "shape": "dot", "size": 10, "title": "cart.q[0, 1]"}, {"color": "#97c2fc", "font": {"color": "black"}, "id": 8, "label": "ic.q[0, 1]", "shape": "dot", "size": 10, "title": "ic.q[0, 1]"}, {"color": "#97c2fc", "font": {"color": "black"}, "id": 9, "label": "cart.q[0, 2]", "shape": "dot", "size": 10, "title": "cart.q[0, 2]"}, {"color": "#97c2fc", "font": {"color": "black"}, "id": 10, "label": "ic.q[0, 2]", "shape": "dot", "size": 10, "title": "ic.q[0, 2]"}, {"color": "#97c2fc", "font": {"color": "black"}, "id": 11, "label": "cart.q[0, 3]", "shape": "dot", "size": 10, "title": "cart.q[0, 3]"}, {"color": "#97c2fc", "font": {"color": "black"}, "id": 12, "label": "ic.q[0, 3]", "shape": "dot", "size": 10, "title": "ic.q[0, 3]"}, {"color": "#97c2fc", "font": {"color": "black"}, "id": 13, "label": "cart.q[5, 0]", "shape": "dot", "size": 10, "title": "cart.q[5, 0]"}, {"color": "#97c2fc", "font": {"color": "black"}, "id": 14, "label": "trap.q1[5, ]", "shape": "dot", "size": 10, "title": "trap.q1[5, ]"}, {"color": "#fed9a6", "font": {"color": "black"}, "id": 63, "label": "trap[5]", "shape": "square", "size": 10, "title": "trap[5]"}, {"color": "#97c2fc", "font": {"color": "black"}, "id": 15, "label": "cart.q[5, 1]", "shape": "dot", "size": 10, "title": "cart.q[5, 1]"}, {"color": "#97c2fc", "font": {"color": "black"}, "id": 16, "label": "cart.q[5, 2]", "shape": "dot", "size": 10, "title": "cart.q[5, 2]"}, {"color": "#97c2fc", "font": {"color": "black"}, "id": 17, "label": "cart.q[5, 3]", "shape": "dot", "size": 10, "title": "cart.q[5, 3]"}, {"color": "#97c2fc", "font": {"color": "black"}, "id": 18, "label": "cart.qdot[0, 0]", "shape": "dot", "size": 10, "title": "cart.qdot[0, 0]"}, {"color": "#97c2fc", "font": {"color": "black"}, "id": 19, "label": "trap.q1dot[0, ]", "shape": "dot", "size": 10, "title": "trap.q1dot[0, ]"}, {"color": "#97c2fc", "font": {"color": "black"}, "id": 20, "label": "kin.u1dot[0, ]", "shape": "dot", "size": 10, "title": "kin.u1dot[0, ]"}, {"color": "#fed9a6", "font": {"color": "black"}, "id": 68, "label": "kin[0]", "shape": "square", "size": 10, "title": "kin[0]"}, {"color": "#97c2fc", "font": {"color": "black"}, "id": 21, "label": "cart.qdot[0, 1]", "shape": "dot", "size": 10, "title": "cart.qdot[0, 1]"}, {"color": "#97c2fc", "font": {"color": "black"}, "id": 22, "label": "cart.qdot[0, 2]", "shape": "dot", "size": 10, "title": "cart.qdot[0, 2]"}, {"color": "#97c2fc", "font": {"color": "black"}, "id": 23, "label": "cart.qdot[0, 3]", "shape": "dot", "size": 10, "title": "cart.qdot[0, 3]"}, {"color": "#97c2fc", "font": {"color": "black"}, "id": 24, "label": "cart.qdot[5, 0]", "shape": "dot", "size": 10, "title": "cart.qdot[5, 0]"}, {"color": "#97c2fc", "font": {"color": "black"}, "id": 25, "label": "trap.q1dot[5, ]", "shape": "dot", "size": 10, "title": "trap.q1dot[5, ]"}, {"color": "#97c2fc", "font": {"color": "black"}, "id": 26, "label": "kin.u1dot[5, ]", "shape": "dot", "size": 10, "title": "kin.u1dot[5, ]"}, {"color": "#fed9a6", "font": {"color": "black"}, "id": 69, "label": "kin[5]", "shape": "square", "size": 10, "title": "kin[5]"}, {"color": "#97c2fc", "font": {"color": "black"}, "id": 27, "label": "cart.qdot[5, 1]", "shape": "dot", "size": 10, "title": "cart.qdot[5, 1]"}, {"color": "#97c2fc", "font": {"color": "black"}, "id": 28, "label": "cart.qdot[5, 2]", "shape": "dot", "size": 10, "title": "cart.qdot[5, 2]"}, {"color": "#97c2fc", "font": {"color": "black"}, "id": 29, "label": "cart.qdot[5, 3]", "shape": "dot", "size": 10, "title": "cart.qdot[5, 3]"}, {"color": "#decbe4", "font": {"color": "black"}, "id": 30, "label": "cart.res[0, 0]", "shape": "dot", "size": 10, "title": "cart.res[0, 0]"}, {"color": "#decbe4", "font": {"color": "black"}, "id": 31, "label": "cart.res[0, 1]", "shape": "dot", "size": 10, "title": "cart.res[0, 1]"}, {"color": "#decbe4", "font": {"color": "black"}, "id": 32, "label": "cart.res[0, 2]", "shape": "dot", "size": 10, "title": "cart.res[0, 2]"}, {"color": "#decbe4", "font": {"color": "black"}, "id": 33, "label": "cart.res[0, 3]", "shape": "dot", "size": 10, "title": "cart.res[0, 3]"}, {"color": "#decbe4", "font": {"color": "black"}, "id": 34, "label": "cart.res[5, 0]", "shape": "dot", "size": 10, "title": "cart.res[5, 0]"}, {"color": "#decbe4", "font": {"color": "black"}, "id": 35, "label": "cart.res[5, 1]", "shape": "dot", "size": 10, "title": "cart.res[5, 1]"}, {"color": "#decbe4", "font": {"color": "black"}, "id": 36, "label": "cart.res[5, 2]", "shape": "dot", "size": 10, "title": "cart.res[5, 2]"}, {"color": "#decbe4", "font": {"color": "black"}, "id": 37, "label": "cart.res[5, 3]", "shape": "dot", "size": 10, "title": "cart.res[5, 3]"}, {"color": "#97c2fc", "font": {"color": "black"}, "id": 38, "label": "trap.q2[0, ]", "shape": "dot", "size": 10, "title": "trap.q2[0, ]"}, {"color": "#97c2fc", "font": {"color": "black"}, "id": 39, "label": "trap.q2[5, ]", "shape": "dot", "size": 10, "title": "trap.q2[5, ]"}, {"color": "#97c2fc", "font": {"color": "black"}, "id": 40, "label": "trap.q2dot[0, ]", "shape": "dot", "size": 10, "title": "trap.q2dot[0, ]"}, {"color": "#97c2fc", "font": {"color": "black"}, "id": 41, "label": "kin.u2dot[0, ]", "shape": "dot", "size": 10, "title": "kin.u2dot[0, ]"}, {"color": "#97c2fc", "font": {"color": "black"}, "id": 42, "label": "trap.q2dot[5, ]", "shape": "dot", "size": 10, "title": "trap.q2dot[5, ]"}, {"color": "#97c2fc", "font": {"color": "black"}, "id": 43, "label": "kin.u2dot[5, ]", "shape": "dot", "size": 10, "title": "kin.u2dot[5, ]"}, {"color": "#decbe4", "font": {"color": "black"}, "id": 44, "label": "trap.res[0, ]", "shape": "dot", "size": 10, "title": "trap.res[0, ]"}, {"color": "#decbe4", "font": {"color": "black"}, "id": 45, "label": "trap.res[5, ]", "shape": "dot", "size": 10, "title": "trap.res[5, ]"}, {"color": "#97c2fc", "font": {"color": "black"}, "id": 46, "label": "obj.x2[0, ]", "shape": "dot", "size": 10, "title": "obj.x2[0, ]"}, {"color": "#97c2fc", "font": {"color": "black"}, "id": 47, "label": "obj.x2[5, ]", "shape": "dot", "size": 10, "title": "obj.x2[5, ]"}, {"color": "#decbe4", "font": {"color": "black"}, "id": 48, "label": "ic.res[0, 0]", "shape": "dot", "size": 10, "title": "ic.res[0, 0]"}, {"color": "#decbe4", "font": {"color": "black"}, "id": 49, "label": "ic.res[0, 1]", "shape": "dot", "size": 10, "title": "ic.res[0, 1]"}, {"color": "#decbe4", "font": {"color": "black"}, "id": 50, "label": "ic.res[0, 2]", "shape": "dot", "size": 10, "title": "ic.res[0, 2]"}, {"color": "#decbe4", "font": {"color": "black"}, "id": 51, "label": "ic.res[0, 3]", "shape": "dot", "size": 10, "title": "ic.res[0, 3]"}, {"color": "#97c2fc", "font": {"color": "black"}, "id": 52, "label": "fc.q[0, 0]", "shape": "dot", "size": 10, "title": "fc.q[0, 0]"}, {"color": "#fed9a6", "font": {"color": "black"}, "id": 67, "label": "fc[0]", "shape": "square", "size": 10, "title": "fc[0]"}, {"color": "#97c2fc", "font": {"color": "black"}, "id": 53, "label": "fc.q[0, 1]", "shape": "dot", "size": 10, "title": "fc.q[0, 1]"}, {"color": "#97c2fc", "font": {"color": "black"}, "id": 54, "label": "fc.q[0, 2]", "shape": "dot", "size": 10, "title": "fc.q[0, 2]"}, {"color": "#97c2fc", "font": {"color": "black"}, "id": 55, "label": "fc.q[0, 3]", "shape": "dot", "size": 10, "title": "fc.q[0, 3]"}, {"color": "#decbe4", "font": {"color": "black"}, "id": 56, "label": "fc.res[0, 0]", "shape": "dot", "size": 10, "title": "fc.res[0, 0]"}, {"color": "#decbe4", "font": {"color": "black"}, "id": 57, "label": "fc.res[0, 1]", "shape": "dot", "size": 10, "title": "fc.res[0, 1]"}, {"color": "#decbe4", "font": {"color": "black"}, "id": 58, "label": "fc.res[0, 2]", "shape": "dot", "size": 10, "title": "fc.res[0, 2]"}, {"color": "#decbe4", "font": {"color": "black"}, "id": 59, "label": "fc.res[0, 3]", "shape": "dot", "size": 10, "title": "fc.res[0, 3]"}]);
+                  nodes = new vis.DataSet([{"color": "#97c2fc", "font": {"color": fontColor}, "id": 0, "label": "cart.x[0, ]", "shape": "dot", "size": 10, "title": "cart.x[0, ]"}, {"color": "#fed9a6", "font": {"color": fontColor}, "id": 60, "label": "cart[0]", "shape": "square", "size": 10, "title": "cart[0]"}, {"color": "#97c2fc", "font": {"color": fontColor}, "id": 1, "label": "obj.x1[0, ]", "shape": "dot", "size": 10, "title": "obj.x1[0, ]"}, {"color": "#fed9a6", "font": {"color": fontColor}, "id": 64, "label": "obj[0]", "shape": "square", "size": 10, "title": "obj[0]"}, {"color": "#97c2fc", "font": {"color": fontColor}, "id": 2, "label": "cart.x[5, ]", "shape": "dot", "size": 10, "title": "cart.x[5, ]"}, {"color": "#fed9a6", "font": {"color": fontColor}, "id": 61, "label": "cart[5]", "shape": "square", "size": 10, "title": "cart[5]"}, {"color": "#97c2fc", "font": {"color": fontColor}, "id": 3, "label": "obj.x1[5, ]", "shape": "dot", "size": 10, "title": "obj.x1[5, ]"}, {"color": "#fed9a6", "font": {"color": fontColor}, "id": 65, "label": "obj[5]", "shape": "square", "size": 10, "title": "obj[5]"}, {"color": "#97c2fc", "font": {"color": fontColor}, "id": 4, "label": "cart.q[0, 0]", "shape": "dot", "size": 10, "title": "cart.q[0, 0]"}, {"color": "#97c2fc", "font": {"color": fontColor}, "id": 5, "label": "trap.q1[0, ]", "shape": "dot", "size": 10, "title": "trap.q1[0, ]"}, {"color": "#97c2fc", "font": {"color": fontColor}, "id": 6, "label": "ic.q[0, 0]", "shape": "dot", "size": 10, "title": "ic.q[0, 0]"}, {"color": "#fed9a6", "font": {"color": fontColor}, "id": 62, "label": "trap[0]", "shape": "square", "size": 10, "title": "trap[0]"}, {"color": "#fed9a6", "font": {"color": fontColor}, "id": 66, "label": "ic[0]", "shape": "square", "size": 10, "title": "ic[0]"}, {"color": "#97c2fc", "font": {"color": fontColor}, "id": 7, "label": "cart.q[0, 1]", "shape": "dot", "size": 10, "title": "cart.q[0, 1]"}, {"color": "#97c2fc", "font": {"color": fontColor}, "id": 8, "label": "ic.q[0, 1]", "shape": "dot", "size": 10, "title": "ic.q[0, 1]"}, {"color": "#97c2fc", "font": {"color": fontColor}, "id": 9, "label": "cart.q[0, 2]", "shape": "dot", "size": 10, "title": "cart.q[0, 2]"}, {"color": "#97c2fc", "font": {"color": fontColor}, "id": 10, "label": "ic.q[0, 2]", "shape": "dot", "size": 10, "title": "ic.q[0, 2]"}, {"color": "#97c2fc", "font": {"color": fontColor}, "id": 11, "label": "cart.q[0, 3]", "shape": "dot", "size": 10, "title": "cart.q[0, 3]"}, {"color": "#97c2fc", "font": {"color": fontColor}, "id": 12, "label": "ic.q[0, 3]", "shape": "dot", "size": 10, "title": "ic.q[0, 3]"}, {"color": "#97c2fc", "font": {"color": fontColor}, "id": 13, "label": "cart.q[5, 0]", "shape": "dot", "size": 10, "title": "cart.q[5, 0]"}, {"color": "#97c2fc", "font": {"color": fontColor}, "id": 14, "label": "trap.q1[5, ]", "shape": "dot", "size": 10, "title": "trap.q1[5, ]"}, {"color": "#fed9a6", "font": {"color": fontColor}, "id": 63, "label": "trap[5]", "shape": "square", "size": 10, "title": "trap[5]"}, {"color": "#97c2fc", "font": {"color": fontColor}, "id": 15, "label": "cart.q[5, 1]", "shape": "dot", "size": 10, "title": "cart.q[5, 1]"}, {"color": "#97c2fc", "font": {"color": fontColor}, "id": 16, "label": "cart.q[5, 2]", "shape": "dot", "size": 10, "title": "cart.q[5, 2]"}, {"color": "#97c2fc", "font": {"color": fontColor}, "id": 17, "label": "cart.q[5, 3]", "shape": "dot", "size": 10, "title": "cart.q[5, 3]"}, {"color": "#97c2fc", "font": {"color": fontColor}, "id": 18, "label": "cart.qdot[0, 0]", "shape": "dot", "size": 10, "title": "cart.qdot[0, 0]"}, {"color": "#97c2fc", "font": {"color": fontColor}, "id": 19, "label": "trap.q1dot[0, ]", "shape": "dot", "size": 10, "title": "trap.q1dot[0, ]"}, {"color": "#97c2fc", "font": {"color": fontColor}, "id": 20, "label": "kin.u1dot[0, ]", "shape": "dot", "size": 10, "title": "kin.u1dot[0, ]"}, {"color": "#fed9a6", "font": {"color": fontColor}, "id": 68, "label": "kin[0]", "shape": "square", "size": 10, "title": "kin[0]"}, {"color": "#97c2fc", "font": {"color": fontColor}, "id": 21, "label": "cart.qdot[0, 1]", "shape": "dot", "size": 10, "title": "cart.qdot[0, 1]"}, {"color": "#97c2fc", "font": {"color": fontColor}, "id": 22, "label": "cart.qdot[0, 2]", "shape": "dot", "size": 10, "title": "cart.qdot[0, 2]"}, {"color": "#97c2fc", "font": {"color": fontColor}, "id": 23, "label": "cart.qdot[0, 3]", "shape": "dot", "size": 10, "title": "cart.qdot[0, 3]"}, {"color": "#97c2fc", "font": {"color": fontColor}, "id": 24, "label": "cart.qdot[5, 0]", "shape": "dot", "size": 10, "title": "cart.qdot[5, 0]"}, {"color": "#97c2fc", "font": {"color": fontColor}, "id": 25, "label": "trap.q1dot[5, ]", "shape": "dot", "size": 10, "title": "trap.q1dot[5, ]"}, {"color": "#97c2fc", "font": {"color": fontColor}, "id": 26, "label": "kin.u1dot[5, ]", "shape": "dot", "size": 10, "title": "kin.u1dot[5, ]"}, {"color": "#fed9a6", "font": {"color": fontColor}, "id": 69, "label": "kin[5]", "shape": "square", "size": 10, "title": "kin[5]"}, {"color": "#97c2fc", "font": {"color": fontColor}, "id": 27, "label": "cart.qdot[5, 1]", "shape": "dot", "size": 10, "title": "cart.qdot[5, 1]"}, {"color": "#97c2fc", "font": {"color": fontColor}, "id": 28, "label": "cart.qdot[5, 2]", "shape": "dot", "size": 10, "title": "cart.qdot[5, 2]"}, {"color": "#97c2fc", "font": {"color": fontColor}, "id": 29, "label": "cart.qdot[5, 3]", "shape": "dot", "size": 10, "title": "cart.qdot[5, 3]"}, {"color": "#decbe4", "font": {"color": fontColor}, "id": 30, "label": "cart.res[0, 0]", "shape": "dot", "size": 10, "title": "cart.res[0, 0]"}, {"color": "#decbe4", "font": {"color": fontColor}, "id": 31, "label": "cart.res[0, 1]", "shape": "dot", "size": 10, "title": "cart.res[0, 1]"}, {"color": "#decbe4", "font": {"color": fontColor}, "id": 32, "label": "cart.res[0, 2]", "shape": "dot", "size": 10, "title": "cart.res[0, 2]"}, {"color": "#decbe4", "font": {"color": fontColor}, "id": 33, "label": "cart.res[0, 3]", "shape": "dot", "size": 10, "title": "cart.res[0, 3]"}, {"color": "#decbe4", "font": {"color": fontColor}, "id": 34, "label": "cart.res[5, 0]", "shape": "dot", "size": 10, "title": "cart.res[5, 0]"}, {"color": "#decbe4", "font": {"color": fontColor}, "id": 35, "label": "cart.res[5, 1]", "shape": "dot", "size": 10, "title": "cart.res[5, 1]"}, {"color": "#decbe4", "font": {"color": fontColor}, "id": 36, "label": "cart.res[5, 2]", "shape": "dot", "size": 10, "title": "cart.res[5, 2]"}, {"color": "#decbe4", "font": {"color": fontColor}, "id": 37, "label": "cart.res[5, 3]", "shape": "dot", "size": 10, "title": "cart.res[5, 3]"}, {"color": "#97c2fc", "font": {"color": fontColor}, "id": 38, "label": "trap.q2[0, ]", "shape": "dot", "size": 10, "title": "trap.q2[0, ]"}, {"color": "#97c2fc", "font": {"color": fontColor}, "id": 39, "label": "trap.q2[5, ]", "shape": "dot", "size": 10, "title": "trap.q2[5, ]"}, {"color": "#97c2fc", "font": {"color": fontColor}, "id": 40, "label": "trap.q2dot[0, ]", "shape": "dot", "size": 10, "title": "trap.q2dot[0, ]"}, {"color": "#97c2fc", "font": {"color": fontColor}, "id": 41, "label": "kin.u2dot[0, ]", "shape": "dot", "size": 10, "title": "kin.u2dot[0, ]"}, {"color": "#97c2fc", "font": {"color": fontColor}, "id": 42, "label": "trap.q2dot[5, ]", "shape": "dot", "size": 10, "title": "trap.q2dot[5, ]"}, {"color": "#97c2fc", "font": {"color": fontColor}, "id": 43, "label": "kin.u2dot[5, ]", "shape": "dot", "size": 10, "title": "kin.u2dot[5, ]"}, {"color": "#decbe4", "font": {"color": fontColor}, "id": 44, "label": "trap.res[0, ]", "shape": "dot", "size": 10, "title": "trap.res[0, ]"}, {"color": "#decbe4", "font": {"color": fontColor}, "id": 45, "label": "trap.res[5, ]", "shape": "dot", "size": 10, "title": "trap.res[5, ]"}, {"color": "#97c2fc", "font": {"color": fontColor}, "id": 46, "label": "obj.x2[0, ]", "shape": "dot", "size": 10, "title": "obj.x2[0, ]"}, {"color": "#97c2fc", "font": {"color": fontColor}, "id": 47, "label": "obj.x2[5, ]", "shape": "dot", "size": 10, "title": "obj.x2[5, ]"}, {"color": "#decbe4", "font": {"color": fontColor}, "id": 48, "label": "ic.res[0, 0]", "shape": "dot", "size": 10, "title": "ic.res[0, 0]"}, {"color": "#decbe4", "font": {"color": fontColor}, "id": 49, "label": "ic.res[0, 1]", "shape": "dot", "size": 10, "title": "ic.res[0, 1]"}, {"color": "#decbe4", "font": {"color": fontColor}, "id": 50, "label": "ic.res[0, 2]", "shape": "dot", "size": 10, "title": "ic.res[0, 2]"}, {"color": "#decbe4", "font": {"color": fontColor}, "id": 51, "label": "ic.res[0, 3]", "shape": "dot", "size": 10, "title": "ic.res[0, 3]"}, {"color": "#97c2fc", "font": {"color": fontColor}, "id": 52, "label": "fc.q[0, 0]", "shape": "dot", "size": 10, "title": "fc.q[0, 0]"}, {"color": "#fed9a6", "font": {"color": fontColor}, "id": 67, "label": "fc[0]", "shape": "square", "size": 10, "title": "fc[0]"}, {"color": "#97c2fc", "font": {"color": fontColor}, "id": 53, "label": "fc.q[0, 1]", "shape": "dot", "size": 10, "title": "fc.q[0, 1]"}, {"color": "#97c2fc", "font": {"color": fontColor}, "id": 54, "label": "fc.q[0, 2]", "shape": "dot", "size": 10, "title": "fc.q[0, 2]"}, {"color": "#97c2fc", "font": {"color": fontColor}, "id": 55, "label": "fc.q[0, 3]", "shape": "dot", "size": 10, "title": "fc.q[0, 3]"}, {"color": "#decbe4", "font": {"color": fontColor}, "id": 56, "label": "fc.res[0, 0]", "shape": "dot", "size": 10, "title": "fc.res[0, 0]"}, {"color": "#decbe4", "font": {"color": fontColor}, "id": 57, "label": "fc.res[0, 1]", "shape": "dot", "size": 10, "title": "fc.res[0, 1]"}, {"color": "#decbe4", "font": {"color": fontColor}, "id": 58, "label": "fc.res[0, 2]", "shape": "dot", "size": 10, "title": "fc.res[0, 2]"}, {"color": "#decbe4", "font": {"color": fontColor}, "id": 59, "label": "fc.res[0, 3]", "shape": "dot", "size": 10, "title": "fc.res[0, 3]"}]);
                   edges = new vis.DataSet([{"from": 0, "to": 60, "width": 1}, {"color": "gray", "dashes": true, "from": 0, "to": 1, "width": 1}, {"from": 1, "to": 64, "width": 1}, {"from": 2, "to": 61, "width": 1}, {"color": "gray", "dashes": true, "from": 2, "to": 3, "width": 1}, {"from": 3, "to": 65, "width": 1}, {"from": 4, "to": 60, "width": 1}, {"color": "gray", "dashes": true, "from": 4, "to": 5, "width": 1}, {"color": "gray", "dashes": true, "from": 4, "to": 6, "width": 1}, {"from": 5, "to": 62, "width": 1}, {"color": "gray", "dashes": true, "from": 5, "to": 6, "width": 1}, {"from": 6, "to": 66, "width": 1}, {"from": 7, "to": 60, "width": 1}, {"color": "gray", "dashes": true, "from": 7, "to": 8, "width": 1}, {"from": 8, "to": 66, "width": 1}, {"from": 9, "to": 60, "width": 1}, {"color": "gray", "dashes": true, "from": 9, "to": 10, "width": 1}, {"from": 10, "to": 66, "width": 1}, {"from": 11, "to": 60, "width": 1}, {"color": "gray", "dashes": true, "from": 11, "to": 12, "width": 1}, {"from": 12, "to": 66, "width": 1}, {"from": 13, "to": 61, "width": 1}, {"color": "gray", "dashes": true, "from": 13, "to": 14, "width": 1}, {"from": 14, "to": 63, "width": 1}, {"from": 15, "to": 61, "width": 1}, {"from": 16, "to": 61, "width": 1}, {"from": 17, "to": 61, "width": 1}, {"from": 18, "to": 60, "width": 1}, {"color": "gray", "dashes": true, "from": 18, "to": 19, "width": 1}, {"color": "gray", "dashes": true, "from": 18, "to": 20, "width": 1}, {"from": 19, "to": 62, "width": 1}, {"color": "gray", "dashes": true, "from": 19, "to": 20, "width": 1}, {"from": 20, "to": 68, "width": 1}, {"from": 21, "to": 60, "width": 1}, {"from": 22, "to": 60, "width": 1}, {"from": 23, "to": 60, "width": 1}, {"from": 24, "to": 61, "width": 1}, {"color": "gray", "dashes": true, "from": 24, "to": 25, "width": 1}, {"color": "gray", "dashes": true, "from": 24, "to": 26, "width": 1}, {"from": 25, "to": 63, "width": 1}, {"color": "gray", "dashes": true, "from": 25, "to": 26, "width": 1}, {"from": 26, "to": 69, "width": 1}, {"from": 27, "to": 61, "width": 1}, {"from": 28, "to": 61, "width": 1}, {"from": 29, "to": 61, "width": 1}, {"from": 30, "to": 60, "width": 1}, {"from": 31, "to": 60, "width": 1}, {"from": 32, "to": 60, "width": 1}, {"from": 33, "to": 60, "width": 1}, {"from": 34, "to": 61, "width": 1}, {"from": 35, "to": 61, "width": 1}, {"from": 36, "to": 61, "width": 1}, {"from": 37, "to": 61, "width": 1}, {"from": 38, "to": 62, "width": 1}, {"from": 39, "to": 63, "width": 1}, {"from": 40, "to": 62, "width": 1}, {"color": "gray", "dashes": true, "from": 40, "to": 41, "width": 1}, {"from": 41, "to": 68, "width": 1}, {"from": 42, "to": 63, "width": 1}, {"color": "gray", "dashes": true, "from": 42, "to": 43, "width": 1}, {"from": 43, "to": 69, "width": 1}, {"from": 44, "to": 62, "width": 1}, {"from": 45, "to": 63, "width": 1}, {"from": 46, "to": 64, "width": 1}, {"from": 47, "to": 65, "width": 1}, {"from": 48, "to": 66, "width": 1}, {"from": 49, "to": 66, "width": 1}, {"from": 50, "to": 66, "width": 1}, {"from": 51, "to": 66, "width": 1}, {"from": 52, "to": 67, "width": 1}, {"from": 53, "to": 67, "width": 1}, {"from": 54, "to": 67, "width": 1}, {"from": 55, "to": 67, "width": 1}, {"from": 56, "to": 67, "width": 1}, {"from": 57, "to": 67, "width": 1}, {"from": 58, "to": 67, "width": 1}, {"from": 59, "to": 67, "width": 1}]);
 
                   nodeColors = {};
