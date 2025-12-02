@@ -31,9 +31,31 @@ function(amigo_add_python_module)
   find_package(amigo REQUIRED CONFIG)
   find_package(Python3 REQUIRED COMPONENTS Development.Module)
   find_package(pybind11 REQUIRED CONFIG)
-  find_package(BLAS REQUIRED)
-  find_package(LAPACK REQUIRED)
-  find_package(MPI REQUIRED COMPONENTS CXX)
+  
+  # Use BLAS/LAPACK/MPI settings from amigo installation instead of re-searching
+  # These were found and cached during the main amigo build
+  if(AMIGO_BLAS_LIBRARIES)
+    set(BLAS_LIBRARIES "${AMIGO_BLAS_LIBRARIES}" CACHE FILEPATH "BLAS library" FORCE)
+    set(BLAS_FOUND TRUE)
+  else()
+    find_package(BLAS REQUIRED)
+  endif()
+  
+  if(AMIGO_LAPACK_LIBRARIES)
+    set(LAPACK_LIBRARIES "${AMIGO_LAPACK_LIBRARIES}" CACHE FILEPATH "LAPACK library" FORCE)
+    set(LAPACK_FOUND TRUE)
+  else()
+    find_package(LAPACK REQUIRED)
+  endif()
+  
+  if(AMIGO_MPI_CXX_LIBRARIES AND AMIGO_MPI_CXX_INCLUDE_PATH)
+    set(MPI_CXX_LIBRARIES "${AMIGO_MPI_CXX_LIBRARIES}" CACHE FILEPATH "MPI library" FORCE)
+    set(MPI_CXX_INCLUDE_PATH "${AMIGO_MPI_CXX_INCLUDE_PATH}" CACHE PATH "MPI include" FORCE)
+    set(MPI_CXX_FOUND TRUE)
+    set(MPI_FOUND TRUE)
+  else()
+    find_package(MPI REQUIRED COMPONENTS CXX)
+  endif()
 
   if (AMIGO_ENABLE_CUDSS)
     include(FindPackageHandleStandardArgs)
@@ -74,4 +96,12 @@ function(amigo_add_python_module)
   set_target_properties(${AMIGO_NAME} PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
   )
+  
+  # For multi-config generators (Visual Studio, Xcode), also set per-config directories
+  foreach(CONFIG ${CMAKE_CONFIGURATION_TYPES})
+    string(TOUPPER ${CONFIG} CONFIG_UPPER)
+    set_target_properties(${AMIGO_NAME} PROPERTIES
+      LIBRARY_OUTPUT_DIRECTORY_${CONFIG_UPPER} "${CMAKE_CURRENT_SOURCE_DIR}"
+    )
+  endforeach()
 endfunction()
