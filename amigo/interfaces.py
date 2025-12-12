@@ -198,30 +198,32 @@ def ExplicitOpenMDAOPostOptComponent(**kwargs):
             }
 
         def compute_partials(self, inputs, partials):
+            # This code is supposed to check if the inputs have changed. However, it gives
+            # a false positive, skipping the optimizaiton step.
             # Re-optimize if inputs changed since compute()
-            inputs_changed = not hasattr(self, "_last_inputs")
-            if not inputs_changed:
-                for name in self.data:
-                    om_name = self.data_mapping[name]
-                    if not np.array_equal(inputs[om_name], self._last_inputs[name]):
-                        inputs_changed = True
-                        break
+            # inputs_changed = not hasattr(self, "_last_inputs")
+            # if not inputs_changed:
+            #     for name in self.data:
+            #         om_name = self.data_mapping[name]
+            #         if not np.array_equal(inputs[om_name], self._last_inputs[name]):
+            #             inputs_changed = True
+            #             break
 
-            # Also compute derivatives if they haven't been computed yet
-            if inputs_changed or not hasattr(self, "of_map"):
-                data = self.model.get_data_vector()
-                for name in self.data:
-                    om_name = self.data_mapping[name]
-                    data[name] = inputs[om_name]
-                self.opt.optimize(self.opt_options)
-                self._last_inputs = {
-                    name: inputs[self.data_mapping[name]].copy() for name in self.data
-                }
+            # Optimize the model
+            # if inputs_changed or not hasattr(self, "of_map"):
+            data = self.model.get_data_vector()
+            for name in self.data:
+                om_name = self.data_mapping[name]
+                data[name] = inputs[om_name]
+            self.opt.optimize(self.opt_options)
+            self._last_inputs = {
+                name: inputs[self.data_mapping[name]].copy() for name in self.data
+            }
 
-                # Compute derivatives only when inputs change
-                self.dfdx, self.of_map, self.wrt_map = (
-                    self.opt.compute_post_opt_derivatives(of=self.output, wrt=self.data)
-                )
+            # Compute derivatives only when inputs change
+            self.dfdx, self.of_map, self.wrt_map = (
+                self.opt.compute_post_opt_derivatives(of=self.output, wrt=self.data)
+            )
 
             for of in self.of_map:
                 open_of = self.output_mapping[of]

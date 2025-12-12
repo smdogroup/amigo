@@ -346,7 +346,7 @@ class SerialOutputBackend {
           Component::compute_output(data, input, output);
 
           for (int k = 0; k < noutputs; k++) {
-            jac_elem[ncomp * k + j] = output[k].deriv[0];
+            jac_elem[ndata * k + j] = output[k].deriv[0];
           }
         }
 

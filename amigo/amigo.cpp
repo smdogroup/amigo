@@ -470,7 +470,8 @@ PYBIND11_MODULE(amigo, mod) {
            py::arg("root") = 0, py::arg("distribute") = true)
       .def("create_output_vector",
            &amigo::OptimizationProblem<double,
-                                       detail::policy>::create_output_vector)
+                                       detail::policy>::create_output_vector,
+           py::arg("loc") = amigo::MemoryLocation::HOST_AND_DEVICE)
       .def("compute_output",
            &amigo::OptimizationProblem<double, detail::policy>::compute_output)
       .def("create_output_jacobian_wrt_input",
