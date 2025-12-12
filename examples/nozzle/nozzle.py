@@ -116,60 +116,33 @@ class Nozzle(am.Component):
         ]
 
 
-class NozzleSolutionCalc(am.Component):
-    def __init__(self, gamma=1.4, T_res=1.0, p_res=1.0, p_back=0.9):
+class ExactNozzleMachCalc(am.Component):
+    def __init__(self, gamma=1.4, Astar=1.0):
         super().__init__()
 
         self.add_constant("gamma", value=gamma)
         self.add_constant("gam1", value=(gamma - 1.0))
-        self.add_constant("ggam1", value=gamma / (gamma - 1.0))
-        self.add_constant("gap1", value=(gamma + 1.0))
-        self.add_constant("exponent", value=(gamma + 1.0) / (2.0 * (gamma - 1.0)))
+        self.add_constant("Astar", value=Astar)
 
-        p_ratio = (2.0 / (gamma + 1)) ** (gamma / (gamma - 1.0))
-        if p_back / p_res < p_ratio:
-            raise ValueError("This is not a subsonic branch")
-
-        # Compute the Mach number at the outlet - assume we have a subsonic solution
-        expn = (gamma - 1.0) / gamma
-        M_out = np.sqrt(2.0 / (gamma - 1.0) * ((p_res / p_back) ** expn - 1.0))
-
-        # The Mach number at the outlet should
-        self.add_constant("M_outlet", value=M_out)
-
-        # Add the inlet and outlet areas
-        self.add_input("A_inlet")
-        self.add_input("A_outlet")
-
-        # Add the Mach number at the inlet
-        self.add_input("M_inlet")
-
-        # Add the constraint
+        self.add_input("A")
+        self.add_input("M")
         self.add_constraint("res")
 
     def compute(self):
+        gamma = self.constants["gamma"]
         gam1 = self.constants["gam1"]
-        gap1 = self.constants["gap1"]
-        expn = self.constants["exponent"]
+        Astar = self.constants["Astar"]
+        M = self.inputs["M"]
+        A = self.inputs["A"]
 
-        A_in = self.inputs["A_inlet"]
-        A_out = self.inputs["A_outlet"]
+        fact = self.vars["fact"] = 1.0 + 0.5 * gam1 * M**2
+        ratio = ((2.0 / (gamma + 1.0)) * fact) ** ((gamma + 1.0) / (2 * gam1))
 
-        M_out = self.constants["M_outlet"]
-        M_in = self.inputs["M_inlet"]
-
-        fact_out = 1.0 + 0.5 * gam1 * M_out * M_out
-        A_star = self.vars["A_star"] = (
-            A_out * M_out * (2.0 / gap1 * fact_out) ** (-expn)
-        )
-
-        fact_in = 1.0 + 0.5 * gam1 * M_in * M_in
-
-        self.constraints["res"] = A_star / A_in - M_in * (2 / gap1 * fact_in) ** (-expn)
+        self.constraints["res"] = ratio - (A / Astar) * M
 
 
 class SubsonicInletFlux(am.Component):
-    def __init__(self, gamma=1.4, T_res=1.0, p_res=1.0, p_back=0.9):
+    def __init__(self, gamma=1.4, T_res=1.0, p_res=1.0):
         super().__init__()
 
         self.add_constant("gamma", value=gamma)
@@ -184,28 +157,23 @@ class SubsonicInletFlux(am.Component):
         self.add_constant("rho_res", value=rho_res)
         self.add_constant("S_res", value=S_res)
 
-        self.add_input("A")
+        self.add_input("A_inlet")
+        self.add_input("M_inlet")
         self.add_input("Q", shape=3)
         self.add_input("F", shape=3)
         self.add_constraint("res", shape=3)
-
-        # Add the inlet Mach number as an additional constraint
-        self.add_input("M_inlet")
 
     def compute(self):
         gamma = self.constants["gamma"]
         gam1 = self.constants["gam1"]
         ggam1 = self.constants["ggam1"]
-
         T_res = self.constants["T_res"]
         S_res = self.constants["S_res"]
 
-        A = self.inputs["A"]
+        A_inlet = self.inputs["A_inlet"]
+        M_inlet = self.inputs["M_inlet"]
         Q = self.inputs["Q"]
         F = self.inputs["F"]
-
-        # Get the Mach number at the inlet
-        M_inlet = self.inputs["M_inlet"]
 
         # Compute the velocity and speed of sound at the input
         rho_int = Q[0]
@@ -213,11 +181,11 @@ class SubsonicInletFlux(am.Component):
         p_int = self.vars["p_int"] = gam1 * (Q[2] - 0.5 * rho_int * u_int * u_int)
         a_int = self.vars["a_int"] = am.sqrt(gamma * p_int / rho_int)
 
-        # Compute the area ratio
-        M_factor = self.vars["M_factor"] = 1.0 + 0.5 * gam1 * M_inlet * M_inlet
+        # Compute the isentropic factor
+        fact = self.vars["fact"] = 1.0 + 0.5 * gam1 * M_inlet * M_inlet
 
         # Compute the inlet speed of sound
-        a_inlet = am.sqrt(T_res / M_factor)
+        a_inlet = am.sqrt(T_res / fact)
 
         # Compute the inlet velocity
         u_inlet = M_inlet * a_inlet
@@ -237,23 +205,30 @@ class SubsonicInletFlux(am.Component):
 
         # Compute the constraints
         self.constraints["res"] = [
-            F[0] - A * rho_b * u_b,
-            F[1] - A * (rho_b * u_b**2 + p_b),
-            F[2] - A * rho_b * u_b * H_b,
+            F[0] - A_inlet * rho_b * u_b,
+            F[1] - A_inlet * (rho_b * u_b**2 + p_b),
+            F[2] - A_inlet * rho_b * u_b * H_b,
         ]
 
 
-class OutletFlux(am.Component):
-    def __init__(self, gamma=1.4, p_back=1.0):
+class SubsonicOutletFlux(am.Component):
+    def __init__(self, gamma=1.4, T_res=1.0, p_res=1.0):
         super().__init__()
 
         self.add_constant("gamma", value=gamma)
         self.add_constant("gam1", value=(gamma - 1.0))
         self.add_constant("ggam1", value=gamma / (gamma - 1.0))
 
-        self.add_constant("p_back", value=p_back)
+        rho_res = gamma * p_res / T_res
+        S_res = rho_res**gamma / p_res
 
-        self.add_input("A")
+        self.add_constant("T_res", value=T_res)
+        self.add_constant("p_res", value=p_res)
+        self.add_constant("rho_res", value=rho_res)
+        self.add_constant("S_res", value=S_res)
+
+        self.add_input("A_outlet")
+        self.add_input("M_outlet")
         self.add_input("Q", shape=3)
         self.add_input("F", shape=3)
         self.add_constraint("res", shape=3)
@@ -263,9 +238,8 @@ class OutletFlux(am.Component):
         gam1 = self.constants["gam1"]
         ggam1 = self.constants["ggam1"]
 
-        p_back = self.constants["p_back"]
-
-        A = self.inputs["A"]
+        M_outlet = self.inputs["M_outlet"]
+        A_outlet = self.inputs["A_outlet"]
         Q = self.inputs["Q"]
         F = self.inputs["F"]
 
@@ -274,26 +248,35 @@ class OutletFlux(am.Component):
         u_int = self.vars["u_int"] = Q[1] / Q[0]
         p_int = self.vars["p_int"] = gam1 * (Q[2] - 0.5 * rho_int * u_int * u_int)
         a_int = self.vars["a_int"] = am.sqrt(gamma * p_int / rho_int)
+        S_int = self.vars["S_int"] = rho_int**gamma / p_int
+
+        # Compute the isentropic factor
+        fact = self.vars["fact"] = 1.0 + 0.5 * gam1 * M_outlet * M_outlet
+
+        # Compute the outlet speed of sound and velocity
+        a_outlet = am.sqrt(T_res / fact)
+        u_outlet = M_outlet * a_outlet
 
         # Compute the two invariants
         invar_int = self.vars["invar_int"] = u_int + 2.0 * a_int / gam1
         S_int = self.vars["S_int"] = rho_int**gamma / p_int
 
-        # Set the back pressure
-        p_b = p_back
+        # Compute the invariants
+        invar_outlet = self.vars["invar_outlet"] = u_outlet - 2.0 * a_outlet / gam1
 
-        # Keep the entropy from the interior S_int = rho_b**gamma / p_b
-        rho_b = self.vars["rho_b"] = (p_b * S_int) ** (1.0 / gamma)
-        a_b = self.vars["a_b"] = am.sqrt(gamma * p_b / rho_b)
-        u_b = self.vars["u_b"] = invar_int - 2 * a_b / gam1
+        # Based on the invariants, compute the velocity and speed of sound
+        u_b = self.vars["u_b"] = 0.5 * (invar_int + invar_outlet)
+        a_b = self.vars["a_b"] = 0.25 * gam1 * (invar_outlet - invar_int)
+        rho_b = self.vars["rho_b"] = (a_b * a_b * S_int / gamma) ** (1.0 / gam1)
 
-        # Set the enthalpy
+        # Compute the remaining states
+        p_b = self.vars["p_b"] = rho_b * a_b * a_b / gamma
         H_b = self.vars["H_b"] = ggam1 * p_b / rho_b + 0.5 * u_b * u_b
 
         self.constraints["res"] = [
-            F[0] - A * rho_b * u_b,
-            F[1] - A * (rho_b * u_b**2 + p_b),
-            F[2] - A * rho_b * u_b * H_b,
+            F[0] - A_outlet * rho_b * u_b,
+            F[1] - A_outlet * (rho_b * u_b**2 + p_b),
+            F[2] - A_outlet * rho_b * u_b * H_b,
         ]
 
 
@@ -322,7 +305,7 @@ class Objective(am.Component):
         u = self.vars["u"] = Q[1] / Q[0]
         p = self.vars["p"] = gam1 * (Q[2] - 0.5 * rho * u * u)
 
-        self.objective["obj"] = (p - p0) ** 2
+        self.objective["obj"] = (10.0 / num_cells) * (p - p0) ** 2
 
 
 class AreaControlPoints(am.Component):
@@ -332,7 +315,59 @@ class AreaControlPoints(am.Component):
         self.add_input("area")
 
 
-def plot_solution(rho, u, p, p_target, num_cells, length):
+def compute_area_target(eta, A_inlet=2.0, A_outlet=1.5, A_min=0.8, eta_sigma=0.3):
+    """
+    Compute the target area distribution
+    """
+
+    # Compute the magnitude of the exponential term
+    A_amplitude = A_min - 0.5 * (A_inlet + A_outlet)
+
+    # Evaluate the target area
+    A_target = A_inlet * (1.0 - eta) + A_outlet * eta
+    A_target += A_amplitude * np.exp(-(((eta - 0.5) / eta_sigma) ** 2))
+
+    return A_target
+
+
+def compute_pressure_target(
+    A_target, p_res, gamma, Astar, newton_iterations=20, tol=1e-12
+):
+    """
+    Given a target area distribution, compute the exact target pressure distribution
+    """
+
+    M_target = np.zeros(len(A_target))
+    p_target = np.zeros(len(A_target))
+    for i in range(len(A_target)):
+
+        # Solve for the Mach number
+        M = 0.01
+        for j in range(newton_iterations):
+            fact = (2.0 / (gamma + 1.0)) * (1.0 + 0.5 * (gamma - 1.0) * M**2)
+            ratio = fact ** ((gamma + 1.0) / (2 * (gamma - 1.0)))
+
+            # Solve the equation
+            R = ratio / M - A_target[i] / Astar
+
+            # Check the convergence tolerance
+            if np.fabs(R) < tol:
+                break
+
+            dRdM = fact ** ((3.0 - gamma) / (2.0 * (gamma - 1.0)))
+            dRdM -= ratio / M**2
+
+            M -= R / dRdM
+
+        # Compute the pressure
+        M_target[i] = M
+        fact = 1.0 + 0.5 * (gamma - 1.0) * M**2
+        p_target[i] = p_res * (fact ** (-gamma / (gamma - 1)))
+
+    return M_target, p_target
+
+
+def plot_solution(rho, u, p, M_target, p_target, num_cells, length):
 
     dx = length / num_cells
     xloc = np.linspace(0.5 * dx, length - 0.5 * dx, num_cells)
@@ -341,8 +376,8 @@ def plot_solution(rho, u, p, p_target, num_cells, length):
         fig, ax = plt.subplots(3, 1, figsize=(10, 6))
         colors = niceplots.get_colors_list()
 
-        labels = [r"$\rho$", "$M$", "$p$"]
-        xlabel = "location"
+        labels = ["Density", "Mach", "Pressure"]
+        xlabel = "Location"
         xticks = [0, 2, 4, 6, 8, 10]
 
         for i, label in enumerate(labels):
@@ -350,14 +385,14 @@ def plot_solution(rho, u, p, p_target, num_cells, length):
 
         line_scaler = 1.0
 
-        indices = [0, 1, 2, 2]
-        cindices = [0, 0, 0, 1]
+        indices = [0, 1, 1, 2, 2]
+        cindices = [0, 0, 1, 0, 1]
 
         gamma = 1.4
         a = np.sqrt(gamma * p / rho)
 
-        data = [rho, u / a, p, p_target]
-        label = [None, None, "solution", "target"]
+        data = [rho, u / a, M_target, p, p_target]
+        label = [None, None, None, "solution", "target"]
 
         for i, (index, c, y) in enumerate(zip(indices, cindices, data)):
             ax[index].plot(
@@ -401,7 +436,7 @@ def plot_solution(rho, u, p, p_target, num_cells, length):
     return
 
 
-def plot_nozzle(A, dAdx, num_cells, length):
+def plot_nozzle(A, dAdx, A_target, num_cells, length):
     dx = length / num_cells
     xintr = np.linspace(0.0, length, num_cells + 1)
     xcell = np.linspace(0.5 * dx, length - 0.5 * dx, num_cells)
@@ -419,10 +454,10 @@ def plot_nozzle(A, dAdx, num_cells, length):
 
         line_scaler = 1.0
 
-        indices = [0, 1]
-        cindices = [0, 0]
-        xdata = [xintr, xcell]
-        ydata = [A, dAdx]
+        indices = [0, 0, 1]
+        cindices = [0, 1, 0]
+        xdata = [xintr, xcell, xcell]
+        ydata = [A, A_target, dAdx]
 
         for i, (index, c, x, y) in enumerate(zip(indices, cindices, xdata, ydata)):
             ax[index].plot(
@@ -469,7 +504,7 @@ def plot_convergence(nrms):
         fig, ax = plt.subplots(1, 1)
 
         ax.semilogy(nrms, marker="o", clip_on=False, lw=2.0)
-        ax.set_ylabel("KKT residual norm")
+        ax.set_ylabel("KKT Residual Norm")
         ax.set_xlabel("Iteration")
 
         niceplots.adjust_spines(ax)
@@ -536,19 +571,14 @@ p_ref = rho_ref * a_ref**2
 T_res = T_reservoir / T_ref
 p_res = p_reservoir / p_ref
 
-# Set the back-pressure
-p_back = 0.8 * p_res
+# Set the reference area
+Astar = 0.7
 
 # Set values for the length
 length = 10.0
 
 # Set the constants needed for the inputs/outputs
 dx = length / num_cells
-
-# Set the pressure values
-p_inlet = 0.95 * p_res
-p_min = 0.45 * p_res
-p_outlet = p_back
 
 # Number of control points
 nctrl = 10
@@ -562,28 +592,31 @@ model.add_component("flux", num_cells - 1, RoeFlux(gamma=gamma))
 # Add the flux computations at the end points
 inlet = SubsonicInletFlux(gamma=gamma, T_res=T_res, p_res=p_res)
 model.add_component("inlet", 1, inlet)
-model.add_component("outlet", 1, OutletFlux(gamma=gamma, p_back=p_back))
+
+outlet = SubsonicOutletFlux(gamma=gamma, T_res=T_res, p_res=p_res)
+model.add_component("outlet", 1, outlet)
 
 # Add the 1D nozzle
 model.add_component("nozzle", num_cells, Nozzle(gamma=gamma, dx=(length / num_cells)))
 
 # Add the nozzle boundary condition calculation
-model.add_component(
-    "calc", 1, NozzleSolutionCalc(T_res=T_res, p_res=p_res, p_back=p_back)
-)
+model.add_component("calc", 2, ExactNozzleMachCalc(gamma=gamma, Astar=Astar))
 
 # Add the objective function
-model.add_component("objective", num_cells, Objective())
+model.add_component("objective", num_cells, Objective(gamma=gamma))
 
 # Add the area source
 model.add_component("area_ctrl", nctrl, AreaControlPoints())
 
-# Add the Bspline components that interpolate from the same area
-xi_interface = np.linspace(0, 1.0, num_cells + 1)
+# Add the Bspline area calculation component
+xi_interface = np.linspace(0, length, num_cells + 1)
 area = am.BSplineInterpolant(xi=xi_interface, k=4, n=nctrl, deriv=0, length=length)
 model.add_component("area", num_cells + 1, area)
 
-xi_cell_center = np.linspace(0.5 / num_cells, 1.0 - 0.5 / num_cells, num_cells)
+# Add the Bspline derivative evaluation component
+first_cell = 0.5 * dx
+last_cell = length - 0.5 * dx
+xi_cell_center = np.linspace(first_cell, last_cell, num_cells)
 area_derivative = am.BSplineInterpolant(
     xi=xi_cell_center, k=4, n=nctrl, deriv=1, length=length
 )
@@ -608,12 +641,12 @@ area.add_links("area", model, "area_ctrl.area")
 area_derivative.add_links("area_derivative", model, "area_ctrl.area")
 
 # Link the input boundary states and fluxes
-model.link("area.output[0]", "inlet.A")
+model.link("area.output[0]", "inlet.A_inlet")
 model.link("nozzle.Q[0, :]", "inlet.Q[0, :]")
 model.link("nozzle.FL[0, :]", "inlet.F[0, :]")
 
 # Link the output boundary states and fluxes
-model.link("area.output[-1]", "outlet.A")
+model.link("area.output[-1]", "outlet.A_outlet")
 model.link("nozzle.Q[-1, :]", "outlet.Q[0, :]")
 model.link("nozzle.FR[-1, :]", "outlet.F[0, :]")
 
@@ -621,9 +654,11 @@ model.link("nozzle.FR[-1, :]", "outlet.F[0, :]")
 model.link("nozzle.Q", "objective.Q")
 
 # Connect the nozzle boundary condition calculations
-model.link("area.output[0]", "calc.A_inlet")
-model.link("area.output[-1]", "calc.A_outlet")
-model.link("inlet.M_inlet", "calc.M_inlet")
+model.link("area.output[0]", "calc.A[0]")
+model.link("inlet.M_inlet", "calc.M[0]")
+
+model.link("area.output[-1]", "calc.A[1]")
+model.link("outlet.M_outlet", "calc.M[1]")
 
 if args.build:
     source_dir = Path(__file__).resolve().parent
@@ -634,10 +669,17 @@ model.initialize(order_type=am.OrderingType.NATURAL)
 # Get the data and set the target pressure distribution
 data = model.get_data_vector()
 
-# Quadratic interpolation with p_inlet, p_min and p_out
-b = 4 * p_min - p_outlet - 3 * p_inlet
-a = 2 * p_inlet - 4 * p_min + 2 * p_outlet
-data["objective.p0"] = p_inlet + b * xi_cell_center + a * xi_cell_center**2
+# Compute the non-dimensional locations to evaluate the area
+eta = xi_cell_center / length
+
+# Compute the target area distribution
+A_target = compute_area_target(eta)
+
+# Evaluate the target pressure distribution
+M_target, p_target = compute_pressure_target(A_target, p_res, gamma, Astar)
+
+# Set the pressure target distribution
+data["objective.p0"] = p_target
 
 # Set the area derivative data
 area.set_data("area", data)
@@ -667,10 +709,14 @@ x["nozzle.FR[:, 0]"] = rho * u
 x["nozzle.FR[:, 1]"] = rho * u**2 + p
 x["nozzle.FR[:, 2]"] = rho * u * H
 
-# Set the bounds for the inlet Mach number
-x["inlet.M_inlet"] = u
+# Set the bounds for the inlet and outlet Mach number
+x["inlet.M_inlet"] = 0.01
 lower["inlet.M_inlet"] = 0.0
 upper["inlet.M_inlet"] = 1.0
+
+x["outlet.M_outlet"] = 0.01
+lower["outlet.M_outlet"] = 0.0
+upper["outlet.M_outlet"] = 1.0
 
 # Set the lower and upper bounds for Q
 lower["nozzle.Q"] = float("-inf")
@@ -684,9 +730,9 @@ x["nozzle.dAdx"] = 0.0
 x["area.output"] = 1.0
 
 # Set the bounds on the the areas
-x["area_ctrl.area"] = 1.0
-lower["area_ctrl.area"] = 0.1
-upper["area_ctrl.area"] = 2.0
+x["area_ctrl.area"] = 1.5
+lower["area_ctrl.area"] = -3.0
+upper["area_ctrl.area"] = 3.0
 
 # Set the remaining variable lower and upper bounds
 lower["area.output"] = -float("inf")
@@ -709,7 +755,7 @@ if args.use_lnks:
         "flux.F",
         "inlet.F",
         "outlet.F",
-        "calc.M_inlet",
+        "calc.M",
     ]
     residuals = ["nozzle.res", "flux.res", "inlet.res", "outlet.res", "calc.res"]
 
@@ -723,15 +769,79 @@ if args.use_lnks:
 if args.use_cuda:
     solver = am.DirectCudaSolver(model.get_problem())
 
+
+from scipy.sparse import csr_matrix
+from scipy.sparse.linalg import splu
+
+
+class NozzleSolver:
+    def __init__(self, problem, model):
+        self.problem = problem
+        self.model = model
+        loc = am.MemoryLocation.HOST_AND_DEVICE
+        self.hess = self.problem.create_matrix(loc)
+        self.nrows, self.ncols, self.nnz, self.rowp, self.cols = (
+            self.hess.get_nonzero_structure()
+        )
+
+        self.area_indices = self.model.get_indices("area_ctrl.area")
+
+        self.beta = 100.0
+        self.iteration = 0
+
+        self.lu = None
+        return
+
+    def factor(self, alpha, x, diag):
+        """
+        Compute and factor the Hessian matrix
+        """
+
+        # Compute the Hessian and add the diagonal values
+        self.problem.hessian(alpha, x, self.hess)
+        self.problem.add_diagonal(diag, self.hess)
+
+        self.hess.copy_data_device_to_host()
+
+        # Build the CSR matrix and convert to CSC
+        shape = (self.nrows, self.ncols)
+        data = self.hess.get_data()
+        H = csr_matrix((data, self.cols, self.rowp), shape=shape).tocsc()
+
+        if alpha == 1.0:
+            H[self.area_indices, self.area_indices] += self.beta
+
+            self.iteration += 1
+            self.beta *= 0.9
+
+        # Compute the LU factorization
+        self.lu = splu(H, permc_spec="COLAMD", diag_pivot_thresh=1.0)
+
+        return
+
+    def solve(self, bx, px):
+        """
+        Solve the KKT system
+        """
+
+        bx.copy_device_to_host()
+        px.get_array()[:] = self.lu.solve(bx.get_array())
+        px.copy_host_to_device()
+
+        return
+
+
+solver = NozzleSolver(model.get_problem(), model)
+
 # Set up the optimizer
 opt = am.Optimizer(model, x, lower=lower, upper=upper, solver=solver)
 
 opt_history = opt.optimize(
     {
-        "max_iterations": 100,
+        "max_iterations": 200,
         "record_components": ["area_ctrl.area"],
         "max_line_search_iterations": 4,
-        "convergence_tolerance": 1e-10,
+        "convergence_tolerance": 1e-9,
         "monotone_barrier_fraction": 0.1,
     }
 )
@@ -757,13 +867,14 @@ print("Residual summary")
 for name in inputs:
     print(f"{name:<30} {np.linalg.norm(res[name])}")
 
+# Plot the solution
 rho = x["nozzle.Q[:, 0]"]
 u = x["nozzle.Q[:, 1]"] / rho
 p = (gamma - 1.0) * (x["nozzle.Q[:, 2]"] - 0.5 * rho * u**2)
-p_target = data["objective.p0"]
-plot_solution(rho, u, p, p_target, num_cells, length)
+plot_solution(rho, u, p, M_target, p_target, num_cells, length)
 
-plot_nozzle(x["area.output"], x["area_derivative.output"], num_cells, length)
+# Plot the nozzle problem solution
+plot_nozzle(x["area.output"], x["area_derivative.output"], A_target, num_cells, length)
 
 norms = []
 for iter_data in opt_history["iterations"]:

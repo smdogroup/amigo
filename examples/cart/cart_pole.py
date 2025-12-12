@@ -238,10 +238,10 @@ def plot_for_documentation(x, final_time=2.0, num_time_steps=100):
         markerfacecolor="none",
         markeredgewidth=1,
     )
-    ax1.set_ylabel("Position (m)", fontsize=12)
+    ax1.set_ylabel("Position (m)", fontsize=18)
     ax1.grid(True, alpha=0.25, linewidth=0.5)
     ax1.tick_params(labelsize=10)
-    ax1.set_title("State", fontsize=14, fontweight="bold", pad=10)
+    ax1.set_title("State", fontsize=18, fontweight="bold", pad=10)
 
     # Angle plot
     ax2.plot(time, angle, color=blue_color, linewidth=2.5)
@@ -254,7 +254,7 @@ def plot_for_documentation(x, final_time=2.0, num_time_steps=100):
         markerfacecolor="none",
         markeredgewidth=1,
     )
-    ax2.set_ylabel("Angle (rad)", fontsize=12)
+    ax2.set_ylabel("Angle (rad)", fontsize=18)
     ax2.grid(True, alpha=0.25, linewidth=0.5)
     ax2.tick_params(labelsize=10)
 
@@ -270,15 +270,16 @@ def plot_for_documentation(x, final_time=2.0, num_time_steps=100):
         markerfacecolor="none",
         markeredgewidth=1,
     )
-    ax3.set_xlabel("Time (s)", fontsize=11)
-    ax3.set_ylabel("Force (N)", fontsize=12)
+    ax3.set_xlabel("Time (s)", fontsize=18)
+    ax3.set_ylabel("Force (N)", fontsize=18)
     ax3.grid(True, alpha=0.25, linewidth=0.5)
     ax3.tick_params(labelsize=10)
-    ax3.set_title("Control", fontsize=14, fontweight="bold", pad=10)
+    ax3.set_title("Control", fontsize=18, fontweight="bold", pad=10)
 
     # Set font for all axes
     fontname = "Helvetica"
     for ax in [ax1, ax2, ax3]:
+        ax.title.set_fontname(fontname)
         ax.xaxis.label.set_fontname(fontname)
         ax.yaxis.label.set_fontname(fontname)
         for tick in ax.get_xticklabels():
@@ -301,7 +302,7 @@ def plot_convergence(nrms):
         fig, ax = plt.subplots(1, 1)
 
         ax.semilogy(nrms, marker="o", clip_on=False, lw=2.0)
-        ax.set_ylabel("KKT residual norm")
+        ax.set_ylabel("KKT Residual Norm")
         ax.set_xlabel("Iteration")
 
         niceplots.adjust_spines(ax)
@@ -328,7 +329,7 @@ def visualize(d, theta, L=0.5):
         ax.axis("equal")
         ax.axis("off")
 
-        values = np.linspace(0, 1.0, d.shape[0])
+        values = np.linspace(0.1, 0.9, d.shape[0])
         cmap = plt.get_cmap("viridis")
 
         hx = 0.03
@@ -346,7 +347,7 @@ def visualize(d, theta, L=0.5):
             xpts.append(x2)
             ypts.append(y2)
 
-            if i % 3 == 0:
+            if i % 2 == 0:
                 ax.plot([x1, x2], [y1, y2], linewidth=2, color=color)
                 ax.fill(
                     [x1 - hx, x1 + hx, x1 + hx, x1 - hx, x1 - hx],
@@ -357,6 +358,22 @@ def visualize(d, theta, L=0.5):
                 )
 
             ax.plot([x2], [y2], color=color, marker="o")
+
+        # Define the bounding box coordinates (x, y, width, height)
+        x = 0
+        y = -L
+        height = 2 * L
+        width = 2 + 0.6 * L
+
+        # Create a Rectangle patch
+        import matplotlib.patches as patches
+
+        rect = patches.Rectangle(
+            (x, y), width, height, linewidth=2, edgecolor="none", facecolor="none"
+        )
+
+        # Add the patch to the axes
+        ax.add_patch(rect)
 
         fig.savefig("cart_pole_history.svg")
         fig.savefig("cart_pole_history.png")

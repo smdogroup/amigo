@@ -1,7 +1,6 @@
-import warnings
 import sys
+import time
 import numpy as np
-from scipy.sparse.linalg import MatrixRankWarning
 from scipy.sparse import csr_matrix
 from scipy.sparse.linalg import splu, eigsh
 
@@ -616,6 +615,9 @@ class Optimizer:
         Optimize the problem with the specified input options
         """
 
+        # Keep track of the optimization time
+        start_time = time.perf_counter()
+
         # Set the communicator rank
         comm_rank = 0
         if self.comm is not None:
@@ -695,9 +697,13 @@ class Optimizer:
                 self.barrier_param, self.gamma_penalty, self.vars, self.grad, self.res
             )
 
+            # Compute the elapsed time
+            elapsed_time = time.perf_counter() - start_time
+
             # Set information about the residual norm into the
             iter_data = {
                 "iteration": i,
+                "time": elapsed_time,
                 "residual": res_norm,
                 "barrier_param": self.barrier_param,
                 "line_iters": line_iters,
