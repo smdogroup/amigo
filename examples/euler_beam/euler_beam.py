@@ -7,12 +7,6 @@ import matplotlib.tri as tri
 import json
 import openmdao.api as om
 
-"""
-                  â†“ 
-///|===============
-
-"""
-
 
 def original_om_problem():
     from openmdao.test_suite.test_examples.beam_optimization.beam_group import BeamGroup
@@ -196,10 +190,18 @@ class VolumeConstraint(am.Component):
         self.outputs["con"] = vol
 
 
+# Set up the argument parser
 parser = argparse.ArgumentParser()
 parser.add_argument(
     "--build", dest="build", action="store_true", default=False, help="Enable building"
 )
+parser.add_argument(
+    "--optimizer",
+    choices=["SLSQP", "L-BFGS-B", "trust-constr"],
+    default="SLSQP",
+    help="scipy.Optimize optimizer",
+)
+args = parser.parse_args()
 
 x_coords = np.linspace(0, length, nelems + 1)
 
@@ -242,61 +244,17 @@ model.link("beam_element.h", "vol_con.h")
 # Summing constraints as output
 model.link("vol_con.con[1:]", "vol_con.con[0]")
 
-model.build_module()
+if args.build:
+    model.build_module()
+
 model.initialize()
 
-
-def show_graph():
-    from pyvis.network import Network
-
-    graph = model.create_graph()
-    net = Network(
-        notebook=True,
-        height="1000px",
-        width="100%",
-        bgcolor="#ffffff",
-        font_color="black",
-    )
-
-    net.from_nx(graph)
-    # net.show_buttons(filter_=["physics"])
-    net.set_options(
-        """
-        var options = {
-        "interaction": {
-            "dragNodes": false
-        }
-        }
-        """
-    )
-
-    net.show("eb_mdao.html")
-
-
-# Post optimality
-# Get the data vector
-# data = model.get_data_vector()
-# # data["beam_element.h"] = 1.0
-# # print('h:', data["beam_element.h"])
-
-# print('h: ', data['beam_element.h'])
-# x = model.create_vector()
-# output = model.create_output_vector()
-# problem = model.get_problem()
-# problem.compute_output(x.get_vector(), output.get_vector())
-
-# print(output["vol_con.con[0]"])
-
-# exit(0)
-
-## Optimization alternative to hessian solve
-
-# # Create displacement vector and provide initial guess
+# Create displacement vector and provide initial guess
 x = model.create_vector()
 lower = model.create_vector()
 upper = model.create_vector()
 
-# # Initial guess (start from zero displacements)
+# Initial guess (start from zero displacements)
 x[:] = 0.0
 
 # Set bounds on displacements
@@ -306,96 +264,18 @@ upper["src.v"] = float("inf")
 lower["src.t"] = -float("inf")
 upper["src.t"] = float("inf")
 
-# inputs, cons, _, _ = model.get_names()
-# inputs.extend(cons)
-
-# for name in inputs:
-#     print(name, x[name])
-
-# for name in inputs:
-#     print(name, lower[name], upper[name])
-
-# exit(0)
-
-
-# # Start optimization - minimize total potential energy
-# opt = am.Optimizer(model, x, lower=lower, upper=upper)
-# opt_data = opt.optimize(  #
-#     {
-#         "max_iterations": 500,
-#         # "initial_barrier_param": 1.0,
-#         # "max_line_search_iterations": 5,
-#         "convergence_tolerance": 1.0e-8,
-#     }
-# )
-
-
-# # Obtain Post Optimality Derivatives
-# # dfdx, of_map, wrt_map = opt.compute_post_opt_derivatives(
-# #     of="comp.c", wrt="beam_element.h"
-# # )
-# dfdx, of_map, wrt_map = opt.compute_post_opt_derivatives(
-#     of="vol_con.con[0]", wrt="beam_element.h"
-# )
-
-# with open("eb_opt_data.json", "w") as fp:
-#     json.dump(opt_data, fp, indent=2)
-
-# Get results
-# comp_1 = x["comp.c"]
-# thicknesses_1 = model.get_data_vector()["beam_element.h"]
-# v_1 = x["src.v"]
-# t_1 = x["src.t"]
-# volume_1 = x["vol_con.con"]
-# print('h: ', thicknesses_1)
-# print('volume computation: ', volume_1)
-# print('volume sum', np.sum(volume_1))
-# print(dfdx)
-
-# exit()
-# # Results
-# print("Results")
-# print()
-# print(f'compliance: {comp_1}')
-# print(f'thicknesses: {thicknesses_1}')
-# print(f'fem vert. displacements: {v_1}')
-# print(f'fem angle theta: {t_1}')
-# print('dc/dh: ',dfdx[of_map["comp.c"], wrt_map["beam_element.h"]])
-
-# # Plot results
-# fig, ax = plt.subplots()
-# plt.plot(x_coords, x["src.v"], label="y-displacements")
-# plt.legend()
-# fig, ax = plt.subplots()
-# plt.plot(x_coords, x["src.t"], label="theta")
-# plt.legend()
-# fig, ax = plt.subplots()
-# # plt.plot(x_coords, np.insert(dfdx[of_map["comp.c"], wrt_map["beam_element.h"]],0,0))
-# plt.plot(x_coords[0:-1], dfdx[of_map["comp.c"], wrt_map["beam_element.h"]])
-# ax.set_ylabel(r"$\nabla_\mathbf{h}c$")
-# ax.set_xlabel(r"$x_{coord}$")
-# plt.show()
-# exit()
-
 # OpenMDAO optimization
 prob = om.Problem()
 
 # OpenMDAO Independent Variables
 indeps = prob.model.add_subsystem("indeps", om.IndepVarComp())
-# indeps.add_output("h", shape=nelems, val=1.0)
 
 # run openmdao example and extract optimal h to test amigo fem
 om_h, om_v, om_totals_obj, om_totals_con = original_om_problem()
 om_c_wrt_h = om_totals_obj["compliance_comp.compliance", "h"]["J_rev"]
 om_con_wrt_h = om_totals_con["volume_comp.volume", "h"]["J_rev"]
-# exit()
-# testing if compliance calc is correct for om-beam optimization
-indeps.add_output(
-    "h", shape=nelems, val=5 * np.linspace(om_h[0], om_h[-1], len(om_h))
-)  # substitute openmdao results
-# print(np.linspace(om_h[0],om_h[-1],len(om_h)))
-# exit()
 
+indeps.add_output("h", shape=nelems, val=5 * np.linspace(om_h[0], om_h[-1], len(om_h)))
 
 # Amigo potential energy minimization parameters
 opt_options = {
@@ -423,47 +303,22 @@ prob.model.add_subsystem(
 
 prob.model.connect("indeps.h", "fea.h")
 
-# Add volume constraint using the volume computed by amigo
-# Note: vol_comp_vol has shape (50,) but element [0] contains the sum of all elements
-# prob.model.add_subsystem(
-#     "volume_con",
-#     om.ExecComp("con = vol - target_vol", vol=0.1, target_vol=0.01),
-# )
-
-# prob.model.connect("fea.con", "volume_con.vol")
-# prob.model.add_constraint('volume_con.con', equals=0.0)
-
 # setup the OpenMDAO optimization
 prob.driver = om.ScipyOptimizeDriver()
-# prob.driver.options["optimizer"] = "SLSQP"
-# prob.driver.options["maxiter"] = 200
-# prob.driver.options["tol"] = 1e-9
-# prob.driver.options['disp'] = True
 
-# prob.driver.options["optimizer"] = "L-BFGS-B"
+if args.optimizer == "SLSQP":
+    prob.driver.options["optimizer"] = "SLSQP"
+    prob.driver.options["maxiter"] = 200
+    prob.driver.options["tol"] = 1e-9
+    prob.driver.options["disp"] = True
+else:
+    prob.driver.options["optimizer"] = args.optimizer
 
-prob.driver.options["optimizer"] = "trust-constr"
-
-# perform optimziation with
+# perform optimziation
 prob.model.add_design_var("indeps.h", lower=1e-2, upper=10)
 prob.model.add_objective("fea.c", ref=20000)
 prob.model.add_constraint("fea.con", equals=0.01)
 prob.setup(check=True)
-
-# # debugging
-# prob.model.list_inputs()
-# prob.model.list_inputs(units=True, prom_name=True, hierarchical=True)
-# prob.model.list_outputs(units=True, prom_name=True, hierarchical=True)
-# print(prob.model.get_io_metadata()['fea.vol_con_con']['shape'])
-# prob.run_model()
-
-# # derivative computation testing
-data = prob.check_partials(compact_print=False, step=1e-5)
-# c_wrt_h = data['fea']['c','h']['J_fwd']
-# con_wrt_h = data['fea']['con','h']['J_fwd']
-# # exit()
-
-# exit()
 
 # Run Optimization Problem
 prob.run_driver()
@@ -481,16 +336,5 @@ ax.legend()
 ax.set_ylabel(r"$h*$")
 ax.set_xlabel(r"$x$")
 ax.set_title("Optimized Thickness Distribution")
+
 plt.show()
-
-# # derivative computation error comparison graph
-# fig,ax = plt.subplots()
-# print(c_wrt_h)
-# print(om_c_wrt_h)
-# print(con_wrt_h)
-# print(om_con_wrt_h)
-# ax.plot((c_wrt_h[0]-om_c_wrt_h[0])/om_c_wrt_h[0])
-# ax.set_title('objective derivative computation error')
-# # ax.plot(om_c_wrt_h[0])
-
-# plt.show()
