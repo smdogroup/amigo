@@ -19,6 +19,11 @@
 #endif
 #endif
 
+// cuDSS in CUDA <= 12.9: uses classic CSR
+#if CUDA_VERSION < 13000
+#define AMIGO_CUDSS_USE_CLASSIC_CSR
+#endif
+
 #include "amigo.h"
 #include "cuda/csr_factor_cuda.h"
 
@@ -43,9 +48,27 @@ class CudssFactorBackend {
     int* d_cols = nullptr;
     double* d_data = nullptr;
     mat->get_device_data(&d_rowp, &d_cols, &d_data);
+
+    d_start_rowp = nullptr, d_end_rowp = nullptr;
+
+#ifdef AMIGO_CUDSS_USE_CLASSIC_CSR
     AMIGO_CHECK_CUDSS(cudssMatrixCreateCsr(
-        &A, n, n, nnz, d_rowp, d_rowp + 1, d_cols, d_data, CUDA_R_32I,
-        CUDA_R_64F, CUDSS_MTYPE_SYMMETRIC, CUDSS_MVIEW_FULL, CUDSS_BASE_ZERO));
+        &A, (int64_t)n, (int64_t)n, (int64_t)nnz, d_rowp, nullptr, d_cols,
+        d_data, CUDA_R_32I, CUDA_R_64F, CUDSS_MTYPE_GENERAL, CUDSS_MVIEW_FULL,
+        CUDSS_BASE_ZERO));
+#else
+    AMIGO_CHECK_CUDA(cudaMalloc(&d_start_rowp, n * sizeof(int)));
+    AMIGO_CHECK_CUDA(cudaMalloc(&d_end_rowp, n * sizeof(int)));
+    AMIGO_CHECK_CUDA(cudaMemcpy(d_start_rowp, d_rowp, n * sizeof(int),
+                                cudaMemcpyDeviceToDevice));
+    AMIGO_CHECK_CUDA(cudaMemcpy(d_end_rowp, d_rowp + 1, n * sizeof(int),
+                                cudaMemcpyDeviceToDevice));
+
+    AMIGO_CHECK_CUDSS(cudssMatrixCreateCsr(
+        &A, (int64_t)n, (int64_t)n, (int64_t)nnz, d_rowp, nullptr, d_cols,
+        d_data, CUDA_R_32I, CUDA_R_64F, CUDSS_MTYPE_GENERAL, CUDSS_MVIEW_FULL,
+        CUDSS_BASE_ZERO));
+#endif  // AMIGO_CUDSS_USE_CLASSIC_CSR
 
     // Create the configuration settings
     AMIGO_CHECK_CUDSS(cudssConfigCreate(&config));
@@ -73,6 +96,12 @@ class CudssFactorBackend {
 
   ~CudssFactorBackend() {
 #ifdef AMIGO_USE_CUDSS
+    if (d_start_rowp) {
+      cudaFree(d_start_rowp);
+    }
+    if (d_end_rowp) {
+      cudaFree(d_end_rowp);
+    }
     cudssMatrixDestroy(A);
     cudssMatrixDestroy(B);
     cudssMatrixDestroy(X);
@@ -114,6 +143,10 @@ class CudssFactorBackend {
   // The pivot tolerance
   double pivot_tol;
   int n, nnz;
+
+  // The end of each row
+  int* d_start_rowp;
+  int* d_end_rowp;
 
 #ifdef AMIGO_USE_CUDSS
   // Handle for the matrix
