@@ -708,7 +708,10 @@ class OptimizationProblem {
 
     T lagrange = 0.0;
     for (size_t i = 0; i < components.size(); i++) {
-      lagrange += components[i]->lagrangian(alpha, *data_vec, *x);
+      // Only sum over components that are not continuation components
+      if (!components[i]->is_continuation()) {
+        lagrange += components[i]->lagrangian(alpha, *data_vec, *x);
+      }
     }
 
     T value = lagrange;
@@ -730,7 +733,11 @@ class OptimizationProblem {
 
     g->zero();
     for (size_t i = 0; i < components.size(); i++) {
-      components[i]->add_gradient(alpha, *data_vec, *x, *g);
+      // Only add the gradient for components that are not continuation
+      // components
+      if (!components[i]->is_continuation()) {
+        components[i]->add_gradient(alpha, *data_vec, *x, *g);
+      }
     }
 
     var_dist.begin_reverse_add(g, var_ctx);
@@ -799,7 +806,9 @@ class OptimizationProblem {
 
     jac->zero();
     for (size_t i = 0; i < components.size(); i++) {
-      components[i]->add_grad_jac_wrt_data(*data_vec, *x, *data_owners, *jac);
+      if (!components[i]->is_continuation()) {
+        components[i]->add_grad_jac_wrt_data(*data_vec, *x, *data_owners, *jac);
+      }
     }
 
     grad_jac_dist->begin_assembly(jac, grad_jac_dist_ctx);

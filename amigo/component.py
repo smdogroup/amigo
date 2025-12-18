@@ -849,6 +849,9 @@ class Component:
         # Set the compute function arguments
         self.args = [{}]
 
+        # Set whether this is a continuation component or not
+        self.continuation_component = False
+
     def set_args(self, args):
         """
         Set arguments for the compute and compute_output functions
@@ -864,6 +867,16 @@ class Component:
 
         self.args = args
         return
+
+    def set_continuation_component(self, flag=True):
+        """
+        Set a flag to designate this as a continuation component
+        """
+        self.continuation_component = flag
+        return
+
+    def is_continuation_component(self):
+        return self.continuation_component
 
     def add_constant(self, name, value, **kwargs):
         """
@@ -1116,6 +1129,14 @@ class Component:
             if self.is_compute_empty():
                 truth = "true"
             cpp += "  " + f"static constexpr bool is_compute_empty = {truth};\n"
+
+            # Is this a continuation component or not
+            truth = "false"
+            if self.is_continuation_component():
+                truth = "true"
+            cpp += (
+                "  " + f"static constexpr bool is_continuation_component = {truth};\n"
+            )
 
             for mode in ["eval", "rev", "hprod"]:
                 cpp += self._generate_compute_cpp(

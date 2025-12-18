@@ -494,6 +494,7 @@ class Optimizer:
             "heuristic_barrier_gamma": 0.1,
             "heuristic_barrier_r": 0.95,
             "verbose_barrier": False,
+            "continuation_control": None,
         }
 
         for name in options:
@@ -635,6 +636,7 @@ class Optimizer:
         tau = options["fraction_to_boundary"]
         tol = options["convergence_tolerance"]
         record_components = options["record_components"]
+        continuation_control = options["continuation_control"]
 
         # Get the x/multiplier solution vector from the optimization variables
         x = self.vars.get_solution()
@@ -699,6 +701,10 @@ class Optimizer:
 
             # Compute the elapsed time
             elapsed_time = time.perf_counter() - start_time
+
+            # Apply the continuation strategy if any
+            if continuation_control is not None:
+                continuation_control(i, res_norm)
 
             # Set information about the residual norm into the
             iter_data = {

@@ -20,6 +20,9 @@ class ComponentGroupBase {
   // Update any externally stored values
   virtual void update(const Vector<T>& x) {}
 
+  // Define whether this is a component intended for continuation or not
+  virtual bool is_continuation() const { return false; }
+
   // Group analysis functions
   virtual T lagrangian(T alpha, const Vector<T>& data,
                        const Vector<T>& x) const {
@@ -206,6 +209,20 @@ template <class T, class... Ts>
 struct __get_collection_noutputs<T, Ts...> {
   static constexpr int value = __get_collection_noutputs<Ts...>::value;
 };
+
+template <class... Ts>
+struct __get_collection_continuation;
+
+template <class T>
+struct __get_collection_continuation<T> {
+  static constexpr int value = T::is_continuation_component;
+};
+
+template <class T, class... Ts>
+struct __get_collection_continuation<T, Ts...> {
+  static constexpr int value = __get_collection_continuation<Ts...>::value;
+};
+
 }  // namespace amigo
 
 #endif  // AMIGO_COMPONENT_GROUP_BASE_H

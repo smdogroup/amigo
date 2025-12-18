@@ -115,6 +115,16 @@ class UnaryNegNode(ExprNode):
         return f"-({a})"
 
 
+class PassiveNode(ExprNode):
+    def __init__(self, expr):
+        self.active = False
+        self.expr = expr
+
+    def generate_cpp(self, index=None):
+        a = self.expr.generate_cpp(index)
+        return f"A2D::get_data({a})"
+
+
 def _to_expr(val):
     if isinstance(val, Expr):
         return val
