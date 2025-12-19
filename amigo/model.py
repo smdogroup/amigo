@@ -1085,6 +1085,14 @@ class Model:
 cmake_minimum_required(VERSION 3.25)
 project({self.module_name} LANGUAGES CXX)
 
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# Enable alternative operator keywords (and, or, not) for MSVC
+if(MSVC)
+  add_compile_options(/permissive-)
+endif()
+
 find_package(amigo REQUIRED CONFIG)
 
 if(AMIGO_ENABLE_CUDA)
@@ -1103,6 +1111,7 @@ amigo_add_python_module(
         print("amigo_cmake_dir = ", amigo_cmake_dir)
 
         # Cmake command
+        # Note: BLAS/LAPACK/MPI paths are inherited from amigo's installation via amigoConfig.cmake
         cmake_cmd = [
             "cmake",
             "-S",

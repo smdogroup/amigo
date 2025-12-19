@@ -12,6 +12,14 @@ if(AMIGO_ENABLE_CUDA)
   set(CMAKE_CUDA_ARCHITECTURES @CMAKE_CUDA_ARCHITECTURES@)
 endif()
 
+# Export BLAS/LAPACK/MPI paths found during amigo build
+# These will be used by module builds to avoid re-searching
+set(AMIGO_BLAS_LIBRARIES "@BLAS_LIBRARIES@" CACHE FILEPATH "BLAS libraries used by amigo")
+set(AMIGO_LAPACK_LIBRARIES "@LAPACK_LIBRARIES@" CACHE FILEPATH "LAPACK libraries used by amigo")
+set(AMIGO_BLA_VENDOR "@BLA_VENDOR@" CACHE STRING "BLAS vendor used by amigo")
+set(AMIGO_MPI_CXX_INCLUDE_PATH "@MPI_CXX_INCLUDE_PATH@" CACHE PATH "MPI include path used by amigo")
+set(AMIGO_MPI_CXX_LIBRARIES "@MPI_CXX_LIBRARIES@" CACHE FILEPATH "MPI libraries used by amigo")
+
 get_filename_component(_AMIGO_CONFIG_DIR "${CMAKE_CURRENT_LIST_FILE}" PATH)
 include("${_AMIGO_CONFIG_DIR}/amigoTargets.cmake")
 include("${_AMIGO_CONFIG_DIR}/amigoAddModule.cmake")
