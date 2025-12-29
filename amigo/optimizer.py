@@ -103,7 +103,7 @@ def gmres(mult, precon, b, x, msub=20, rtol=1e-2, atol=1e-30):
 
 
 class DirectCudaSolver:
-    def __init__(self, problem):
+    def __init__(self, problem, pivot_eps=1e-8):
         self.problem = problem
 
         try:
@@ -113,7 +113,7 @@ class DirectCudaSolver:
 
         loc = MemoryLocation.DEVICE_ONLY
         self.hess = self.problem.create_matrix(loc)
-        self.solver = CSRMatFactorCuda(self.hess)
+        self.solver = CSRMatFactorCuda(self.hess, pivot_eps)
 
     def factor(self, alpha, x, diag):
         self.problem.hessian(alpha, x, self.hess)

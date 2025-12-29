@@ -72,13 +72,14 @@ inline bool check_consistent_policy_and_location(ExecPolicy policy,
 #endif
 
 #ifndef AMIGO_CHECK_CUBLAS
-#define AMIGO_CHECK_CUBLAS(call)                            \
-  do {                                                      \
-    cublasStatus_t _st = (call);                            \
-    if (_st != CUBLAS_STATUS_SUCCESS) {                     \
-      std::fprintf(stderr, "cuBLAS error: %d\n", int(_st)); \
-      std::abort();                                         \
-    }                                                       \
+#define AMIGO_CHECK_CUBLAS(call)                                           \
+  do {                                                                     \
+    cublasStatus_t _st = (call);                                           \
+    if (_st != CUBLAS_STATUS_SUCCESS) {                                    \
+      std::fprintf(stderr, "cuBLAS error %s:%d: %d\n", __FILE__, __LINE__, \
+                   int(_st));                                              \
+      std::abort();                                                        \
+    }                                                                      \
   } while (0)
 #endif
 

@@ -516,7 +516,8 @@ PYBIND11_MODULE(amigo, mod) {
 #ifdef AMIGO_USE_CUDA
   py::class_<amigo::CSRMatFactorCuda, std::shared_ptr<amigo::CSRMatFactorCuda>>(
       mod, "CSRMatFactorCuda")
-      .def(py::init<std::shared_ptr<amigo::CSRMat<double>>>())
+      .def(py::init<std::shared_ptr<amigo::CSRMat<double>>, double>(),
+           py::arg("mat"), py::arg("pivot_tol") = 1e-12)
       .def("factor", &amigo::CSRMatFactorCuda::factor)
       .def("solve", &amigo::CSRMatFactorCuda::solve);
 #endif

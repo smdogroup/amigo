@@ -4,7 +4,11 @@ from pathlib import Path
 import amigo as am
 import numpy as np
 import matplotlib.pylab as plt
+from matplotlib import font_manager
 import niceplots
+
+
+available_fonts = {f.name for f in font_manager.fontManager.ttflist}
 
 
 class RoeFlux(am.Component):
@@ -468,6 +472,9 @@ def plot_solution(rho, u, p, M_target, p_target, num_cells, length):
             )
 
         fontname = "Helvetica"
+        if not fontname in available_fonts:
+            fontname = "DejaVu Sans"
+
         ax[1].legend(loc="upper left", prop={"family": fontname, "size": 12})
         ax[2].legend(loc="lower left", prop={"family": fontname, "size": 12})
 
@@ -535,6 +542,9 @@ def plot_nozzle(A, dAdx, A_target, num_cells, length):
             )
 
         fontname = "Helvetica"
+        if not fontname in available_fonts:
+            fontname = "DejaVu Sans"
+
         for axis in ax:
             niceplots.adjust_spines(axis, outward=True)
 
@@ -577,6 +587,9 @@ def plot_convergence(nrms):
         niceplots.adjust_spines(ax)
 
         fontname = "Helvetica"
+        if not fontname in available_fonts:
+            fontname = "DejaVu Sans"
+
         ax.xaxis.label.set_fontname(fontname)
         ax.yaxis.label.set_fontname(fontname)
 
