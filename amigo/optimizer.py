@@ -103,7 +103,7 @@ def gmres(mult, precon, b, x, msub=20, rtol=1e-2, atol=1e-30):
 
 
 class DirectCudaSolver:
-    def __init__(self, problem):
+    def __init__(self, problem, pivot_eps=1e-8):
         self.problem = problem
 
         try:
@@ -113,7 +113,7 @@ class DirectCudaSolver:
 
         loc = MemoryLocation.DEVICE_ONLY
         self.hess = self.problem.create_matrix(loc)
-        self.solver = CSRMatFactorCuda(self.hess)
+        self.solver = CSRMatFactorCuda(self.hess, pivot_eps)
 
     def factor(self, alpha, x, diag):
         self.problem.hessian(alpha, x, self.hess)
@@ -494,6 +494,7 @@ class Optimizer:
             "heuristic_barrier_gamma": 0.1,
             "heuristic_barrier_r": 0.95,
             "verbose_barrier": False,
+            "continuation_control": None,
         }
 
         for name in options:
@@ -635,6 +636,7 @@ class Optimizer:
         tau = options["fraction_to_boundary"]
         tol = options["convergence_tolerance"]
         record_components = options["record_components"]
+        continuation_control = options["continuation_control"]
 
         # Get the x/multiplier solution vector from the optimization variables
         x = self.vars.get_solution()
@@ -699,6 +701,10 @@ class Optimizer:
 
             # Compute the elapsed time
             elapsed_time = time.perf_counter() - start_time
+
+            # Apply the continuation strategy if any
+            if continuation_control is not None:
+                continuation_control(i, res_norm)
 
             # Set information about the residual norm into the
             iter_data = {

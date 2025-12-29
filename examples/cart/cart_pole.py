@@ -15,11 +15,10 @@ except:
 
 
 final_time = 2.0
-num_time_steps = 100
 
 
 class TrapezoidRule(am.Component):
-    def __init__(self):
+    def __init__(self, final_time=2.0, num_time_steps=100):
         super().__init__()
 
         self.add_constant("dt", value=final_time / num_time_steps)
@@ -98,7 +97,7 @@ class CartComponent(am.Component):
 
 
 class KineticEnergyOutput(am.Component):
-    def __init__(self):
+    def __init__(self, final_time=2.0, num_time_steps=100):
         super().__init__()
 
         self.add_constant("dt", value=final_time / num_time_steps)
@@ -170,7 +169,7 @@ class FinalConditions(am.Component):
         self.constraints["res"] = [q[0] - 2.0, q[1] - pi, q[2], q[3]]
 
 
-def plot(d, theta, xctrl):
+def plot_solution(d, theta, xctrl, final_time=2.0, num_time_steps=100):
     t = np.linspace(0, final_time, num_time_steps + 1)
 
     with plt.style.context(niceplots.get_style()):
@@ -381,13 +380,13 @@ def visualize(d, theta, L=0.5):
     return
 
 
-def create_cart_model(module_name="cart_pole"):
+def create_cart_model(module_name="cart_pole", final_time=2.0, num_time_steps=100):
     cart = CartComponent()
-    trap = TrapezoidRule()
+    trap = TrapezoidRule(final_time=final_time, num_time_steps=num_time_steps)
     obj = Objective()
     ic = InitialConditions()
     fc = FinalConditions()
-    kin = KineticEnergyOutput()
+    kin = KineticEnergyOutput(final_time=final_time, num_time_steps=num_time_steps)
 
     model = am.Model(module_name)
 
@@ -432,7 +431,9 @@ def create_cart_model(module_name="cart_pole"):
     return model
 
 
-def check_post_optimality_derivative(x, opt, opt_options={}, dh=1e-7):
+def check_post_optimality_derivative(
+    x, opt, opt_options={}, dh=1e-7, num_time_steps=100
+):
     # Set the initial conditions based on the varaibles
     x[:] = 0.0
     x["cart.q[:, 0]"] = np.linspace(0, 2.0, num_time_steps + 1)
@@ -491,6 +492,13 @@ parser.add_argument(
     help="Show graph for timesteps. Can be a single int (e.g., 0) or a list (e.g., '[0,5,6]')",
 )
 parser.add_argument(
+    "--with-cuda",
+    dest="with_cuda",
+    action="store_true",
+    default=False,
+    help="Use the CUDSS factorization on the GPU",
+)
+parser.add_argument(
     "--distribute",
     dest="distribute",
     action="store_true",
@@ -504,10 +512,24 @@ parser.add_argument(
     default=False,
     help="Compute the post-optimality",
 )
+parser.add_argument(
+    "--num-time-steps",
+    dest="num_time_steps",
+    type=int,
+    default=100,
+    help="Number of time steps",
+)
+parser.add_argument(
+    "--opt-filename",
+    dest="opt_filename",
+    type=str,
+    default="cart_opt_data.json",
+    help="Number of time steps",
+)
 
 args = parser.parse_args()
 
-model = create_cart_model()
+model = create_cart_model(num_time_steps=args.num_time_steps)
 
 if args.build:
     source_dir = Path(__file__).resolve().parent
@@ -537,31 +559,9 @@ data["cart.L"] = 0.5
 data["cart.m1"] = 1.0
 data["cart.m2"] = 0.3
 
-# Get the design variables
-x = model.create_vector()
-lower = model.create_vector()
-upper = model.create_vector()
-
-if comm_rank == 0:
-    # Set the initial conditions based on the varaibles
-    x["cart.q[:, 0]"] = np.linspace(0, 2.0, num_time_steps + 1)
-    x["cart.q[:, 1]"] = np.linspace(0, np.pi, num_time_steps + 1)
-    x["cart.q[:, 2]"] = 1.0
-    x["cart.q[:, 3]"] = 1.0
-
-    # Apply lower and upper bound constraints
-    lower["cart.q"] = -float("inf")
-    lower["cart.qdot"] = -float("inf")
-    lower["cart.x"] = -50
-
-    upper["cart.q"] = float("inf")
-    upper["cart.qdot"] = float("inf")
-    upper["cart.x"] = 50
-
-
 opt_options = {
     "initial_barrier_param": 0.1,
-    "convergence_tolerance": 1e-10,
+    "convergence_tolerance": 5e-7,
     "max_line_search_iterations": 4,  # 30,  # Reasonable for intermediate problem
     "max_iterations": 500,  # Sufficient iterations
     # "init_affine_step_multipliers": True,  # Enable for better scaling
@@ -570,11 +570,49 @@ opt_options = {
     # "verbose_barrier": True,  # Show ξ and complementarity values
 }
 
-# Set up the optimizer
-opt = am.Optimizer(model, x, lower=lower, upper=upper, comm=comm, distribute=distribute)
+solver = None
+if args.with_cuda:
+    solver = am.DirectCudaSolver(model.get_problem())
 
-# Optimize
-opt_data = opt.optimize(opt_options)
+for opt_iter in range(4):
+    # Get the design variables
+    x = model.create_vector()
+    lower = model.create_vector()
+    upper = model.create_vector()
+
+    if comm_rank == 0:
+        # Set the initial conditions based on the varaibles
+        x["cart.q[:, 0]"] = np.linspace(0, 2.0, args.num_time_steps + 1)
+        x["cart.q[:, 1]"] = np.linspace(0, np.pi, args.num_time_steps + 1)
+        x["cart.q[:, 2]"] = 1.0
+        x["cart.q[:, 3]"] = 1.0
+
+        # Apply lower and upper bound constraints
+        lower["cart.q"] = -float("inf")
+        lower["cart.qdot"] = -float("inf")
+        lower["cart.x"] = -50
+
+        upper["cart.q"] = float("inf")
+        upper["cart.qdot"] = float("inf")
+        upper["cart.x"] = 50
+
+    # Set up the optimizer
+    opt = am.Optimizer(
+        model,
+        x,
+        lower=lower,
+        upper=upper,
+        comm=comm,
+        distribute=distribute,
+        solver=solver,
+    )
+
+    # Optimize
+    opt_data = opt.optimize(opt_options)
+
+    opt_data["num_time_steps"] = args.num_time_steps
+    opt_data["num_variables"] = model.num_variables
+    opt_data["num_constraints"] = model.num_constraints
 
 # Copy the solution from the device to host
 x.get_vector().copy_device_to_host()
@@ -582,17 +620,19 @@ x.get_vector().copy_device_to_host()
 # Print objective value
 u = x["cart.x[:]"]  # control force at each timestep
 obj_value = 0.0
-dt = final_time / num_time_steps
-for i in range(num_time_steps):
+dt = final_time / args.num_time_steps
+for i in range(args.num_time_steps):
     obj_value += (u[i] ** 2 + u[i + 1] ** 2) / 2 * dt
 
 print(obj_value)
 
-with open("cart_opt_data.json", "w") as fp:
+with open(args.opt_filename, "w") as fp:
     json.dump(opt_data, fp, indent=2)
 
 if args.post_optimality:
-    check_post_optimality_derivative(x, opt, opt_options)
+    check_post_optimality_derivative(
+        x, opt, opt_options, num_time_steps=args.num_time_steps
+    )
 
 
 if comm_rank == 0:
@@ -604,12 +644,12 @@ if comm_rank == 0:
     for iter_data in opt_data["iterations"]:
         norms.append(iter_data["residual"])
 
-    plot(d, theta, xctrl)
+    plot_solution(d, theta, xctrl, num_time_steps=args.num_time_steps)
     plot_convergence(norms)
     visualize(d, theta)
 
     # Generate documentation-style plots
-    plot_for_documentation(x, final_time, num_time_steps)
+    plot_for_documentation(x, final_time, args.num_time_steps)
 
     if args.show_sparsity:
         H = am.tocsr(opt.solver.hess)

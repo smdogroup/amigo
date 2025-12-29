@@ -1,0 +1,33 @@
+\documentclass{article}
+\usepackage{tikz}
+\usepackage[active,tightpage]{preview}
+\PreviewEnvironment{tikzpicture}
+\setlength{\PreviewBorder}{2pt}
+\definecolor{blue}{HTML}{1B5299}
+
+\begin{document}
+\begin{tikzpicture}[x=1in,y=1in]
+  \def\H{3.5}        % Height
+  \def\W{3.75}       % Width
+  \def\WT{1.1}       % Width of the A at the top
+  \def\WB{0.9}       % Width of the leg of the A
+  \def\R{0.47}       % Radius of the Amigo-head
+  \pgfmathsetmacro{\HM}{0.37 * \H} 
+  \pgfmathsetmacro{\WM}{0.37 * \W + 0.63 * \WT}
+
+  % Set the bounding box for github preview
+  % \useasboundingbox (-1.15*\H, -0.15*\H) rectangle (1.15*\H, 1.15 * \H);
+
+  \path[draw=blue, fill=blue, line width=1.5pt, even odd rule, rounded corners=3pt]
+    % outer boundary
+    (-0.5 * \W, 0) -- (-0.5 * \WT, \H) -- 
+    (0.5 * \WT, \H) -- (0.5 * \W, 0) [rounded corners=3pt] --
+    % lower boundary
+    (0.5 * \W - \WB, 0) [rounded corners=4pt] -- 
+    (0.5 * \WM - 0.6 * \WB, \HM) -- 
+    (-0.5 * \WM + 0.6 * \WB, \HM) [rounded corners=3pt] -- 
+    (-0.5 * \W + \WB, 0) [rounded corners=3pt] -- cycle
+    % circle
+    (0, 0.66 * \H) circle[radius=\R];
+\end{tikzpicture}
+\end{document}

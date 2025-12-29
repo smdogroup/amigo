@@ -108,15 +108,15 @@ class Helmholtz(am.Component):
         Ny = self.vars["Ny"]
 
         x0 = self.vars["x0"] = dot(N, x)
-        rho0 = self.vars["rho0"] = dot(N, rho)
+        rhoE = self.vars["rhoE"] = dot(N, rho)
         rho_x = self.vars["rho_x"] = dot(Nx, rho)
         rho_y = self.vars["rho_y"] = dot(Ny, rho)
 
         self.constraints["rho_res"] = [
-            detJ * (N[0] * (rho0 - x0) + r * r * (Nx[0] * rho_x + Ny[0] * rho_y)),
-            detJ * (N[1] * (rho0 - x0) + r * r * (Nx[1] * rho_x + Ny[1] * rho_y)),
-            detJ * (N[2] * (rho0 - x0) + r * r * (Nx[2] * rho_x + Ny[2] * rho_y)),
-            detJ * (N[3] * (rho0 - x0) + r * r * (Nx[3] * rho_x + Ny[3] * rho_y)),
+            detJ * (N[0] * (rhoE - x0) + r * r * (Nx[0] * rho_x + Ny[0] * rho_y)),
+            detJ * (N[1] * (rhoE - x0) + r * r * (Nx[1] * rho_x + Ny[1] * rho_y)),
+            detJ * (N[2] * (rhoE - x0) + r * r * (Nx[2] * rho_x + Ny[2] * rho_y)),
+            detJ * (N[3] * (rhoE - x0) + r * r * (Nx[3] * rho_x + Ny[3] * rho_y)),
         ]
 
         return
@@ -133,14 +133,17 @@ class Topology(am.Component):
         self.set_args(args)
 
         # Constants
-        self.add_constant("p", 3.0)
         self.add_constant("E", 1.0)
         self.add_constant("nu", 0.3)
         self.add_constant("kappa", 1e-6)
 
+        # Add the penalty
+        self.add_data("p")
+
         # The x/y coordinates
         self.add_data("x_coord", shape=(4,))
         self.add_data("y_coord", shape=(4,))
+        self.add_data("rho0", shape=(4,), value=0.5, lower=0.0, upper=1.0)
 
         # The inputs to the problem
         self.add_input("rho", shape=(4,), value=0.5, lower=0.0, upper=1.0)
@@ -164,7 +167,6 @@ class Topology(am.Component):
         E = self.constants["E"]
         nu = self.constants["nu"]
         kappa = self.constants["kappa"]
-        p = self.constants["p"]
 
         # Extract the input variables
         rho = self.inputs["rho"]
@@ -172,18 +174,26 @@ class Topology(am.Component):
         v = self.inputs["v"]
 
         # Extract the input data
+        p = self.data["p"]
+
         X = self.data["x_coord"]
         Y = self.data["y_coord"]
         compute_shape_derivs(xi, eta, X, Y, self.vars)
+
+        # Set the initial rho0 value
+        rho0 = self.data["rho0"]
 
         # Set the values of the derivatives of the shape functions
         detJ = self.vars["detJ"]
         Nx = self.vars["Nx"]
         Ny = self.vars["Ny"]
 
-        rho0 = 0.25 * (rho[0] + rho[1] + rho[2] + rho[3])
-        # self.vars["E0"] = E * (rho0**p + kappa)
-        E0 = self.vars["E0"] = E * (rho0 + kappa)
+        rho0E = self.vars["rho0E"] = 0.25 * (rho0[0] + rho0[1] + rho0[2] + rho0[3])
+        rhoE = self.vars["rhoE"] = 0.25 * (rho[0] + rho[1] + rho[2] + rho[3])
+
+        E0 = self.vars["E0"] = E * (
+            rho0E**p + p * (rhoE - rho0E) * rho0E ** (p - 1) + kappa
+        )
 
         Ux = self.vars["Ux"] = [[dot(Nx, u), dot(Ny, u)], [dot(Nx, v), dot(Ny, v)]]
 
@@ -355,6 +365,7 @@ ny = 64
 
 nnodes = (nx + 1) * (ny + 1)
 nelems = nx * ny
+print(nx, ny, nnodes, nelems)
 
 nodes = np.arange(nnodes, dtype=int).reshape((nx + 1, ny + 1))
 
@@ -466,6 +477,10 @@ data = model.get_data_vector()
 data["src.x_coord"] = x_coord
 data["src.y_coord"] = y_coord
 
+# Set the initial rho0 values
+data["topo.p"] = 1.0
+data["topo.rho0"] = 0.0
+
 # Set the initial problem variable values
 x = model.create_vector()
 
@@ -500,13 +515,13 @@ end = time.perf_counter()
 print(f"Matrix initialization time: {end - start:.6f} seconds")
 
 start = time.perf_counter()
-prob.hessian(x.get_vector(), mat_obj)
+prob.hessian(1.0, x.get_vector(), mat_obj)
 end = time.perf_counter()
 print(f"Matrix computation time:    {end - start:.6f} seconds")
 
 grad = prob.create_vector()
 start = time.perf_counter()
-prob.gradient(x.get_vector(), grad)
+prob.gradient(1.0, x.get_vector(), grad)
 end = time.perf_counter()
 print(f"Residual computation time:  {end - start:.6f} seconds")
 
@@ -527,33 +542,54 @@ if args.use_lnks:
 
 opt = am.Optimizer(model, x=x, lower=lower, upper=upper, solver=solver)
 
-options = {
-    "max_iterations": 25,
-    "initial_barrier_param": 0.1,
-    "max_line_search_iterations": 1,
-}
-opt.optimize(options)
+max_convex_steps = 5
+for i in range(max_convex_steps):
 
-vals = x["src.rho"]
-vals = vals.reshape((nx + 1, ny + 1)).T
+    options = {
+        "max_iterations": 25,
+        "initial_barrier_param": 1.0,
+        "max_line_search_iterations": 1,
+        "convergence_tolerance": 1e-1,
+        "init_least_squares_multipliers": True,
+    }
 
-# Set the x and y coordinates
-X, Y = np.meshgrid(xpts, ypts)
+    if i == max_convex_steps - 1:
+        options["convergence_tolerance"] = 1e-3
 
-# Plot the result as a figure
-fig, ax = plt.subplots(figsize=(8, 4))
-ax.set_aspect("equal")
-ax.get_xaxis().set_ticks([])
-ax.get_yaxis().set_ticks([])
-ax.axis("off")
+    opt.optimize(options)
 
-# Set the number of levels to use.
-levels = np.linspace(0.0, 1.0, 26)
-ax.contourf(X, Y, vals, levels, cmap="coolwarm", extend="max")
+    vals = x["src.rho"]
+    vals = vals.reshape((nx + 1, ny + 1)).T
 
-plt.savefig(
-    "compliance.png", dpi=500, transparent=True, bbox_inches="tight", pad_inches=0.01
-)
+    # Set the x and y coordinates
+    X, Y = np.meshgrid(xpts, ypts)
 
-fig.tight_layout(pad=0.01)
-plt.show()
+    # Plot the result as a figure
+    fig, ax = plt.subplots(figsize=(8, 4))
+    ax.set_aspect("equal")
+    ax.get_xaxis().set_ticks([])
+    ax.get_yaxis().set_ticks([])
+    ax.axis("off")
+
+    # Set the number of levels to use.
+    levels = np.linspace(0.0, 1.0, 26)
+    ax.contourf(X, Y, vals, levels, cmap="coolwarm", extend="max")
+
+    plt.savefig(
+        "compliance.png",
+        dpi=500,
+        transparent=True,
+        bbox_inches="tight",
+        pad_inches=0.01,
+    )
+
+    fig.tight_layout(pad=0.01)
+    fig.savefig(f"compliance{i}.png")
+    plt.close(fig)
+
+    # Update the data and the design variable bounds
+    pval = 3.0
+    data["topo.p"] = pval
+    data["topo.rho0"] = x["topo.rho"]
+    lower["src.x"] = (1.0 - 1.0 / pval) * x["src.x"]
+    lower["src.rho"] = (1.0 - 1.0 / pval) * x["src.rho"]

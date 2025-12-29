@@ -645,6 +645,8 @@ class ComponentGroup : public ComponentGroupBase<T, policy> {
   static constexpr int ndata = __get_collection_ndata<Components...>::value;
   static constexpr int noutputs =
       __get_collection_noutputs<Components...>::value;
+  static constexpr bool continuation =
+      __get_collection_continuation<Components...>::value;
 
   // Use whatever class is defined as the default backend
   using Backend =
@@ -669,6 +671,8 @@ class ComponentGroup : public ComponentGroupBase<T, policy> {
     return std::make_shared<ComponentGroup<T, policy, Components...>>(
         num_elements, data_idx, layout_idx, output_idx);
   }
+
+  bool is_continuation() const { return continuation; }
 
   // Group compute functions
   T lagrangian(T alpha, const Vector<T>& data_vec, const Vector<T>& vec) const {

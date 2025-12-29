@@ -4,9 +4,11 @@ from pathlib import Path
 import amigo as am
 import numpy as np
 import matplotlib.pylab as plt
+from matplotlib import font_manager
 import niceplots
 
-num_cells = 400
+
+available_fonts = {f.name for f in font_manager.fontManager.ttflist}
 
 
 class RoeFlux(am.Component):
@@ -281,10 +283,11 @@ class SubsonicOutletFlux(am.Component):
 
 
 class Objective(am.Component):
-    def __init__(self, gamma=1.4):
+    def __init__(self, gamma=1.4, dx=1.0):
         super().__init__()
 
         self.add_constant("gam1", value=(gamma - 1.0))
+        self.add_constant("dx", value=dx)
 
         # Add the objective function
         self.add_objective("obj")
@@ -297,6 +300,7 @@ class Objective(am.Component):
 
     def compute(self):
         gam1 = self.constants["gam1"]
+        dx = self.constants["dx"]
         Q = self.inputs["Q"]
         p0 = self.data["p0"]
 
@@ -305,7 +309,7 @@ class Objective(am.Component):
         u = self.vars["u"] = Q[1] / Q[0]
         p = self.vars["p"] = gam1 * (Q[2] - 0.5 * rho * u * u)
 
-        self.objective["obj"] = (10.0 / num_cells) * (p - p0) ** 2
+        self.objective["obj"] = dx * (p - p0) ** 2
 
 
 class AreaControlPoints(am.Component):
@@ -313,6 +317,69 @@ class AreaControlPoints(am.Component):
         super().__init__()
 
         self.add_input("area")
+
+
+class PseudoTransient(am.Component):
+    def __init__(self, gamma=1.4, dx=1.0):
+        super().__init__()
+
+        self.add_constant("gamma", value=gamma)
+        self.add_constant("gam1", value=(gamma - 1.0))
+        self.add_constant("dx", value=dx)
+
+        # Add the inputs and constraints
+        self.add_input("Q", shape=3)
+        self.add_constraint("res", shape=3)
+
+        # Set the CFL as input data
+        self.add_data("CFL")
+
+        # This is a continuation component. These component contributions are only
+        # added for the Hessian contribution. This is used for continuation methods.
+        self.set_continuation_component(True)
+
+        return
+
+    def compute(self):
+        gamma = self.constants["gamma"]
+        gam1 = self.constants["gam1"]
+        dx = self.constants["dx"]
+
+        Q = self.inputs["Q"]
+        CFL = self.data["CFL"]
+
+        rho = self.vars["rho"] = am.passive(Q[0])
+        q1 = self.vars["q1"] = am.passive(Q[1])
+        q2 = self.vars["q2"] = am.passive(Q[2])
+
+        u = self.vars["u"] = q1 / rho
+        p = self.vars["p"] = gam1 * (q2 - 0.5 * rho * u * u)
+        a = am.sqrt(gamma * p / rho)
+        V = a + am.fabs(u)
+        dt = self.vars["dt"] = dx * CFL / V
+
+        self.constraints["res"] = [Q[0] / dt, Q[1] / dt, Q[2] / dt]
+
+        return
+
+
+class DesignContinuation(am.Component):
+    def __init__(self):
+        super().__init__()
+
+        self.add_data("diagonal_weight")
+        self.add_input("area_ctrl")
+        self.add_objective("obj")
+
+        self.set_continuation_component(True)
+        return
+
+    def compute(self):
+        diagonal_weight = self.data["diagonal_weight"]
+        area_ctrl = self.inputs["area_ctrl"]
+
+        self.objective["obj"] = 0.5 * diagonal_weight * area_ctrl**2
+        return
 
 
 def compute_area_target(eta, A_inlet=2.0, A_outlet=1.5, A_min=0.8, eta_sigma=0.3):
@@ -386,13 +453,13 @@ def plot_solution(rho, u, p, M_target, p_target, num_cells, length):
         line_scaler = 1.0
 
         indices = [0, 1, 1, 2, 2]
-        cindices = [0, 0, 1, 0, 1]
+        cindices = [0, 1, 0, 1, 0]
 
         gamma = 1.4
         a = np.sqrt(gamma * p / rho)
 
-        data = [rho, u / a, M_target, p, p_target]
-        label = [None, None, None, "solution", "target"]
+        data = [rho, M_target, u / a, p_target, p]
+        label = [None, "target", "solution", "target", "solution"]
 
         for i, (index, c, y) in enumerate(zip(indices, cindices, data)):
             ax[index].plot(
@@ -405,7 +472,11 @@ def plot_solution(rho, u, p, M_target, p_target, num_cells, length):
             )
 
         fontname = "Helvetica"
-        ax[-1].legend(loc="lower left", prop={"family": fontname, "size": 12})
+        if not fontname in available_fonts:
+            fontname = "DejaVu Sans"
+
+        ax[1].legend(loc="upper left", prop={"family": fontname, "size": 12})
+        ax[2].legend(loc="lower left", prop={"family": fontname, "size": 12})
 
         for axis in ax:
             niceplots.adjust_spines(axis, outward=True)
@@ -445,19 +516,20 @@ def plot_nozzle(A, dAdx, A_target, num_cells, length):
         fig, ax = plt.subplots(2, 1, figsize=(10, 4))
         colors = niceplots.get_colors_list()
 
-        labels = [r"$A$", r"$dA/dx$"]
-        xlabel = "location"
+        ylabels = [r"Area", r"$dA/dx$"]
+        xlabel = "Location"
         xticks = [0, 2, 4, 6, 8, 10]
 
-        for i, label in enumerate(labels):
+        for i, label in enumerate(ylabels):
             ax[i].set_ylabel(label, rotation="horizontal", horizontalalignment="right")
 
         line_scaler = 1.0
 
         indices = [0, 0, 1]
-        cindices = [0, 1, 0]
-        xdata = [xintr, xcell, xcell]
-        ydata = [A, A_target, dAdx]
+        cindices = [1, 0, 0]
+        xdata = [xcell, xintr, xcell]
+        ydata = [A_target, A, dAdx]
+        labels = ["target", "solution", None]
 
         for i, (index, c, x, y) in enumerate(zip(indices, cindices, xdata, ydata)):
             ax[index].plot(
@@ -466,12 +538,17 @@ def plot_nozzle(A, dAdx, A_target, num_cells, length):
                 clip_on=False,
                 lw=3 * line_scaler,
                 color=colors[c],
-                label=label[i],
+                label=labels[i],
             )
 
         fontname = "Helvetica"
+        if not fontname in available_fonts:
+            fontname = "DejaVu Sans"
+
         for axis in ax:
             niceplots.adjust_spines(axis, outward=True)
+
+        ax[0].legend(loc="lower left", prop={"family": fontname, "size": 12})
 
         for axis in ax[:-1]:
             axis.get_xaxis().set_visible(False)
@@ -510,6 +587,9 @@ def plot_convergence(nrms):
         niceplots.adjust_spines(ax)
 
         fontname = "Helvetica"
+        if not fontname in available_fonts:
+            fontname = "DejaVu Sans"
+
         ax.xaxis.label.set_fontname(fontname)
         ax.yaxis.label.set_fontname(fontname)
 
@@ -549,6 +629,16 @@ parser.add_argument(
     default=False,
     help="Enable the CUDA solver",
 )
+parser.add_argument(
+    "--num-cells", dest="num_cells", default=400, type=int, help="Number of cells"
+)
+parser.add_argument(
+    "--opt-filename",
+    dest="opt_filename",
+    type=str,
+    default="nozzle_history.json",
+    help="Number of time steps",
+)
 
 args = parser.parse_args()
 
@@ -578,7 +668,7 @@ Astar = 0.7
 length = 10.0
 
 # Set the constants needed for the inputs/outputs
-dx = length / num_cells
+dx = length / args.num_cells
 
 # Number of control points
 nctrl = 10
@@ -587,7 +677,7 @@ nctrl = 10
 model = am.Model("nozzle_module")
 
 # Add the flux computations at the interior points
-model.add_component("flux", num_cells - 1, RoeFlux(gamma=gamma))
+model.add_component("flux", args.num_cells - 1, RoeFlux(gamma=gamma))
 
 # Add the flux computations at the end points
 inlet = SubsonicInletFlux(gamma=gamma, T_res=T_res, p_res=p_res)
@@ -597,30 +687,41 @@ outlet = SubsonicOutletFlux(gamma=gamma, T_res=T_res, p_res=p_res)
 model.add_component("outlet", 1, outlet)
 
 # Add the 1D nozzle
-model.add_component("nozzle", num_cells, Nozzle(gamma=gamma, dx=(length / num_cells)))
+model.add_component(
+    "nozzle", args.num_cells, Nozzle(gamma=gamma, dx=(length / args.num_cells))
+)
 
 # Add the nozzle boundary condition calculation
 model.add_component("calc", 2, ExactNozzleMachCalc(gamma=gamma, Astar=Astar))
 
 # Add the objective function
-model.add_component("objective", num_cells, Objective(gamma=gamma))
+model.add_component(
+    "objective", args.num_cells, Objective(gamma=gamma, dx=(length / args.num_cells))
+)
 
 # Add the area source
 model.add_component("area_ctrl", nctrl, AreaControlPoints())
 
 # Add the Bspline area calculation component
-xi_interface = np.linspace(0, length, num_cells + 1)
+xi_interface = np.linspace(0, length, args.num_cells + 1)
 area = am.BSplineInterpolant(xi=xi_interface, k=4, n=nctrl, deriv=0, length=length)
-model.add_component("area", num_cells + 1, area)
+model.add_component("area", args.num_cells + 1, area)
 
 # Add the Bspline derivative evaluation component
 first_cell = 0.5 * dx
 last_cell = length - 0.5 * dx
-xi_cell_center = np.linspace(first_cell, last_cell, num_cells)
+xi_cell_center = np.linspace(first_cell, last_cell, args.num_cells)
 area_derivative = am.BSplineInterpolant(
     xi=xi_cell_center, k=4, n=nctrl, deriv=1, length=length
 )
-model.add_component("area_derivative", num_cells, area_derivative)
+model.add_component("area_derivative", args.num_cells, area_derivative)
+
+# Add the continuation components
+pseudo_transient = PseudoTransient(gamma=gamma, dx=(length / args.num_cells))
+model.add_component("pseudo_transient", args.num_cells, pseudo_transient)
+
+design_continuation = DesignContinuation()
+model.add_component("design_continuation", nctrl, design_continuation)
 
 # Link the states
 model.link(f"nozzle.Q[:-1, :]", "flux.QL")
@@ -660,6 +761,17 @@ model.link("inlet.M_inlet", "calc.M[0]")
 model.link("area.output[-1]", "calc.A[1]")
 model.link("outlet.M_outlet", "calc.M[1]")
 
+# Link the pseudo-transient continuation values
+model.link("pseudo_transient.Q", "nozzle.Q")
+model.link("pseudo_transient.res", "nozzle.res")
+model.link("pseudo_transient.CFL[1:]", "pseudo_transient.CFL[0]")
+
+# Link the design continuation parameters
+model.link("design_continuation.area_ctrl", "area_ctrl.area")
+model.link(
+    "design_continuation.diagonal_weight[1:]", "design_continuation.diagonal_weight[0]"
+)
+
 if args.build:
     source_dir = Path(__file__).resolve().parent
     model.build_module(source_dir=source_dir)
@@ -681,9 +793,14 @@ M_target, p_target = compute_pressure_target(A_target, p_res, gamma, Astar)
 # Set the pressure target distribution
 data["objective.p0"] = p_target
 
+# Set the initial continuation parameters
+data["pseudo_transient.CFL[0]"] = 10.0
+data["design_continuation.diagonal_weight[0]"] = 100.0
+
 # Set the area derivative data
 area.set_data("area", data)
 area_derivative.set_data("area_derivative", data)
+data.get_vector().copy_host_to_device()
 
 # Get the design variables
 x = model.create_vector()
@@ -765,89 +882,37 @@ if args.use_lnks:
         state_vars=state_vars,
         residuals=residuals,
     )
-
-if args.use_cuda:
+elif args.use_cuda:
     solver = am.DirectCudaSolver(model.get_problem())
 
 
-from scipy.sparse import csr_matrix
-from scipy.sparse.linalg import splu
+def continuation_control(iteration, res_norm):
+    data["pseudo_transient.CFL[0]"] = np.min((10000.0, 10.0 + 10.0 * iteration))
+    data["design_continuation.diagonal_weight[0]"] = np.max((0.0, 100.0 - iteration))
+    data.get_vector().copy_host_to_device()
+    return
 
-
-class NozzleSolver:
-    def __init__(self, problem, model):
-        self.problem = problem
-        self.model = model
-        loc = am.MemoryLocation.HOST_AND_DEVICE
-        self.hess = self.problem.create_matrix(loc)
-        self.nrows, self.ncols, self.nnz, self.rowp, self.cols = (
-            self.hess.get_nonzero_structure()
-        )
-
-        self.area_indices = self.model.get_indices("area_ctrl.area")
-
-        self.beta = 100.0
-        self.iteration = 0
-
-        self.lu = None
-        return
-
-    def factor(self, alpha, x, diag):
-        """
-        Compute and factor the Hessian matrix
-        """
-
-        # Compute the Hessian and add the diagonal values
-        self.problem.hessian(alpha, x, self.hess)
-        self.problem.add_diagonal(diag, self.hess)
-
-        self.hess.copy_data_device_to_host()
-
-        # Build the CSR matrix and convert to CSC
-        shape = (self.nrows, self.ncols)
-        data = self.hess.get_data()
-        H = csr_matrix((data, self.cols, self.rowp), shape=shape).tocsc()
-
-        if alpha == 1.0:
-            H[self.area_indices, self.area_indices] += self.beta
-
-            self.iteration += 1
-            self.beta *= 0.9
-
-        # Compute the LU factorization
-        self.lu = splu(H, permc_spec="COLAMD", diag_pivot_thresh=1.0)
-
-        return
-
-    def solve(self, bx, px):
-        """
-        Solve the KKT system
-        """
-
-        bx.copy_device_to_host()
-        px.get_array()[:] = self.lu.solve(bx.get_array())
-        px.copy_host_to_device()
-
-        return
-
-
-solver = NozzleSolver(model.get_problem(), model)
 
 # Set up the optimizer
 opt = am.Optimizer(model, x, lower=lower, upper=upper, solver=solver)
 
 opt_history = opt.optimize(
     {
-        "max_iterations": 200,
+        "max_iterations": 1000,
         "record_components": ["area_ctrl.area"],
         "max_line_search_iterations": 4,
         "convergence_tolerance": 1e-9,
         "monotone_barrier_fraction": 0.1,
+        "continuation_control": continuation_control,
     }
 )
 
-with open("nozzle_history.json", "w") as fp:
-    json.dump(opt_history, fp, indent=2)
+opt_history["num_cells"] = args.num_cells
+opt_history["num_variables"] = model.num_variables
+opt_history["num_constraints"] = model.num_constraints
+
+with open(args.opt_filename, "w") as fp:
+    json.dump(opt_history, fp, indent=2, default=lambda obj: "")
 
 inputs, cons, _, _ = model.get_names()
 
@@ -871,10 +936,12 @@ for name in inputs:
 rho = x["nozzle.Q[:, 0]"]
 u = x["nozzle.Q[:, 1]"] / rho
 p = (gamma - 1.0) * (x["nozzle.Q[:, 2]"] - 0.5 * rho * u**2)
-plot_solution(rho, u, p, M_target, p_target, num_cells, length)
+plot_solution(rho, u, p, M_target, p_target, args.num_cells, length)
 
 # Plot the nozzle problem solution
-plot_nozzle(x["area.output"], x["area_derivative.output"], A_target, num_cells, length)
+plot_nozzle(
+    x["area.output"], x["area_derivative.output"], A_target, args.num_cells, length
+)
 
 norms = []
 for iter_data in opt_history["iterations"]:

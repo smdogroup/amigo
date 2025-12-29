@@ -4,6 +4,11 @@ include/amigo_include_paths.h
 # Ignore anything in the build directory
 /build/*
 *.so
+*.png
+*.svg
+*.pdf
+*.aux
+*.log
 
 # Ignore anything in the pycache
 **/__pycache__

@@ -1,5 +1,5 @@
 import math
-from .expressions import Expr, UnaryNode, OpNode, ConstNode
+from .expressions import Expr, UnaryNode, OpNode, ConstNode, PassiveNode
 
 
 def abs(expr):
@@ -109,3 +109,8 @@ def max2(a, b):
         return Expr(OpNode("max2", a.node, ConstNode(value=b)))
     else:
         return Expr(OpNode("max2", a.node, b.node))
+
+
+def passive(expr):
+    """Force an expression to be passive"""
+    return Expr(PassiveNode(expr))
