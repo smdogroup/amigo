@@ -103,7 +103,7 @@ def gmres(mult, precon, b, x, msub=20, rtol=1e-2, atol=1e-30):
 
 
 class DirectCudaSolver:
-    def __init__(self, problem, pivot_eps=1e-8):
+    def __init__(self, problem, pivot_eps=1e-12):
         self.problem = problem
 
         try:
