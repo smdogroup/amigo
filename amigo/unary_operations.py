@@ -1,4 +1,4 @@
-from expressions import Expr, VarNode, UnaryNode, BinaryNode, ConstNode, PassiveNode
+from .expressions import Expr, VarNode, UnaryNode, BinaryNode, ConstNode, PassiveNode
 
 
 def abs(expr):

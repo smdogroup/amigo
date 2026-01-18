@@ -273,6 +273,12 @@ class Expr:
                     raise ValueError(f"Index {index} out of range")
 
             return Expr(IndexNode(self, index))
+        elif isinstance(self.node, PassiveNode):
+            if isinstance(idx, tuple):
+                index = tuple(int(i) for i in idx)
+            else:
+                index = int(idx)
+            return Expr(IndexNode(self, index))
         else:
             raise TypeError("You can only index variables, not general expressions")
 
@@ -380,7 +386,7 @@ class ExprBuilder:
 
         # Set it up so that the temp expressions are in order
         self.temp_exprs = []
-        for idx in sorted(self.temp_list):
+        for idx in sorted(set(self.temp_list)):
             # Set whether the temporaries are active or not
             self.node_exprs[idx].set_active_flag(temp_var_exprs[idx].is_active())
             self.temp_exprs.append([self.node_exprs[idx], temp_var_exprs[idx]])

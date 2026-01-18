@@ -327,6 +327,8 @@ if args.build:
 comm = COMM_WORLD
 model.initialize(comm=comm)
 
+exit(0)
+
 comm_rank = 0
 distribute = False
 if comm is not None:
