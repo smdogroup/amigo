@@ -1100,7 +1100,6 @@ amigo_add_python_module(
 
         # Locate the installed Amigo CMake package inside the Python package
         amigo_cmake_dir = get_cmake_dir()
-        print("amigo_cmake_dir = ", amigo_cmake_dir)
 
         # Cmake command
         cmake_cmd = [

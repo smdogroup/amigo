@@ -32,17 +32,55 @@ class RoeFlux(am.Component):
         # Compute the weights
         rhoL = QL[0]
         rhoR = QR[0]
-        r = self.vars["r"] = am.sqrt(rhoR / rhoL)
-        wL = self.vars["wL"] = r / (r + 1.0)
-        wR = self.vars["wR"] = 1.0 - wL
+        # r = self.vars["r"] = am.sqrt(rhoR / rhoL)
+        # wL = self.vars["wL"] = r / (r + 1.0)
+        # wR = self.vars["wR"] = 1.0 - wL
+
+        # # Compute the left and right states
+        # uL = self.vars["uL"] = QL[1] / QL[0]
+        # pL = self.vars["pL"] = gam1 * (QL[2] - 0.5 * rhoL * uL * uL)
+        # HL = ggam1 * (pL / rhoL) + 0.5 * uL * uL
+
+        # uR = self.vars["uR"] = QR[1] / QR[0]
+        # pR = self.vars["pR"] = gam1 * (QR[2] - 0.5 * rhoR * uR * uR)
+        # HR = ggam1 * (pR / rhoR) + 0.5 * uR * uR
+
+        # # Compute the left and right fluxes
+        # FL = [rhoL * uL, rhoL * uL * uL + pL, rhoL * HL * uL]
+        # FR = [rhoR * uR, rhoR * uR * uR + pR, rhoR * HR * uR]
+
+        # # Compute the Roe averages
+        # rho = self.vars["rho"] = r * rhoL
+        # u = self.vars["u"] = wL * uL + wR * uR
+        # H = self.vars["H"] = wL * HL + wR * HR
+
+        # a = self.vars["a"] = am.sqrt(gam1 * (H - 0.5 * u * u))
+        # ainv = self.vars["ainv"] = 1.0 / a
+
+        # fp = self.vars["fp"] = ainv * ainv * (pR - pL)
+        # fu = self.vars["fu"] = (uR - uL) * rho * ainv
+
+        # # Entropy fix with a square root function
+        # h = self.vars["h"] = 0.05 * (am.abs(u) + a)
+        # lam1 = self.vars["lam1"] = am.sqrt(u * u + h * h / 4)
+        # lam2 = self.vars["lam2"] = am.sqrt((u + a) * (u + a) + h * h / 4)
+        # lam3 = self.vars["lam3"] = am.sqrt((u - a) * (u - a) + h * h / 4)
+
+        # w0 = self.vars["w0"] = ((rhoR - rhoL) - fp) * lam1
+        # w1 = self.vars["w1"] = (0.5 * (fp + fu)) * lam2
+        # w2 = self.vars["w2"] = (0.5 * (fp - fu)) * lam3
+
+        r = am.sqrt(rhoR / rhoL)
+        wL = r / (r + 1.0)
+        wR = 1.0 - wL
 
         # Compute the left and right states
-        uL = self.vars["uL"] = QL[1] / QL[0]
-        pL = self.vars["pL"] = gam1 * (QL[2] - 0.5 * rhoL * uL * uL)
+        uL = QL[1] / QL[0]
+        pL = gam1 * (QL[2] - 0.5 * rhoL * uL * uL)
         HL = ggam1 * (pL / rhoL) + 0.5 * uL * uL
 
-        uR = self.vars["uR"] = QR[1] / QR[0]
-        pR = self.vars["pR"] = gam1 * (QR[2] - 0.5 * rhoR * uR * uR)
+        uR = QR[1] / QR[0]
+        pR = gam1 * (QR[2] - 0.5 * rhoR * uR * uR)
         HR = ggam1 * (pR / rhoR) + 0.5 * uR * uR
 
         # Compute the left and right fluxes
@@ -50,25 +88,25 @@ class RoeFlux(am.Component):
         FR = [rhoR * uR, rhoR * uR * uR + pR, rhoR * HR * uR]
 
         # Compute the Roe averages
-        rho = self.vars["rho"] = r * rhoL
-        u = self.vars["u"] = wL * uL + wR * uR
-        H = self.vars["H"] = wL * HL + wR * HR
+        rho = r * rhoL
+        u = wL * uL + wR * uR
+        H = wL * HL + wR * HR
 
-        a = self.vars["a"] = am.sqrt(gam1 * (H - 0.5 * u * u))
-        ainv = self.vars["ainv"] = 1.0 / a
+        a = am.sqrt(gam1 * (H - 0.5 * u * u))
+        ainv = 1.0 / a
 
-        fp = self.vars["fp"] = ainv * ainv * (pR - pL)
-        fu = self.vars["fu"] = (uR - uL) * rho * ainv
+        fp = ainv * ainv * (pR - pL)
+        fu = (uR - uL) * rho * ainv
 
         # Entropy fix with a square root function
-        h = self.vars["h"] = 0.05 * (am.abs(u) + a)
-        lam1 = self.vars["lam1"] = am.sqrt(u * u + h * h / 4)
-        lam2 = self.vars["lam2"] = am.sqrt((u + a) * (u + a) + h * h / 4)
-        lam3 = self.vars["lam3"] = am.sqrt((u - a) * (u - a) + h * h / 4)
+        h = 0.05 * (am.abs(u) + a)
+        lam1 = am.sqrt(u * u + h * h / 4)
+        lam2 = am.sqrt((u + a) * (u + a) + h * h / 4)
+        lam3 = am.sqrt((u - a) * (u - a) + h * h / 4)
 
-        w0 = self.vars["w0"] = ((rhoR - rhoL) - fp) * lam1
-        w1 = self.vars["w1"] = (0.5 * (fp + fu)) * lam2
-        w2 = self.vars["w2"] = (0.5 * (fp - fu)) * lam3
+        w0 = ((rhoR - rhoL) - fp) * lam1
+        w1 = (0.5 * (fp + fu)) * lam2
+        w2 = (0.5 * (fp - fu)) * lam3
 
         Fr = 0.5 * w0 * u * u + w1 * (H + u * a) + w2 * (H - u * a)
         self.constraints["res"] = [
@@ -343,10 +381,13 @@ class PseudoTransient(am.Component):
         Q = self.inputs["Q"]
         CFL = self.data["CFL"]
 
-        rho = self.vars["rho"] = am.passive(Q[0])
-        q1 = self.vars["q1"] = am.passive(Q[1])
-        q2 = self.vars["q2"] = am.passive(Q[2])
+        # Extract passive values - this won't be differentiated
+        Qp = am.passive(Q)
+        rho = Qp[0]
+        q1 = Qp[1]
+        q2 = Qp[2]
 
+        # Compute the time step
         u = self.vars["u"] = q1 / rho
         p = self.vars["p"] = gam1 * (q2 - 0.5 * rho * u * u)
         a = am.sqrt(gamma * p / rho)

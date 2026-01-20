@@ -35,138 +35,18 @@ def _get_shape_from_list(obj):
     return (length,) + sub_shape
 
 
-def _generate_cpp_input_decl(
-    inputs,
-    offset=0,
-    mode="eval",
-    alt_names=None,
-    template_name="T__",
-    input_name="input__",
-    grad_name="boutput__",
-    prod_name="pinput__",
-    hprod_name="houtput__",
-):
-    lines = []
-
-    for index, name in enumerate(inputs):
-        node = inputs[name]
-        shape = _normalize_shape(node.shape)
-        var_name = name if alt_names is None else alt_names[name]
-
-        if mode == "eval":
-            decl = None
-            if shape is None:
-                decl = f"{template_name}& {var_name}"
-            else:
-                if len(shape) == 1:
-                    decl = f"A2D::Vec<{template_name}, {shape[0]}>& {var_name}"
-                elif len(shape) == 2:
-                    decl = (
-                        f"A2D::Mat<{template_name}, {shape[0]}, {shape[1]}>& {var_name}"
-                    )
-            lines.append(f"{decl} = A2D::get<{index + offset}>({input_name})")
-        elif mode == "rev":
-            decl = None
-            if shape is None:
-                decl = f"A2D::ADObj<{template_name}&> {var_name}"
-            else:
-                if len(shape) == 1:
-                    decl = (
-                        f"A2D::ADObj<A2D::Vec<{template_name}, {shape[0]}>&> {var_name}"
-                    )
-                elif len(shape) == 2:
-                    decl = f"A2D::ADObj<A2D::Mat<{template_name}, {shape[0]}, {shape[1]}>&> {var_name}"
-            lines.append(
-                f"{decl}(A2D::get<{index + offset}>({input_name}), A2D::get<{index + offset}>({grad_name}))"
-            )
-        elif mode == "hprod":
-            decl = None
-            if shape is None:
-                decl = f"A2D::A2DObj<{template_name}&> {var_name}"
-            else:
-                if len(shape) == 1:
-                    decl = f"A2D::A2DObj<A2D::Vec<{template_name}, {shape[0]}>&> {var_name}"
-                elif len(shape) == 2:
-                    decl = f"A2D::A2DObj<A2D::Mat<{template_name}, {shape[0]}, {shape[1]}>&> {var_name}"
-            lines.append(
-                f"{decl}(A2D::get<{index + offset}>({input_name}), A2D::get<{index + offset}>({grad_name}), "
-                + f"A2D::get<{index + offset}>({prod_name}), A2D::get<{index + offset}>({hprod_name}))"
-            )
-
-    return lines
-
-
-def _generate_cpp_var_decl(
-    inputs, active=None, mode="eval", alt_names=None, template_name="T__"
-):
-    lines = []
-
-    for index, name in enumerate(inputs):
-        node = inputs[name]
-        shape = _normalize_shape(node.shape)
-        var_name = name if alt_names is None else alt_names[name]
-
-        passive = False
-        if active is not None:
-            if var_name in active and not active[var_name]:
-                passive = True
-
-        if mode == "eval" or passive:
-            decl = None
-            if shape is None:
-                decl = f"{template_name} {var_name}"
-            else:
-                if len(shape) == 1:
-                    decl = f"A2D::Vec<{template_name}, {shape[0]}> {var_name}"
-                elif len(shape) == 2:
-                    decl = (
-                        f"A2D::Mat<{template_name}, {shape[0]}, {shape[1]}> {var_name}"
-                    )
-            lines.append(decl)
-        elif mode == "rev":
-            decl = None
-            if shape is None:
-                decl = f"A2D::ADObj<{template_name}> {var_name}"
-            else:
-                if len(shape) == 1:
-                    decl = (
-                        f"A2D::ADObj<A2D::Vec<{template_name}, {shape[0]}>> {var_name}"
-                    )
-                elif len(shape) == 2:
-                    decl = f"A2D::ADObj<A2D::Mat<{template_name}, {shape[0]}, {shape[1]}>> {var_name}"
-            lines.append(decl)
-        elif mode == "hprod":
-            decl = None
-            if shape is None:
-                decl = f"A2D::A2DObj<{template_name}> {var_name}"
-            else:
-                if len(shape) == 1:
-                    decl = (
-                        f"A2D::A2DObj<A2D::Vec<{template_name}, {shape[0]}>> {var_name}"
-                    )
-                elif len(shape) == 2:
-                    decl = f"A2D::A2DObj<A2D::Mat<{template_name}, {shape[0]}, {shape[1]}>> {var_name}"
-            lines.append(decl)
-
-    return lines
-
-
 def _generate_cpp_types(inputs, template_name="T__"):
     lines = []
 
-    for index, name in enumerate(inputs):
-        node = inputs[name]
-        shape = _normalize_shape(node.shape)
-
-        decl = None
+    for name in inputs:
+        shape = _normalize_shape(inputs[name].node.shape)
         if shape is None:
-            decl = f"{template_name}"
+            lines.append(f"{template_name}")
         else:
             if len(shape) == 1:
-                decl = f"A2D::Vec<{template_name}, {shape[0]}>"
+                lines.append(f"A2D::Vec<{template_name}, {shape[0]}>")
             elif len(shape) == 2:
-                decl = f"A2D::Mat<{template_name}, {shape[0]}, {shape[1]}>"
-        lines.append(decl)
+                lines.append(f"A2D::Mat<{template_name}, {shape[0]}, {shape[1]}>")
 
     return lines
 
@@ -261,7 +141,7 @@ class InputSet:
         self.meta = {}
 
     def add(self, name, shape=None, **kwargs):
-        self.inputs[name] = VarNode(name, shape=shape, active=True)
+        self.inputs[name] = Expr(VarNode(name, shape=shape, active=True))
         self.meta[name] = Meta(name, "input", shape=shape, **kwargs)
         return
 
@@ -277,37 +157,16 @@ class InputSet:
     def __getitem__(self, name):
         if name not in self.inputs:
             raise KeyError(f"{name} not in declared inputs")
-        return Expr(self.inputs[name])
+        return self.inputs[name]
 
     def get_shape(self, name):
-        return self.inputs[name].shape
+        return self.inputs[name].node.shape
 
     def get_meta(self, name):
         return self.meta[name]
 
     def generate_cpp_types(self, template_name="T__"):
         return _generate_cpp_types(self.inputs, template_name=template_name)
-
-    def generate_cpp_input_decl(
-        self,
-        offset=0,
-        mode="eval",
-        template_name="T__",
-        input_name="input__",
-        grad_name="boutput__",
-        prod_name="pinput__",
-        hprod_name="houtput__",
-    ):
-        return _generate_cpp_input_decl(
-            self.inputs,
-            offset=offset,
-            mode=mode,
-            template_name=template_name,
-            input_name=input_name,
-            grad_name=grad_name,
-            prod_name=prod_name,
-            hprod_name=hprod_name,
-        )
 
 
 class ConstantSet:
@@ -318,11 +177,14 @@ class ConstantSet:
     def add(self, name, value, type=float, **kwargs):
         if "shape" in kwargs and kwargs["shape"] != None:
             raise ValueError("Constants must be scalars")
-        self.consts[name] = ConstNode(name=name, value=value, type=type)
+        self.consts[name] = Expr(ConstNode(name=name, value=value, type=type))
         self.meta[name] = Meta(
             name, "constant", value=value, shape=None, type=type, **kwargs
         )
         return
+
+    def __len__(self):
+        return len(self.consts)
 
     def __iter__(self):
         return iter(self.consts)
@@ -330,7 +192,7 @@ class ConstantSet:
     def __getitem__(self, name):
         if name not in self.consts:
             raise KeyError(f"{name} not in declared constants")
-        return Expr(self.consts[name])
+        return self.consts[name]
 
     def get_shape(self, name):
         return self.consts[name].shape
@@ -341,7 +203,7 @@ class ConstantSet:
     def generate_cpp_const_decl(self):
         lines = []
         for name in self.consts:
-            node = self.consts[name]
+            node = self.consts[name].node
             vtype = _cpp_type_map[node.type]
             lines.append(
                 f"inline static constexpr {vtype} {name} = static_cast<{vtype}>({node.value})"
@@ -355,7 +217,7 @@ class VarSet:
             self.name = name
             self.shape = _normalize_shape(shape)
             self.type = type
-            self.var = VarNode(name, shape=shape, type=type, active=active)
+            self.var = Expr(VarNode(name, shape=shape, type=type, active=active))
             self.active = active
 
             if self.shape is None:
@@ -372,6 +234,9 @@ class VarSet:
     def __init__(self):
         self.vars = {}
 
+    def __len__(self):
+        return len(self.vars)
+
     def __iter__(self):
         return iter(self.vars)
 
@@ -381,29 +246,22 @@ class VarSet:
     def __setitem__(self, name, expr):
         if isinstance(expr, Expr):
             shape = None
-            self.vars[name] = self.VarExpr(name, shape=shape, active=expr.active)
+            self.vars[name] = self.VarExpr(name, shape=shape)
             self.vars[name].expr = expr
             expr.name = name
         else:
             shape = _get_shape_from_list(expr)
-            self.vars[name] = self.VarExpr(name, shape=shape, active=True)
+            self.vars[name] = self.VarExpr(name, shape=shape)
 
-            # Check whether we should reset the active flag
-            active = False
             if len(shape) == 1:
                 for i in range(shape[0]):
                     self.vars[name].expr[i] = expr[i]
-                    active = active or expr[i].active
                     expr[i].name = f"{name}[{i}]"
             elif len(shape) == 2:
                 for i in range(shape[0]):
                     for j in range(shape[1]):
                         self.vars[name].expr[i][j] = expr[i][j]
-                        active = active or expr[i][j].active
                         expr[i][j].name = f"{name}({i}, {j})"
-
-            self.vars[name].active = active
-            self.vars[name].var.active = active
 
         return
 
@@ -413,82 +271,6 @@ class VarSet:
     def generate_cpp_types(self, template_name="T__"):
         return _generate_cpp_types(self.vars, template_name=template_name)
 
-    def generate_cpp_decl(self, mode="eval", template_name="T__"):
-        active = {}
-        for name in self.vars:
-            active[name] = self.vars[name].active
-
-        return _generate_cpp_var_decl(
-            self.vars, active, mode=mode, template_name=template_name
-        )
-
-    def generate_passive_cpp(self):
-        lines = []
-        for name in self.vars:
-            if not self.vars[name].active:
-                shape = _normalize_shape(self.vars[name].shape)
-                if shape is None:
-                    rhs = self.vars[name].expr.generate_cpp(use_vars=False)
-                    lines.append(f"{name} = {rhs}")
-                elif len(shape) == 1:
-                    for i in range(shape[0]):
-                        rhs = self.vars[name].expr[i].generate_cpp(use_vars=False)
-                        lines.append(f"{name}[{i}] = {rhs}")
-                elif len(shape) == 2:
-                    for j in range(shape[1]):
-                        for i in range(shape[0]):
-                            rhs = (
-                                self.vars[name].expr[i][j].generate_cpp(use_vars=False)
-                            )
-                            lines.append(f"{name}({i},{j}) = {rhs}")
-
-        return lines
-
-    def generate_active_cpp(self, mode="eval"):
-        lines = []
-
-        if mode == "eval":
-            for name in self.vars:
-                if self.vars[name].active:
-                    shape = _normalize_shape(self.vars[name].shape)
-                    if shape is None:
-                        rhs = self.vars[name].expr.generate_cpp(use_vars=False)
-                        lines.append(f"{name} = {rhs}")
-                    elif len(shape) == 1:
-                        for i in range(shape[0]):
-                            rhs = self.vars[name].expr[i].generate_cpp(use_vars=False)
-                            lines.append(f"{name}[{i}] = {rhs}")
-                    elif len(shape) == 2:
-                        for j in range(shape[1]):
-                            for i in range(shape[0]):
-                                rhs = (
-                                    self.vars[name]
-                                    .expr[i][j]
-                                    .generate_cpp(use_vars=False)
-                                )
-                                lines.append(f"{name}({i},{j}) = {rhs}")
-        else:
-            for name in self.vars:
-                if self.vars[name].active:
-                    shape = _normalize_shape(self.vars[name].shape)
-                    if shape is None:
-                        rhs = self.vars[name].expr.generate_cpp(use_vars=False)
-                        lines.append(f"A2D::Eval({rhs}, {name})")
-                    elif len(shape) == 1:
-                        for i in range(shape[0]):
-                            rhs = self.vars[name].expr[i].generate_cpp(use_vars=False)
-                            lines.append(f"A2D::Eval({rhs}, {name}[{i}])")
-                    elif len(shape) == 2:
-                        for j in range(shape[1]):
-                            for i in range(shape[0]):
-                                rhs = (
-                                    self.vars[name]
-                                    .expr[i][j]
-                                    .generate_cpp(use_vars=False)
-                                )
-                                lines.append(f"A2D::Eval({rhs}, {name}({i},{j}))")
-        return lines
-
 
 class DataSet:
     def __init__(self):
@@ -496,14 +278,14 @@ class DataSet:
         self.meta = {}
 
     def add(self, name, shape=None, type=float, **kwargs):
-        self.data[name] = VarNode(name, shape=shape, type=type, active=False)
+        self.data[name] = Expr(VarNode(name, shape=shape, type=type, active=False))
         self.meta[name] = Meta(name, "data", shape=shape, type=type, **kwargs)
 
     def __len__(self):
         return len(self.data)
 
     def __getitem__(self, name):
-        return Expr(self.data[name])
+        return self.data[name]
 
     def __iter__(self):
         return iter(self.data)
@@ -511,14 +293,8 @@ class DataSet:
     def generate_cpp_types(self, template_name="T__"):
         return _generate_cpp_types(self.data, template_name=template_name)
 
-    def generate_cpp_input_decl(self, template_name="T__", data_name="data___"):
-        lines = _generate_cpp_input_decl(
-            self.data, mode="eval", template_name=template_name, input_name=data_name
-        )
-        return lines
-
     def get_shape(self, name):
-        return self.data[name].shape
+        return self.data[name].node.shape
 
     def get_meta(self, name):
         return self.meta[name]
@@ -544,10 +320,9 @@ class ConstraintSet:
                         for _ in range(self.shape[0])
                     ]
 
-    def __init__(self, lagrangian_name="lagrangian__"):
+    def __init__(self):
         self.cons = {}
         self.meta = {}
-        self.lagrangian_name = lagrangian_name
 
     def add(self, name, shape=None, type=float, **kwargs):
         self.cons[name] = self.ConstrExpr(name, shape=shape, type=type)
@@ -563,10 +338,10 @@ class ConstraintSet:
         return len(self.cons)
 
     def __iter__(self):
-        return iter(self.cons)
+        return iter(self.cons.keys())
 
     def __getitem__(self, name):
-        return self.cons[name]
+        return self.cons[name].expr
 
     def __setitem__(self, name, expr):
         if name not in self.cons:
@@ -599,130 +374,23 @@ class ConstraintSet:
     def evaluate(self, name, env):
         return self.cons[name].node.evaluate(env)
 
-    def _get_multiplier_names(self):
-        mult_names = {}
-        for name in self:
-            mult_names[name] = "lam_" + name + "__"
-
-        return mult_names
+    def get_multiplier_name(self, name):
+        if name in self.cons:
+            return f"lam_{name}__"
+        else:
+            raise KeyError(f"{name} not in declared constraints")
 
     def generate_cpp_types(self, template_name="T__"):
-        return _generate_cpp_types(self.cons, template_name=template_name)
-
-    def generate_cpp_input_decl(
-        self,
-        offset=0,
-        mode="eval",
-        template_name="T__",
-        input_name="input__",
-        grad_name="boutput__",
-        prod_name="pinput__",
-        hprod_name="houtput__",
-    ):
-        mult_names = self._get_multiplier_names()
-        lines = _generate_cpp_input_decl(
-            self.cons,
-            alt_names=mult_names,
-            offset=offset,
-            mode=mode,
-            template_name=template_name,
-            input_name=input_name,
-            grad_name=grad_name,
-            prod_name=prod_name,
-            hprod_name=hprod_name,
-        )
-        return lines
-
-    def generate_cpp_decl(self, mode="eval", template_name="T__"):
-        lines = _generate_cpp_var_decl(
-            self.cons, mode=mode, template_name=template_name
-        )
-        if mode == "eval":
-            lines.append(f"{template_name} {self.lagrangian_name}")
-        elif mode == "rev":
-            lines.append(f"A2D::ADObj<{template_name}> {self.lagrangian_name}")
-        else:
-            lines.append(f"A2D::A2DObj<{template_name}> {self.lagrangian_name}")
-        return lines
-
-    def _lagrangian_evaluation(self, res_names, obj_expr=None):
-        expr_list = []
-
-        mult_names = self._get_multiplier_names()
-        for item in self.cons:
-            shape = self.cons[item].shape
-            name = self.cons[item].name
-
-            if shape is None:
-                res_name = res_names[name]
-                expr_list.append(f"({res_name}) * {mult_names[name]}")
-            elif len(shape) == 1:
-                for i in range(shape[0]):
-                    res_name = res_names[name][i]
-                    expr_list.append(f"({res_name}) * {mult_names[name]}[{i}]")
-            elif len(shape) == 2:
-                for i in range(shape[0]):
-                    for j in range(shape[1]):
-                        res_name = res_names[name][i][j]
-                        expr_list.append(f"({res_name}) * {mult_names[name]}({i}, {j})")
-
-        if obj_expr is None:
-            expr = ""
-        else:
-            expr = f"alpha__ * ({obj_expr})"
-
-        if len(expr_list) > 0:
-            if obj_expr is None:
-                expr = expr_list[0]
-            else:
-                expr += " + " + expr_list[0]
-            for i in range(1, len(expr_list)):
-                expr += " + " + expr_list[i]
-
-        return expr
-
-    def generate_cpp(self, mode="eval", obj_expr=None):
         lines = []
-
-        if mode == "eval":
-            make_line = lambda name, rhs: f"{name} = {rhs}"
-        else:
-            make_line = lambda name, rhs: f"A2D::Eval({rhs}, {name})"
-
-        res_names = {}
-        for item in self.cons:
-            shape = self.cons[item].shape
-            name = self.cons[item].name
+        for name in self.cons:
+            shape = _normalize_shape(self.cons[name].shape)
             if shape is None:
-                rhs = self.cons[item].expr.generate_cpp()
-                if self.cons[name].expr.active:
-                    res_names[name] = name
-                    lines.append(make_line(name, rhs))
-                else:
-                    res_names[name] = rhs
-            elif len(shape) == 1:
-                res_names[name] = []
-                for i in range(shape[0]):
-                    rhs = self.cons[item].expr[i].generate_cpp()
-                    if self.cons[name].expr[i].active:
-                        res_names[name].append(f"{name}[{i}]")
-                        lines.append(make_line(f"{name}[{i}]", rhs))
-                    else:
-                        res_names[name].append(rhs)
-            elif len(shape) == 2:
-                res_names[name] = []
-                for i in range(shape[0]):
-                    res_names[name][i].append([])
-                    for j in range(shape[1]):
-                        rhs = self.cons[item].expr[i][j].generate_cpp()
-                        if self.cons[name].expr[i][j].active:
-                            res_names[name][i].append(f"{name}({i}, {j})")
-                            lines.append(make_line(f"{name}({i}, {j}", rhs))
-                        else:
-                            res_names[name].append(rhs)
-
-        rhs = self._lagrangian_evaluation(res_names, obj_expr=obj_expr)
-        lines.append(make_line(f"{self.lagrangian_name}", rhs))
+                lines.append(f"{template_name}")
+            else:
+                if len(shape) == 1:
+                    lines.append(f"A2D::Vec<{template_name}, {shape[0]}>")
+                elif len(shape) == 2:
+                    lines.append(f"A2D::Mat<{template_name}, {shape[0]}, {shape[1]}>")
 
         return lines
 
@@ -746,21 +414,23 @@ class ObjectiveSet:
     def __len__(self):
         return len(self.expr)
 
+    def __iter__(self):
+        return iter(self.expr)
+
     def __setitem__(self, name, expr):
         if name not in self.expr:
             raise KeyError(f"{name} not the declared objective")
         self.expr[name] = expr
         return
 
+    def __getitem__(self, name):
+        if name not in self.expr:
+            raise KeyError(f"{name} not the declared objective")
+        return self.expr[name]
+
     def clear(self):
         for name in self.expr:
             self.expr[name] = None
-
-    def generate_cpp(self):
-        for name in self.expr:
-            rhs = self.expr[name].generate_cpp()
-            return rhs
-        return None
 
     def get_meta(self, name):
         return self.meta[name]
@@ -772,7 +442,7 @@ class OutputSet:
             self.name = name
             self.shape = _normalize_shape(shape)
             self.type = type
-            self.var = VarNode(name, shape=shape, type=type, active=active)
+            self.var = Expr(VarNode(name, shape=shape, type=type, active=active))
             self.active = active
             self.expr = None
 
@@ -800,6 +470,11 @@ class OutputSet:
         self.outputs[name].expr = expr
         return
 
+    def __getitem__(self, name):
+        if name not in self.outputs:
+            raise KeyError(f"{name} not the declared outputs")
+        return self.outputs[name].expr
+
     def get_shape(self, name):
         return self.outputs[name].shape
 
@@ -808,25 +483,21 @@ class OutputSet:
             self.outputs[name].expr = None
 
     def generate_cpp_types(self, template_name="T__"):
-        return _generate_cpp_types(self.outputs, template_name=template_name)
-
-    def generate_cpp_input_decl(
-        self, offset=0, template_name="R__", output_name="output__"
-    ):
-        return _generate_cpp_input_decl(
-            self.outputs,
-            offset=offset,
-            mode="eval",
-            template_name=template_name,
-            input_name=output_name,
-        )
-
-    def generate_cpp(self):
         lines = []
         for name in self.outputs:
-            rhs = self.outputs[name].expr.generate_cpp()
-            lines.append(f"{name} = {rhs}")
+            shape = _normalize_shape(self.outputs[name].shape)
+            if shape is None:
+                lines.append(f"{template_name}")
+            else:
+                if len(shape) == 1:
+                    lines.append(f"A2D::Vec<{template_name}, {shape[0]}>")
+                elif len(shape) == 2:
+                    lines.append(f"A2D::Mat<{template_name}, {shape[0]}, {shape[1]}>")
+
         return lines
+
+    def get_var(self, name):
+        return self.outputs[name].var
 
     def get_meta(self, name):
         return self.meta[name]
@@ -845,6 +516,7 @@ class Component:
         self.objective = ObjectiveSet()
         self.data = DataSet()
         self.outputs = OutputSet()
+        self.multipliers = {}
 
         # Set the compute function arguments
         self.args = [{}]
@@ -1012,6 +684,54 @@ class Component:
             out_shapes[name] = shape
         return out_shapes
 
+    def _initialize_multipliers(self):
+        for name in self.constraints:
+            mult_name = self.constraints.get_multiplier_name(name)
+            if mult_name not in self.inputs:
+                shape = self.constraints.get_shape(name)
+                self.multipliers[mult_name] = Expr(VarNode(mult_name, shape=shape))
+
+        return
+
+    def _compute_lagrangian(self):
+        # Compute the Lagrangian
+        lhs = Expr(VarNode("lagrangian__"))
+        alpha = Expr(VarNode("alpha__", active=False))
+        rhs = None
+
+        for name in self.objective:
+            rhs = alpha * self.objective[name]
+
+        for name in self.constraints:
+            mult_name = self.constraints.get_multiplier_name(name)
+            con = self.constraints[name]
+            lam = self.multipliers[mult_name]
+
+            shape = self.constraints.get_shape(name)
+
+            if shape is None:
+                if rhs is None:
+                    rhs = con * lam
+                else:
+                    rhs = rhs + con * lam
+            elif len(shape) == 1:
+                if rhs is None:
+                    rhs = con[0] * lam[0]
+                else:
+                    rhs = rhs + con[0] * lam[0]
+                for i in range(1, shape[0]):
+                    rhs = rhs + con[i] * lam[i]
+            else:
+                for i in range(shape[0]):
+                    if rhs is None:
+                        rhs = con[i, 0] * lam[i, 0]
+                    else:
+                        rhs = rhs + con[i, 0] * lam[i, 0]
+                    for j in range(1, shape[1]):
+                        rhs = rhs + con[i, j] * lam[i, j]
+
+        return rhs, lhs
+
     def _get_using_statement(self, name="input", template_name="R__"):
         # Generate the using statement
         if name == "input":
@@ -1045,6 +765,91 @@ class Component:
 
         return using
 
+    def _generate_cpp_class_types(
+        self, class_name, template_name="T__", using_template="R__"
+    ):
+        cpp = ""
+
+        # Create the class structure
+        cpp += "\n" + f"template<typename {template_name}> \n"
+        cpp += f"class {class_name} " + "{\n"
+        cpp += " public:\n"
+
+        # Add the const declarations
+        const_decl = self.constants.generate_cpp_const_decl()
+        for line in const_decl:
+            cpp += "  " + line + ";\n"
+
+        # Add the input statement
+        if len(self.inputs) + len(self.constraints) > 0:
+            using = self._get_using_statement(
+                name="input", template_name=using_template
+            )
+            cpp += "  " + using + ";\n"
+            cpp += (
+                "  " + f"static constexpr int ncomp = Input<{template_name}>::ncomp;\n"
+            )
+        else:
+            cpp += (
+                "  "
+                + f"template <typename {using_template}> using Input = "
+                + f"typename A2D::VarTuple<{using_template}, {using_template}>;\n"
+            )
+            cpp += "  " + "static constexpr int ncomp = 0;\n"
+
+        # Add the data statement
+        if len(self.data) > 0:
+            using = self._get_using_statement(name="data", template_name=using_template)
+            cpp += "  " + using + ";\n"
+            cpp += (
+                "  " + f"static constexpr int ndata = Data<{template_name}>::ncomp;\n"
+            )
+        else:
+            cpp += (
+                "  "
+                + f"template <typename {using_template}> using Data = "
+                + f"typename A2D::VarTuple<{using_template}, {using_template}>;\n"
+            )
+            cpp += "  " + "static constexpr int ndata = 0;\n"
+
+        # Is compute actually empty
+        truth = "false"
+        if self.is_compute_empty():
+            truth = "true"
+        cpp += "  " + f"static constexpr bool is_compute_empty = {truth};\n"
+
+        # Is this a continuation component or not
+        truth = "false"
+        if self.is_continuation_component():
+            truth = "true"
+        cpp += "  " + f"static constexpr bool is_continuation_component = {truth};\n"
+
+        # Is compute_output actually empty?
+        truth = "false"
+        if self.is_output_empty():
+            truth = "true"
+        cpp += "  " + f"static constexpr bool is_output_empty = {truth};\n"
+
+        # Add the output statement
+        if len(self.outputs) > 0:
+            using = self._get_using_statement(
+                name="output", template_name=using_template
+            )
+            cpp += "  " + using + ";\n"
+            cpp += (
+                "  "
+                + f"static constexpr int noutputs = Output<{template_name}>::ncomp;\n"
+            )
+        else:
+            cpp += (
+                "  "
+                + f"template<typename {using_template}> "
+                + f"using Output = typename A2D::VarTuple<{using_template}, {using_template}>;\n"
+            )
+            cpp += "  " + "static constexpr int noutputs = 0;\n"
+
+        return cpp
+
     def generate_cpp(
         self,
         template_name="T__",
@@ -1063,6 +868,15 @@ class Component:
 
         cpp = ""
 
+        # Initialize the multipliers that are added to the inputs
+        self._initialize_multipliers()
+
+        # Make lists of the constants
+        consts = [self.constants[name] for name in self.constants]
+        data = [self.data[name] for name in self.data]
+        inputs = [self.inputs[name] for name in self.inputs]
+        inputs += [self.multipliers[name] for name in self.multipliers]
+
         for index, args in enumerate(self.args):
             # Re-initialize any variables or other arguments
             self.clear()
@@ -1078,68 +892,28 @@ class Component:
             else:
                 class_name = self.name + str(index) + "__"
 
-            # Create the class structure
-            cpp += "\n" + f"template<typename {template_name}> \n"
-            cpp += f"class {class_name} " + "{\n"
-            cpp += " public:\n"
-
-            # Add the const declarations
-            const_decl = self.constants.generate_cpp_const_decl()
-            for line in const_decl:
-                cpp += "  " + line + ";\n"
-
-            # Add the input statement
-            if len(self.inputs) + len(self.constraints) > 0:
-                using = self._get_using_statement(
-                    name="input", template_name=using_template
-                )
-                cpp += "  " + using + ";\n"
-                cpp += (
-                    "  "
-                    + f"static constexpr int ncomp = Input<{template_name}>::ncomp;\n"
-                )
-            else:
-                cpp += (
-                    "  "
-                    + f"template <typename {using_template}> using Input = "
-                    + f"typename A2D::VarTuple<{using_template}, {using_template}>;\n"
-                )
-                cpp += "  " + "static constexpr int ncomp = 0;\n"
-
-            # Add the data statement
-            if len(self.data) > 0:
-                using = self._get_using_statement(
-                    name="data", template_name=using_template
-                )
-                cpp += "  " + using + ";\n"
-                cpp += (
-                    "  "
-                    + f"static constexpr int ndata = Data<{template_name}>::ncomp;\n"
-                )
-            else:
-                cpp += (
-                    "  "
-                    + f"template <typename {using_template}> using Data = "
-                    + f"typename A2D::VarTuple<{using_template}, {using_template}>;\n"
-                )
-                cpp += "  " + "static constexpr int ndata = 0;\n"
-
-            # Is compute actually empty
-            truth = "false"
-            if self.is_compute_empty():
-                truth = "true"
-            cpp += "  " + f"static constexpr bool is_compute_empty = {truth};\n"
-
-            # Is this a continuation component or not
-            truth = "false"
-            if self.is_continuation_component():
-                truth = "true"
-            cpp += (
-                "  " + f"static constexpr bool is_continuation_component = {truth};\n"
+            cpp += self._generate_cpp_class_types(
+                class_name, template_name=template_name, using_template=using_template
             )
 
-            for mode in ["eval", "rev", "hprod"]:
+            # Get the expression for the Lagrangian
+            rhs, lhs = self._compute_lagrangian()
+
+            if rhs is None:
+                rhs = []
+            if lhs is None:
+                lhs = []
+
+            # Get any variables that might have been set
+            vars = [self.vars[name] for name in self.vars]
+
+            # Create the expression builder
+            builder = ExprBuilder(consts, data, inputs, vars, rhs=rhs, lhs=lhs)
+
+            for mode in ["eval", "grad", "hprod"]:
                 cpp += self._generate_compute_cpp(
+                    builder,
+                    lhs,
                     mode,
                     template_name=using_template,
                     data_name=data_name,
@@ -1159,31 +933,20 @@ class Component:
             else:
                 self.compute_output()
 
-            # Add the output statement
-            if len(self.outputs) > 0:
-                using = self._get_using_statement(
-                    name="output", template_name=using_template
-                )
-                cpp += "  " + using + ";\n"
-                cpp += (
-                    "  "
-                    + f"static constexpr int noutputs = Output<{template_name}>::ncomp;\n"
-                )
-            else:
-                cpp += (
-                    "  "
-                    + f"template<typename {using_template}> "
-                    + f"using Output = typename A2D::VarTuple<{using_template}, {using_template}>;\n"
-                )
-                cpp += "  " + "static constexpr int noutputs = 0;\n"
+            # Get any variables that might have been set
+            vars = [self.vars[name] for name in self.vars]
 
-            # Is compute_output actually empty
-            truth = "false"
-            if self.is_output_empty():
-                truth = "true"
-            cpp += "  " + f"static constexpr bool is_output_empty = {truth};\n"
+            outputs, lhs = [], []
+            for name in self.outputs:
+                outputs.append(self.outputs[name])
+                lhs.append(self.outputs.get_var(name))
+
+            # Create the expression builder
+            builder = ExprBuilder(consts, data, inputs, vars, rhs=outputs, lhs=lhs)
 
             cpp += self._generate_output_cpp(
+                builder,
+                lhs,
                 template_name=using_template,
                 data_name=data_name,
                 input_name=input_name,
@@ -1196,6 +959,8 @@ class Component:
 
     def _generate_compute_cpp(
         self,
+        builder,
+        lhs,
         mode,
         template_name="T__",
         data_name="data__",
@@ -1217,7 +982,7 @@ class Component:
                 + f"Input<{template_name}>& {input_name}) "
                 + "{\n"
             )
-        elif mode == "rev":
+        elif mode == "grad":
             cpp += (
                 f"{pre} void gradient({template_name} alpha__, "
                 + f"Data<{template_name}>& {data_name}, "
@@ -1239,70 +1004,37 @@ class Component:
         is_empty = self.is_compute_empty()
 
         if not is_empty:
-            data_decl = self.data.generate_cpp_input_decl(
-                template_name=template_name, data_name=data_name
-            )
-            for line in data_decl:
-                cpp += "    " + line + ";\n"
-
-            in_decl = self.inputs.generate_cpp_input_decl(
+            decl, passive, active = builder.get_cpp_lines(
                 mode=mode,
                 template_name=template_name,
+                data_name=data_name,
                 input_name=input_name,
                 grad_name=grad_name,
                 prod_name=prod_name,
                 hprod_name=hprod_name,
             )
-            for line in in_decl:
-                cpp += "    " + line + ";\n"
 
-            offset = self.inputs.get_num_inputs()
-            con_decl = self.constraints.generate_cpp_input_decl(
-                mode=mode,
-                offset=offset,
-                template_name=template_name,
-                input_name=input_name,
-                grad_name=grad_name,
-                prod_name=prod_name,
-                hprod_name=hprod_name,
+            decl += builder.get_declarations(
+                [lhs], reference=False, mode=mode, template_name=template_name
             )
-            for line in con_decl:
-                cpp += "    " + line + ";\n"
-
-            var_decl = self.vars.generate_cpp_decl(
-                mode=mode, template_name=template_name
-            )
-            for line in var_decl:
-                cpp += "    " + line + ";\n"
-
-            con_decl = self.constraints.generate_cpp_decl(
-                mode=mode, template_name=template_name
-            )
-            for line in con_decl:
-                cpp += "    " + line + ";\n"
-
-            lines = self.vars.generate_passive_cpp()
-            for line in lines:
-                cpp += "    " + f"{line};\n"
-
-            obj_expr = self.objective.generate_cpp()
-            body = self.vars.generate_active_cpp(mode=mode)
-            body.extend(self.constraints.generate_cpp(mode=mode, obj_expr=obj_expr))
 
             if mode == "eval":
-                for line in body:
+                for line in decl + passive + active:
                     cpp += "    " + line + ";\n"
-                cpp += "    " + f"return {self.constraints.lagrangian_name};\n"
+                cpp += "    " + f"return {lhs.to_cpp()};\n"
             else:
+                for line in decl + passive:
+                    cpp += "    " + line + ";\n"
+
                 cpp += "    " + f"auto {stack_name} = A2D::MakeStack(\n"
-                for index, line in enumerate(body):
+                for index, line in enumerate(active):
                     cpp += "      " + line
-                    if index == len(body) - 1:
+                    if index == len(active) - 1:
                         cpp += ");\n"
                     else:
                         cpp += ",\n"
 
-                cpp += "    " + f"{self.constraints.lagrangian_name}.bvalue() = 1.0;\n"
+                cpp += "    " + f"{lhs.to_cpp()}.bvalue() = 1.0;\n"
                 cpp += "    " + f"{stack_name}.reverse();\n"
                 if mode == "hprod":
                     cpp += "    " + f"{stack_name}.hforward();\n"
@@ -1317,6 +1049,8 @@ class Component:
 
     def _generate_output_cpp(
         self,
+        builder,
+        lhs,
         template_name="R__",
         data_name="data__",
         input_name="input__",
@@ -1331,53 +1065,17 @@ class Component:
             + f"Output<{template_name}>& {output_name})"
             + " {\n"
         )
-        data_decl = self.data.generate_cpp_input_decl(
-            template_name=template_name, data_name=data_name
-        )
-        for line in data_decl:
-            cpp += "    " + line + ";\n"
 
-        in_decl = self.inputs.generate_cpp_input_decl(
-            mode="eval",
-            template_name=template_name,
-            input_name=input_name,
-        )
-        for line in in_decl:
-            cpp += "    " + line + ";\n"
+        if not self.is_output_empty():
+            decl, passive, active = builder.get_cpp_lines(
+                mode="eval", template_name=template_name, data_name=data_name
+            )
+            decl += builder.get_input_declarations(
+                lhs, mode="eval", template_name=template_name, input_name=data_name
+            )
 
-        offset = self.inputs.get_num_inputs()
-        con_decl = self.constraints.generate_cpp_input_decl(
-            mode="eval",
-            offset=offset,
-            template_name=template_name,
-            input_name=input_name,
-        )
-        for line in con_decl:
-            cpp += "    " + line + ";\n"
-
-        offset += self.constraints.get_num_constraints()
-        out_decl = self.outputs.generate_cpp_input_decl(
-            template_name=template_name,
-            output_name=output_name,
-        )
-        for line in out_decl:
-            cpp += "    " + line + ";\n"
-
-        var_decl = self.vars.generate_cpp_decl(mode="eval", template_name=template_name)
-        for line in var_decl:
-            cpp += "    " + line + ";\n"
-
-        body = self.vars.generate_passive_cpp()
-        for line in body:
-            cpp += "    " + line + ";\n"
-
-        body = self.vars.generate_active_cpp(mode="eval")
-        for line in body:
-            cpp += "    " + line + ";\n"
-
-        lines = self.outputs.generate_cpp()
-        for line in lines:
-            cpp += "    " + line + ";\n"
+            for line in decl + passive + active:
+                cpp += "    " + line + ";\n"
 
         cpp += "  }\n"
 

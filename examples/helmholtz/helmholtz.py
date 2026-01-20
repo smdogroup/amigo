@@ -33,7 +33,7 @@ def dot(N, u):
     return N[0] * u[0] + N[1] * u[1] + N[2] * u[2] + N[3] * u[3]
 
 
-def compute_detJ(xi, eta, X, Y, vars):
+def compute_detJ(xi, eta, X, Y):
     N, N_xi, N_ea = eval_shape_funcs(xi, eta)
 
     x_xi = dot(N_xi, X)
@@ -42,34 +42,33 @@ def compute_detJ(xi, eta, X, Y, vars):
     y_xi = dot(N_xi, Y)
     y_ea = dot(N_ea, Y)
 
-    vars["detJ"] = x_xi * y_ea - x_ea * y_xi
+    detJ = x_xi * y_ea - x_ea * y_xi
 
-    return x_xi, x_ea, y_xi, y_ea
+    return x_xi, x_ea, y_xi, y_ea, detJ
 
 
-def compute_shape_derivs(xi, eta, X, Y, vars):
+def compute_shape_derivs(xi, eta, X, Y):
     N, N_xi, N_ea = eval_shape_funcs(xi, eta)
 
-    x_xi, x_ea, y_xi, y_ea = compute_detJ(xi, eta, X, Y, vars)
-    detJ = vars["detJ"]
+    x_xi, x_ea, y_xi, y_ea, detJ = compute_detJ(xi, eta, X, Y)
 
-    invJ = vars["invJ"] = [[y_ea / detJ, -x_ea / detJ], [-y_xi / detJ, x_xi / detJ]]
+    invJ = [[y_ea / detJ, -x_ea / detJ], [-y_xi / detJ, x_xi / detJ]]
 
-    vars["Nx"] = [
+    Nx = [
         invJ[0][0] * N_xi[0] + invJ[1][0] * N_ea[0],
         invJ[0][0] * N_xi[1] + invJ[1][0] * N_ea[1],
         invJ[0][0] * N_xi[2] + invJ[1][0] * N_ea[2],
         invJ[0][0] * N_xi[3] + invJ[1][0] * N_ea[3],
     ]
 
-    vars["Ny"] = [
+    Ny = [
         invJ[0][1] * N_xi[0] + invJ[1][1] * N_ea[0],
         invJ[0][1] * N_xi[1] + invJ[1][1] * N_ea[1],
         invJ[0][1] * N_xi[2] + invJ[1][1] * N_ea[2],
         invJ[0][1] * N_xi[3] + invJ[1][1] * N_ea[3],
     ]
 
-    return N, N_xi, N_ea
+    return N, Nx, Ny, detJ
 
 
 class Helmholtz(am.Component):
@@ -108,18 +107,13 @@ class Helmholtz(am.Component):
         X = self.data["x_coord"]
         Y = self.data["y_coord"]
 
-        N, N_xi, N_ea = compute_shape_derivs(xi, eta, X, Y, self.vars)
+        N, Nx, Ny, detJ = compute_shape_derivs(xi, eta, X, Y)
+        x = dot(N, X)
+        y = dot(N, Y)
 
-        detJ = self.vars["detJ"]
-        Nx = self.vars["Nx"]
-        Ny = self.vars["Ny"]
-
-        x = self.vars["x"] = dot(N, X)
-        y = self.vars["y"] = dot(N, Y)
-
-        rho0 = self.vars["rho0"] = dot(N, rho)
-        rho_x = self.vars["rho_x"] = dot(Nx, rho)
-        rho_y = self.vars["rho_y"] = dot(Ny, rho)
+        rho0 = dot(N, rho)
+        rho_x = dot(Nx, rho)
+        rho_y = dot(Ny, rho)
 
         rhs = 1.0 - (x - 1) ** 2 + (y - 1) ** 2
         laplace = r * r * (rho_x * rho_x + rho_y * rho_y)
@@ -254,11 +248,11 @@ ans = problem.create_vector()
 g = problem.create_vector()
 rhs = problem.create_vector()
 
-problem.gradient(x, ans)
-problem.gradient(x, g)
+problem.gradient(1.0, x, ans)
+problem.gradient(1.0, x, g)
 
 start = time.perf_counter()
-problem.hessian(x, mat)
+problem.hessian(1.0, x, mat)
 end = time.perf_counter()
 print(f"Matrix computation time:    {end - start:.6f} seconds")
 
