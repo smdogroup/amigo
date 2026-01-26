@@ -726,6 +726,14 @@ div[class*="codeBlockContainer"] {
   color: #999 !important;
 }
 
+/* Hide footer on documentation pages (only show on homepage) */
+article .footer,
+.theme-doc-footer ~ .footer,
+[class*="docPage"] .footer,
+[class*="docRoot"] .footer {
+  display: none !important;
+}
+
 /* Hero section on homepage */
 .hero {
   background: linear-gradient(135deg, #007FA2 0%, #006684 100%);
