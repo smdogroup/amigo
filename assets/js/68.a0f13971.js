@@ -1,1 +1,0 @@
-"use strict";(globalThis.webpackChunkamigo_docs=globalThis.webpackChunkamigo_docs||[]).push([[68],{5068:(o,s,a)=>{a.d(s,{useColorMode:()=>c.G});a(4586);var c=a(5293)}}]);

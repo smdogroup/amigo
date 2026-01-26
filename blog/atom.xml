@@ -6,7 +6,7 @@
     <generator>https://github.com/jpmonette/feed</generator>
     <link rel="alternate" href="https://smdogroup.github.io/amigo/blog"/>
     <subtitle>Amigo Blog</subtitle>
-    <icon>https://smdogroup.github.io/amigo/img/favicon.ico</icon>
+    <icon>https://smdogroup.github.io/amigo/img/logo.svg</icon>
     <entry>
         <title type="html"><![CDATA[Welcome to Amigo Documentation]]></title>
         <id>https://smdogroup.github.io/amigo/blog/welcome</id>
