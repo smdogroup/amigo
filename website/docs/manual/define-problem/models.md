@@ -59,26 +59,26 @@ Linking establishes relationships between variables across components. The linki
 
 ### Basic Linking
 
-Link scalar variables:
+Link two inputs together (they become the same variable):
 
 ```python
-# Output of comp1 becomes input to comp2
-model.link("comp1.output", "comp2.input")
+# Link inputs from two components
+model.link("comp1.x", "comp2.x")
 ```
 
 ### Array Linking
 
-Link array elements or slices:
+Link array elements or slices (inputs to inputs):
 
 ```python
-# Link entire array
-model.link("comp1.forces[:3]", "comp2.loads[:3]")
+# Link entire array of inputs
+model.link("comp1.forces[:3]", "comp2.forces[:3]")
 
 # Link specific elements
-model.link("comp1.stress[0]", "comp2.load")
+model.link("comp1.load[0]", "comp2.load")
 
 # Link with different indices
-model.link("comp1.state[0:3]", "comp2.input[1:4]")
+model.link("comp1.state[0:3]", "comp2.state[1:4]")
 ```
 
 ### Linking Across Instances
@@ -88,9 +88,9 @@ For time-marching or sequential processes:
 ```python
 num_steps = 50
 
-# Link state at time k+1 to previous state at time k
-for k in range(num_steps):
-    model.link(f"dynamics.q[{k+1}, :]", f"dynamics.q_prev[{k}, :]")
+# Link state at end of step k to state at start of step k+1
+for k in range(num_steps - 1):
+    model.link(f"dynamics.q_end[{k}, :]", f"dynamics.q_start[{k+1}, :]")
 ```
 
 ### Linking Rules
@@ -162,38 +162,51 @@ Whenever you modify `compute()` methods, you must call `build_module()` again to
 import amigo as am
 
 # Define components
-class Source(am.Component):
+class Dynamics(am.Component):
     def __init__(self):
         super().__init__()
-        self.add_input("x", value=1.0, lower=0.0, upper=10.0)
-        self.add_output("y")
+        self.add_input("x", shape=2)  # Current state
+        self.add_input("u")           # Control input
+        self.add_input("x_next", shape=2)  # Next state
+        self.add_constraint("residual", shape=2)
     
     def compute(self):
-        self.outputs["y"] = self.inputs["x"]**2
+        x = self.inputs["x"]
+        u = self.inputs["u"]
+        x_next = self.inputs["x_next"]
+        
+        # Simple dynamics: x_next = f(x, u)
+        dt = 0.1
+        self.constraints["residual"] = [
+            x_next[0] - (x[0] + dt * x[1]),
+            x_next[1] - (x[1] + dt * u)
+        ]
 
-class Processor(am.Component):
+class Objective(am.Component):
     def __init__(self):
         super().__init__()
-        self.add_input("z")
-        self.add_output("w")
+        self.add_input("x_final", shape=2)
         self.add_objective("cost")
     
     def compute(self):
-        z = self.inputs["z"]
-        self.outputs["w"] = am.sqrt(z)
-        self.objective["cost"] = z
+        x = self.inputs["x_final"]
+        # Minimize distance from origin
+        self.objective["cost"] = x[0]**2 + x[1]**2
 
 # Build model
-model = am.Model("pipeline")
+model = am.Model("trajectory")
 
-# Add components
-model.add_component("source", 1, Source())
-model.add_component("proc", 3, Processor())
+# Add components (10 time steps)
+num_steps = 10
+model.add_component("dynamics", num_steps, Dynamics())
+model.add_component("obj", 1, Objective())
 
-# Link components
-model.link("source.y", "proc.z[0]")
-for i in range(2):
-    model.link(f"proc.w[{i}]", f"proc.z[{i+1}]")
+# Link states across time steps (input to input)
+for k in range(num_steps - 1):
+    model.link(f"dynamics.x_next[{k}, :]", f"dynamics.x[{k+1}, :]")
+
+# Link final state to objective (input to input)
+model.link(f"dynamics.x[{num_steps-1}, :]", "obj.x_final")
 
 # Build and initialize
 model.build_module()
@@ -213,16 +226,20 @@ You can add sub-models to a model by calling `model.add_sub_model("sub_model", s
 wing = am.Model("wing")
 wing.add_component("aero", 1, AeroComponent())
 wing.add_component("structure", 1, StructureComponent())
-wing.link("aero.pressure", "structure.loads")
+# Link shared input between components (e.g., both need velocity)
+wing.link("aero.velocity", "structure.velocity")
 
 # Create main aircraft model
 aircraft = am.Model("aircraft")
 aircraft.add_sub_model("left_wing", wing)
 aircraft.add_sub_model("right_wing", wing)
 
-# Link between sub-models
-aircraft.link("left_wing.structure.weight", "total_weight")
-aircraft.link("right_wing.structure.weight", "total_weight")
+# Add a component that takes total weight as input
+aircraft.add_component("performance", 1, PerformanceComponent())
+
+# Link wing weight inputs to performance component (input to input)
+aircraft.link("left_wing.structure.weight_input", "performance.weight_left")
+aircraft.link("right_wing.structure.weight_input", "performance.weight_right")
 ```
 
 Variable paths in sub-models use the format: `sub_model_name.component_name.variable_name`

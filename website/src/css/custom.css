@@ -1,10 +1,9 @@
 /**
  * Amigo Documentation Custom Styles
- * Inspired by control-toolbox.org (Documenter.jl theme)
  */
 
 :root {
-  /* Primary colors - blue theme like control-toolbox */
+  /* Primary colors - blue theme */
   --ifm-color-primary: #4063D8;
   --ifm-color-primary-dark: #3454c7;
   --ifm-color-primary-darker: #2f4dbb;
@@ -12,11 +11,11 @@
   --ifm-color-primary-light: #5377e0;
   --ifm-color-primary-lighter: #5f81e3;
   --ifm-color-primary-lightest: #7a96eb;
-  
-  /* Navbar teal color from control-toolbox */
-  --ifm-navbar-background-color: #007FA2;
-  --ifm-navbar-link-color: #CFD0CE;
-  --ifm-navbar-link-hover-color: rgba(255, 255, 255, 0.95);
+
+  /* Navbar blue color matching logo */
+  --ifm-navbar-background-color: #1B5299;
+  --ifm-navbar-link-color: rgba(255, 255, 255, 0.75);
+  --ifm-navbar-link-hover-color: rgba(255, 255, 255, 1);
 
   /* Secondary colors */
   --ifm-color-secondary: #4063D8;
@@ -28,15 +27,15 @@
   /* Background colors */
   --ifm-background-color: #ffffff;
   --ifm-background-surface-color: #f9fafb;
-  
+
   /* Code blocks */
   --ifm-code-font-size: 95%;
   --docusaurus-highlighted-code-line-bg: rgba(64, 99, 216, 0.1);
 
-  /* Font - exactly like control-toolbox (Documenter.jl) */
+  /* Font families */
   --ifm-font-family-base: 'Lato', 'Lato-Regular', 'Helvetica Neue', Helvetica, Arial, sans-serif;
   --ifm-font-family-monospace: 'JuliaMono', 'SFMono-Regular', 'Menlo', 'Consolas', 'Liberation Mono', monospace;
-  
+
   /* Spacing */
   --ifm-spacing-horizontal: 1.5rem;
   --ifm-navbar-height: 3.75rem;
@@ -58,14 +57,14 @@
   /* Standard dark mode backgrounds */
   --ifm-background-color: #18181b;
   --ifm-background-surface-color: #27272a;
-  
+
   /* Standard dark mode text colors */
   --ifm-font-color-base: #e4e4e7;
   --ifm-heading-color: #f4f4f5;
-  
-  /* Keep navbar teal in dark mode too */
-  --ifm-navbar-background-color: #007FA2;
-  
+
+  /* Keep navbar blue in dark mode too */
+  --ifm-navbar-background-color: #1B5299;
+
   --docusaurus-highlighted-code-line-bg: rgba(107, 138, 251, 0.15);
 }
 
@@ -84,11 +83,11 @@
 }
 
 /* Dark mode - Sidebar category headings */
-[data-theme='dark'] .menu__list-item-collapsible > .menu__link {
+[data-theme='dark'] .menu__list-item-collapsible>.menu__link {
   color: #f4f4f5;
 }
 
-[data-theme='dark'] .menu__list-item-collapsible > .menu__link:hover {
+[data-theme='dark'] .menu__list-item-collapsible>.menu__link:hover {
   background-color: rgba(255, 255, 255, 0.05);
   color: #ffffff;
 }
@@ -236,11 +235,17 @@
   color: #6b8afb;
 }
 
-/* Navbar styling - control-toolbox inspired */
+/* Navbar styling */
 .navbar {
   background-color: var(--ifm-navbar-background-color) !important;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
   border-bottom: none;
+}
+
+.navbar__logo {
+  height: 2.5rem !important;
+  width: auto !important;
+  margin-right: 0.5rem;
 }
 
 .navbar__title {
@@ -294,6 +299,34 @@
   display: none !important;
 }
 
+/* Dark/Light mode toggle icon - make it white */
+.navbar__items--right button[class*="colorModeToggle"] svg,
+.navbar__items--right button[class*="toggle"] svg,
+button[class*="colorModeToggle"] svg {
+  color: rgba(255, 255, 255, 0.75) !important;
+  fill: rgba(255, 255, 255, 0.75) !important;
+}
+
+.navbar__items--right button[class*="colorModeToggle"]:hover svg,
+.navbar__items--right button[class*="toggle"]:hover svg,
+button[class*="colorModeToggle"]:hover svg {
+  color: rgba(255, 255, 255, 1) !important;
+  fill: rgba(255, 255, 255, 1) !important;
+}
+
+/* Remove background highlight from dark mode toggle */
+.navbar__items--right button[class*="colorModeToggle"],
+.navbar__items--right button[class*="toggle"],
+button[class*="colorModeToggle"] {
+  background: transparent !important;
+}
+
+.navbar__items--right button[class*="colorModeToggle"]:hover,
+.navbar__items--right button[class*="toggle"]:hover,
+button[class*="colorModeToggle"]:hover {
+  background: transparent !important;
+}
+
 /* Dropdown menu styling */
 .dropdown__menu {
   background-color: #ffffff;
@@ -308,43 +341,21 @@
   color: #007FA2 !important;
 }
 
-/* Sidebar styling - inspired by Documenter.jl */
+/* Sidebar styling */
 .theme-doc-sidebar-container {
   background-color: var(--ifm-background-surface-color);
   border-right: 1px solid var(--ifm-toc-border-color);
 }
 
-/* Search bar styling in sidebar */
-.theme-doc-sidebar-container input[type="text"] {
-  background-color: var(--ifm-background-color);
-  color: var(--ifm-font-color-base);
-  border: 1px solid var(--ifm-color-emphasis-300);
-}
-
-.theme-doc-sidebar-container input[type="text"]::placeholder {
-  color: var(--ifm-color-emphasis-600);
-  font-style: italic;
-}
-
-[data-theme='dark'] .theme-doc-sidebar-container input[type="text"] {
-  background-color: #18181b;
-  color: #e4e4e7;
-  border-color: #52525b;
-}
-
-[data-theme='dark'] .theme-doc-sidebar-container input[type="text"]::placeholder {
-  color: #71717a;
-}
-
 /* Sidebar category headings - black and bold */
-.menu__list-item-collapsible > .menu__link {
+.menu__list-item-collapsible>.menu__link {
   color: #1a1a1a;
   font-weight: 700;
   font-size: 0.95rem;
   padding: 0.5rem 0.75rem;
 }
 
-.menu__list-item-collapsible > .menu__link:hover {
+.menu__list-item-collapsible>.menu__link:hover {
   background-color: rgba(0, 0, 0, 0.03);
   color: #000000;
 }
@@ -369,7 +380,7 @@
 ul.menu__list,
 .menu__list-item-collapsible,
 .theme-doc-sidebar-item-category,
-.theme-doc-sidebar-item-category > *,
+.theme-doc-sidebar-item-category>*,
 .theme-doc-sidebar-item-link,
 nav.menu,
 .theme-doc-sidebar-container * {
@@ -393,7 +404,7 @@ nav.menu,
   background-color: #e8e8e8;
   color: #1a1a1a;
   font-weight: 600;
-  border-left: 3px solid #007FA2;
+  border-left: 3px solid #699bde;
   border-radius: 0;
 }
 
@@ -475,10 +486,10 @@ div[align="center"] p {
   margin-bottom: 0.5rem;
 }
 
-/* Style figure captions - all figures same teal color */
+/* Style figure captions - blue color */
 div[align="center"] p strong,
 p[align="center"] strong {
-  color: #005F73;
+  color: #1B5299;
   font-weight: 600;
 }
 
@@ -493,7 +504,7 @@ a.hash-link {
 }
 
 .markdown h1 {
-  color: #005F73;
+  color: #1B5299;
   font-weight: 600;
   font-size: 2rem;
   margin-bottom: 2.5rem;
@@ -502,7 +513,7 @@ a.hash-link {
 }
 
 .markdown h2 {
-  color: #005F73;
+  color: #1B5299;
   font-weight: 600;
   font-size: 2rem;
   margin-top: 2.5rem;
@@ -512,7 +523,7 @@ a.hash-link {
 }
 
 .markdown h3 {
-  color: #007FA2;
+  color: #3d6bc0;
   font-weight: 600;
   font-size: 1.5rem;
   margin-top: 1.5rem;
@@ -522,8 +533,8 @@ a.hash-link {
 }
 
 .markdown h4 {
-  color: #007FA2;
-  font-weight: 600;
+  color: #4d7acc;
+  font-weight: 500;
   font-size: 1.25rem;
   border-bottom: none;
   padding-bottom: 0;
@@ -559,7 +570,7 @@ div[class*="codeBlockContainer"] {
   border-color: var(--ifm-color-emphasis-400);
 }
 
-/* Admonitions - control-toolbox style */
+/* Admonitions */
 .theme-admonition {
   border: 2px solid #3C5DCD !important;
   border-radius: 3px !important;
@@ -570,7 +581,7 @@ div[class*="codeBlockContainer"] {
 }
 
 /* Remove inner div styling */
-.theme-admonition > div {
+.theme-admonition>div {
   border: none !important;
   padding: 0 !important;
   margin: 0 !important;
@@ -695,17 +706,27 @@ div[class*="codeBlockContainer"] {
 
 /* Footer - smaller, minimal */
 .footer {
-  background-color: var(--ifm-background-surface-color);
-  border-top: 1px solid var(--ifm-toc-border-color);
+  background-color: #f5f5f5 !important;
+  border-top: 1px solid #e5e5e5;
   padding: 1rem 0;
 }
 
 .footer__copyright {
   font-size: 0.85rem;
   margin: 0;
+  color: #666 !important;
 }
 
-/* Hero section on homepage - teal gradient like control-toolbox */
+[data-theme='dark'] .footer {
+  background-color: #1a1a1a !important;
+  border-top-color: #333;
+}
+
+[data-theme='dark'] .footer__copyright {
+  color: #999 !important;
+}
+
+/* Hero section on homepage */
 .hero {
   background: linear-gradient(135deg, #007FA2 0%, #006684 100%);
   color: white;
@@ -763,14 +784,8 @@ div[class*="codeBlockContainer"] {
 }
 
 .feature h3 {
-  color: var(--ifm-color-primary);
+  color: #1B5299;
   font-weight: 700;
-}
-
-/* Search bar */
-.DocSearch-Button {
-  border-radius: 6px;
-  border: 1px solid var(--ifm-toc-border-color);
 }
 
 /* Pagination - show both prev and next with page names */
@@ -832,7 +847,7 @@ div[class*="codeBlockContainer"] {
   content: " »";
 }
 
-/* Breadcrumbs - gray like control-toolbox */
+/* Breadcrumbs */
 .breadcrumbs {
   margin-bottom: 1rem;
 }
@@ -940,19 +955,30 @@ li[class*="category"] {
 
 /* Target any nested containers */
 .theme-doc-sidebar-item-category ul,
-.theme-doc-sidebar-item-category > ul,
+.theme-doc-sidebar-item-category>ul,
 .theme-doc-sidebar-item-category .menu__list {
   border-radius: 0 !important;
 }
 
-/* Reference links - black with teal hover */
+/* All markdown links - consistent styling */
+.markdown a {
+  color: #000000;
+  text-decoration: none;
+}
+
+.markdown a:hover {
+  color: #1B5299;
+  text-decoration: none;
+}
+
+/* Reference links - same style */
 .markdown a:has(.ref-link) {
   color: #000000;
   text-decoration: none;
 }
 
 .markdown a:has(.ref-link):hover {
-  color: #007FA2;
+  color: #1B5299;
   text-decoration: none;
 }
 
@@ -969,4 +995,3 @@ iframe {
 [data-theme='dark'] iframe {
   border-color: var(--ifm-color-emphasis-400);
 }
-

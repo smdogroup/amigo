@@ -1,7 +1,7 @@
-/* Import Lato font from Google Fonts - exactly like control-toolbox */
+/* Import Lato font from Google Fonts */
 @import url('https://fonts.googleapis.com/css2?family=Lato:ital,wght@0,300;0,400;0,700;0,900;1,300;1,400;1,700;1,900&display=swap');
 
-/* Import JuliaMono for code blocks */
+/* Import monospace font for code blocks */
 @import url('https://cdn.jsdelivr.net/npm/juliamono@0.050/webfonts/JuliaMono.css');
 
 /* Apply Lato as the primary font */
@@ -17,7 +17,7 @@ h1, h2, h3, h4, h5, h6 {
   font-weight: 700;
 }
 
-/* Code and monospace with JuliaMono */
+/* Code and monospace font */
 code, pre, .prism-code {
   font-family: 'JuliaMono', 'SFMono-Regular', 'Menlo', 'Consolas', 'Liberation Mono', monospace;
   font-variant-ligatures: none;

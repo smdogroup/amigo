@@ -7,7 +7,7 @@ import rehypeKatex from 'rehype-katex';
 const config: Config = {
   title: 'Amigo',
   tagline: 'A friendly library for MDO on HPC',
-  favicon: 'img/favicon.ico',
+  favicon: 'img/logo.svg',
 
   url: 'https://smdogroup.github.io',
   baseUrl: '/amigo/',
@@ -38,9 +38,33 @@ const config: Config = {
           editUrl: undefined,
         },
         theme: {
-          customCss: ['./src/css/fonts.css', './src/css/custom.css'],
+          customCss: ['./src/css/fonts.css', './src/css/custom.css', './src/css/search.css'],
         },
       } satisfies Preset.Options,
+    ],
+  ],
+
+  themes: [
+    [
+      require.resolve("@cmfcmf/docusaurus-search-local"),
+      {
+        indexDocs: true,
+        indexDocSidebarParentCategories: 0,
+        indexBlog: true,
+        indexPages: false,
+        language: "en",
+        style: undefined,
+        maxSearchResults: 8,
+        lunr: {
+          tokenizerSeparator: /[\s\-]+/,
+          b: 0.75,
+          k1: 1.2,
+          titleBoost: 5,
+          contentBoost: 1,
+          tagsBoost: 3,
+          parentCategoriesBoost: 2,
+        },
+      },
     ],
   ],
 
@@ -57,7 +81,12 @@ const config: Config = {
   themeConfig: {
     image: 'img/amigo-social-card.jpg',
     navbar: {
-      title: 'Amigo',
+      title: '',
+      logo: {
+        alt: 'Amigo Logo',
+        src: 'img/logo-white.svg',
+        srcDark: 'img/logo-white.svg',
+      },
       items: [
         {
           type: 'docSidebar',

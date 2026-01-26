@@ -33,3 +33,13 @@ include/amigo_include_paths.h
 # Virtual environments and packaging
 venv/
 amigo.egg-info/
+
+# Docusaurus / Node.js
+**/node_modules/
+website/build/
+website/.docusaurus/
+website/.cache/
+website/yarn-error.log
+website/npm-debug.log*
+logo/package-lock.json
+lib/

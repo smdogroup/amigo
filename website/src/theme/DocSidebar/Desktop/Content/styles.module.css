@@ -1,35 +1,30 @@
-.searchContainer {
+.sidebarSearchContainer {
   padding: 1rem 0.75rem;
   border-bottom: 1px solid var(--ifm-toc-border-color);
-}
-
-.searchInput {
-  width: 100%;
-  padding: 0.5rem 0.75rem;
-  border: 1px solid var(--ifm-color-emphasis-300);
-  border-radius: 6px;
-  fontSize: 0.9rem;
-  background-color: var(--ifm-background-color);
-  color: var(--ifm-font-color-base);
-  transition: border-color 0.2s ease;
-}
-
-.searchInput::placeholder {
-  color: var(--ifm-color-emphasis-600);
-  font-style: italic;
-}
-
-.searchInput:focus {
-  border-color: var(--ifm-color-primary);
-  outline: none;
-}
-
-[data-theme='dark'] .searchInput {
   background-color: var(--ifm-background-surface-color);
-  border-color: var(--ifm-color-emphasis-400);
 }
 
-[data-theme='dark'] .searchInput:focus {
-  border-color: var(--ifm-color-primary);
+.sidebarSearchContainer :global(.DocSearch-Button) {
+  width: 100%;
+  background-color: var(--ifm-background-color) !important;
+  border: 1px solid var(--ifm-color-emphasis-300) !important;
+  border-radius: 6px !important;
+  padding: 0.5rem 0.75rem !important;
+  margin: 0 !important;
+}
+
+.sidebarSearchContainer :global(.DocSearch-Button):hover {
+  background-color: var(--ifm-background-color) !important;
+  border-color: var(--ifm-color-primary) !important;
+  box-shadow: none !important;
+}
+
+[data-theme='dark'] .sidebarSearchContainer :global(.DocSearch-Button) {
+  background-color: var(--ifm-background-surface-color) !important;
+  border-color: var(--ifm-color-emphasis-400) !important;
+}
+
+[data-theme='dark'] .sidebarSearchContainer :global(.DocSearch-Button):hover {
+  border-color: var(--ifm-color-primary) !important;
 }
 
