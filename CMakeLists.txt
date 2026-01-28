@@ -22,9 +22,10 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 # Set the CUDSS directory
 set(CUDSS_HOME "$ENV{CUDSS_HOME}" CACHE PATH "Path to cuDSS installation")
 
-# Enable alternative operator keywords (and, or, not) for MSVC
+# MSVC: Enable C++17 conformance mode and conforming preprocessor
+# This allows C++ alternative tokens (and, or, not, etc.) to work correctly
 if(MSVC)
-  add_compile_options(/permissive-)
+  add_compile_options(/permissive- /Zc:preprocessor)
 endif()
 
 # Find Python early (needed for Windows auto-detection)
@@ -62,9 +63,9 @@ if(AMIGO_ENABLE_CUDA)
   endif()
 endif()
 
-#Windows-specific setup:
+# Windows-specific dependency detection
 if(WIN32)
-  # Auto-detect MKL in Python venv if BLAS/LAPACK not manually specified
+  # Auto-detect Intel MKL in Python venv for BLAS/LAPACK
   if(NOT DEFINED BLAS_LIBRARIES OR NOT DEFINED LAPACK_LIBRARIES)
     execute_process(
       COMMAND "${Python3_EXECUTABLE}" -c "import os, sys; print(os.path.join(sys.prefix, 'Library'))"
@@ -82,7 +83,7 @@ if(WIN32)
     endif()
   endif()
   
-  # Auto-detect MS-MPI if not manually specified
+  # Auto-detect Microsoft MPI SDK
   if(NOT DEFINED MPI_CXX_INCLUDE_PATH OR NOT DEFINED MPI_CXX_LIBRARIES)
     set(MSMPI_SDK_PATH "C:/Program Files (x86)/Microsoft SDKs/MPI")
     if(EXISTS "${MSMPI_SDK_PATH}/Include/mpi.h")
@@ -93,12 +94,9 @@ if(WIN32)
   endif()
 endif()
 
-# Dependencies:
-# Ask CMake to locate BLAS and LAPACK.
+# Find required dependencies
 find_package(BLAS REQUIRED)
 find_package(LAPACK REQUIRED)
-
-# MPI (C++ API) for code that uses MPI
 find_package(MPI REQUIRED COMPONENTS CXX)
 
 # OpenMP (optional)

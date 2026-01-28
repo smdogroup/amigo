@@ -8,3 +8,7 @@ pre-commit>=3.5.0
 mpi4py
 networkx
 pyvis
+
+# Windows-specific dependencies (automatically skipped on other platforms)
+mkl; sys_platform == 'win32'
+mkl-devel; sys_platform == 'win32'
