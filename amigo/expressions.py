@@ -1,8 +1,15 @@
+# Convert from/to strings to/from type
+_type_to_str = {float: "float", int: "int"}
+_str_to_type = {"float": float, "int": int}
+
+
 def _normalize_shape(shape):
     if shape is None:
         return None
     if isinstance(shape, int):
         shape = (shape,)
+    elif isinstance(shape, list):
+        return tuple(shape)
     elif not isinstance(shape, tuple):
         raise TypeError("Expecting None, int or tuple")
     if not (len(shape) == 1 or len(shape) == 2):
@@ -11,7 +18,7 @@ def _normalize_shape(shape):
 
 
 class ExprNode:
-    def to_key(self):
+    def serialize(self):
         raise NotImplementedError
 
     def to_cpp(self):
@@ -31,8 +38,8 @@ class ConstNode(ExprNode):
         self.value = value
         self.type = type
 
-    def to_key(self):
-        return ("const", self.name, self.value, self.type)
+    def serialize(self):
+        return ("const", self.name, self.value, _type_to_str[self.type])
 
     def to_cpp(self):
         if self.name is not None:
@@ -54,8 +61,8 @@ class VarNode(ExprNode):
         self.type = type
         self.active = active
 
-    def to_key(self):
-        return ("var", self.name, self.shape, self.type, self.active)
+    def serialize(self):
+        return ("var", self.name, self.shape, _type_to_str[self.type], self.active)
 
     def to_cpp(self):
         return self.name
@@ -73,8 +80,8 @@ class IndexNode(ExprNode):
         self.expr = expr
         self.index = index
 
-    def to_key(self):
-        return ("index", self.expr.to_key(), self.index)
+    def serialize(self):
+        return ("index", self.expr.serialize(), self.index)
 
     def to_cpp(self):
         arr = self.expr.to_cpp()
@@ -94,8 +101,8 @@ class PassiveNode(ExprNode):
     def __init__(self, expr):
         self.expr = expr
 
-    def to_key(self):
-        return ("passive", self.expr.to_key())
+    def serialize(self):
+        return ("passive", self.expr.serialize())
 
     def to_cpp(self):
         a = self.expr.to_cpp()
@@ -114,8 +121,8 @@ class UnaryNode(ExprNode):
         self.op = op
         self.expr = expr
 
-    def to_key(self):
-        return ("unary", self.op, self.expr.to_key())
+    def serialize(self):
+        return ("unary", self.op, self.expr.serialize())
 
     def to_cpp(self):
         a = self.expr.to_cpp()
@@ -154,8 +161,8 @@ class BinaryNode(ExprNode):
         self.left = left
         self.right = right
 
-    def to_key(self):
-        return ("binary", self.op, self.left.to_key(), self.right.to_key())
+    def serialize(self):
+        return ("binary", self.op, self.left.serialize(), self.right.serialize())
 
     def to_cpp(self):
         a = self.left.to_cpp()
@@ -210,7 +217,6 @@ def _to_expr(val):
 
 class Expr:
     def __init__(self, node: ExprNode):
-        self.name = None
         self.node = node
 
     def __neg__(self):
@@ -282,12 +288,29 @@ class Expr:
         else:
             raise TypeError("You can only index variables, not general expressions")
 
-    def to_key(self):
-        return self.node.to_key()
+    def serialize(self):
+        return self.node.serialize()
 
-    def to_cpp(self, use_vars=True):
-        if use_vars and self.name is not None:
-            return self.name
+    @classmethod
+    def deserialize(cls, d):
+        if d[0] == "const":
+            return cls(ConstNode(name=d[1], value=d[2], type=_str_to_type[d[3]]))
+        elif d[0] == "var":
+            return cls(
+                VarNode(name=d[1], shape=d[2], type=_str_to_type[d[3]], active=d[4])
+            )
+        elif d[0] == "index":
+            return cls(IndexNode(cls.deserialize(d[1]), d[2]))
+        elif d[0] == "passive":
+            return cls(PassiveNode(cls.deserialize(d[1])))
+        elif d[0] == "unary":
+            return cls(UnaryNode(d[1], cls.deserialize(d[2])))
+        elif d[0] == "binary":
+            return cls(BinaryNode(d[1], cls.deserialize(d[2]), cls.deserialize(d[3])))
+        else:
+            return ValueError("Unrecognized operation type in deserialize")
+
+    def to_cpp(self):
         return self.node.to_cpp()
 
     def set_active_flag(self, flag):
@@ -321,10 +344,6 @@ class ExprBuilder:
             self.lhs = [lhs]
         else:
             raise TypeError("Unrecognized lhs type")
-
-        # Convert from/to strings to/from type
-        self.type_to_str = {float: "float", int: "int"}
-        self.str_to_type = {"float": float, "int": int}
 
         # Initialize the internal data
         self.counter = 0
@@ -399,7 +418,7 @@ class ExprBuilder:
         return
 
     def _serialize_expr(self, e: Expr):
-        key = e.to_key()
+        key = e.serialize()
         if key in self.key_to_id:
             return self.key_to_id[key]
 
@@ -409,14 +428,14 @@ class ExprBuilder:
                 "type": "const",
                 "name": node.name,
                 "value": node.value,
-                "vartype": self.type_to_str[node.type],
+                "vartype": _type_to_str[node.type],
             }
         elif isinstance(node, VarNode):
             info = {
                 "type": "var",
                 "name": node.name,
                 "shape": node.shape,
-                "vartype": self.type_to_str[node.type],
+                "vartype": _type_to_str[node.type],
                 "active": node.active,
             }
         elif isinstance(node, IndexNode):
@@ -453,9 +472,6 @@ class ExprBuilder:
 
         return count
 
-    def serialize(self):
-        return {"version": 1, "nodes": self.nodes}
-
     def _build_expr(self, idx):
         node = self.nodes[idx]
         if node["type"] == "const":
@@ -463,7 +479,7 @@ class ExprBuilder:
                 ConstNode(
                     name=node["name"],
                     value=node["value"],
-                    type=self.str_to_type[node["vartype"]],
+                    type=_str_to_type[node["vartype"]],
                 )
             )
         elif node["type"] == "var":
@@ -471,7 +487,7 @@ class ExprBuilder:
                 VarNode(
                     name=node["name"],
                     shape=node["shape"],
-                    type=self.str_to_type[node["vartype"]],
+                    type=_str_to_type[node["vartype"]],
                     active=node["active"],
                 )
             )

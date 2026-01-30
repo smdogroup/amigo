@@ -2,6 +2,7 @@ import amigo as am
 import numpy as np  # used for plotting/analysis
 import argparse
 import time
+import json
 import matplotlib.pylab as plt
 from scipy.sparse import csr_matrix  # For visualization
 
@@ -212,6 +213,9 @@ elif args.order_type == "natural":
 order_for_block = args.order_for_block
 model.initialize(order_type=order_type, order_for_block=order_for_block, comm=comm)
 serial_problem = model.get_problem()
+
+with open("helmholtz_model.json", "w") as fp:
+    json.dump(model.serialize(), fp)
 
 end = time.perf_counter()
 if comm_rank == 0:

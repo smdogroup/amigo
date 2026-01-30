@@ -32,43 +32,6 @@ class RoeFlux(am.Component):
         # Compute the weights
         rhoL = QL[0]
         rhoR = QR[0]
-        # r = self.vars["r"] = am.sqrt(rhoR / rhoL)
-        # wL = self.vars["wL"] = r / (r + 1.0)
-        # wR = self.vars["wR"] = 1.0 - wL
-
-        # # Compute the left and right states
-        # uL = self.vars["uL"] = QL[1] / QL[0]
-        # pL = self.vars["pL"] = gam1 * (QL[2] - 0.5 * rhoL * uL * uL)
-        # HL = ggam1 * (pL / rhoL) + 0.5 * uL * uL
-
-        # uR = self.vars["uR"] = QR[1] / QR[0]
-        # pR = self.vars["pR"] = gam1 * (QR[2] - 0.5 * rhoR * uR * uR)
-        # HR = ggam1 * (pR / rhoR) + 0.5 * uR * uR
-
-        # # Compute the left and right fluxes
-        # FL = [rhoL * uL, rhoL * uL * uL + pL, rhoL * HL * uL]
-        # FR = [rhoR * uR, rhoR * uR * uR + pR, rhoR * HR * uR]
-
-        # # Compute the Roe averages
-        # rho = self.vars["rho"] = r * rhoL
-        # u = self.vars["u"] = wL * uL + wR * uR
-        # H = self.vars["H"] = wL * HL + wR * HR
-
-        # a = self.vars["a"] = am.sqrt(gam1 * (H - 0.5 * u * u))
-        # ainv = self.vars["ainv"] = 1.0 / a
-
-        # fp = self.vars["fp"] = ainv * ainv * (pR - pL)
-        # fu = self.vars["fu"] = (uR - uL) * rho * ainv
-
-        # # Entropy fix with a square root function
-        # h = self.vars["h"] = 0.05 * (am.abs(u) + a)
-        # lam1 = self.vars["lam1"] = am.sqrt(u * u + h * h / 4)
-        # lam2 = self.vars["lam2"] = am.sqrt((u + a) * (u + a) + h * h / 4)
-        # lam3 = self.vars["lam3"] = am.sqrt((u - a) * (u - a) + h * h / 4)
-
-        # w0 = self.vars["w0"] = ((rhoR - rhoL) - fp) * lam1
-        # w1 = self.vars["w1"] = (0.5 * (fp + fu)) * lam2
-        # w2 = self.vars["w2"] = (0.5 * (fp - fu)) * lam3
 
         r = am.sqrt(rhoR / rhoL)
         wL = r / (r + 1.0)
@@ -141,8 +104,8 @@ class Nozzle(am.Component):
 
         # Compute the pressure
         rho = Q[0]
-        u = self.vars["u"] = Q[1] / Q[0]
-        p = self.vars["p"] = gam1 * (Q[2] - 0.5 * rho * u * u)
+        u = Q[1] / Q[0]
+        p = gam1 * (Q[2] - 0.5 * rho * u * u)
 
         self.constraints["res"] = [
             (FR[0] - FL[0]) / dx,
@@ -170,7 +133,7 @@ class ExactNozzleMachCalc(am.Component):
         M = self.inputs["M"]
         A = self.inputs["A"]
 
-        fact = self.vars["fact"] = 1.0 + 0.5 * gam1 * M**2
+        fact = 1.0 + 0.5 * gam1 * M**2
         ratio = ((2.0 / (gamma + 1.0)) * fact) ** ((gamma + 1.0) / (2 * gam1))
 
         self.constraints["res"] = ratio - (A / Astar) * M
@@ -212,12 +175,12 @@ class SubsonicInletFlux(am.Component):
 
         # Compute the velocity and speed of sound at the input
         rho_int = Q[0]
-        u_int = self.vars["u_int"] = Q[1] / Q[0]
-        p_int = self.vars["p_int"] = gam1 * (Q[2] - 0.5 * rho_int * u_int * u_int)
-        a_int = self.vars["a_int"] = am.sqrt(gamma * p_int / rho_int)
+        u_int = Q[1] / Q[0]
+        p_int = gam1 * (Q[2] - 0.5 * rho_int * u_int * u_int)
+        a_int = am.sqrt(gamma * p_int / rho_int)
 
         # Compute the isentropic factor
-        fact = self.vars["fact"] = 1.0 + 0.5 * gam1 * M_inlet * M_inlet
+        fact = 1.0 + 0.5 * gam1 * M_inlet * M_inlet
 
         # Compute the inlet speed of sound
         a_inlet = am.sqrt(T_res / fact)
@@ -226,17 +189,17 @@ class SubsonicInletFlux(am.Component):
         u_inlet = M_inlet * a_inlet
 
         # Compute the two invariants
-        invar_int = self.vars["invar_int"] = u_int - 2.0 * a_int / gam1
-        invar_inlet = self.vars["invar_inlet"] = u_inlet + 2.0 * a_inlet / gam1
+        invar_int = u_int - 2.0 * a_int / gam1
+        invar_inlet = u_inlet + 2.0 * a_inlet / gam1
 
         # Based on the invariants, compute the velocity and speed of sound
-        u_b = self.vars["u_b"] = 0.5 * (invar_int + invar_inlet)
-        a_b = self.vars["a_b"] = 0.25 * gam1 * (invar_inlet - invar_int)
-        rho_b = self.vars["rho_b"] = (a_b * a_b * S_res / gamma) ** (1.0 / gam1)
+        u_b = 0.5 * (invar_int + invar_inlet)
+        a_b = 0.25 * gam1 * (invar_inlet - invar_int)
+        rho_b = (a_b * a_b * S_res / gamma) ** (1.0 / gam1)
 
         # Compute the remaining states
-        p_b = self.vars["p_b"] = rho_b * a_b * a_b / gamma
-        H_b = self.vars["H_b"] = ggam1 * p_b / rho_b + 0.5 * u_b * u_b
+        p_b = rho_b * a_b * a_b / gamma
+        H_b = ggam1 * p_b / rho_b + 0.5 * u_b * u_b
 
         # Compute the constraints
         self.constraints["res"] = [
@@ -280,33 +243,33 @@ class SubsonicOutletFlux(am.Component):
 
         # Compute the velocity and speed of sound at the input
         rho_int = Q[0]
-        u_int = self.vars["u_int"] = Q[1] / Q[0]
-        p_int = self.vars["p_int"] = gam1 * (Q[2] - 0.5 * rho_int * u_int * u_int)
-        a_int = self.vars["a_int"] = am.sqrt(gamma * p_int / rho_int)
-        S_int = self.vars["S_int"] = rho_int**gamma / p_int
+        u_int = Q[1] / Q[0]
+        p_int = gam1 * (Q[2] - 0.5 * rho_int * u_int * u_int)
+        a_int = am.sqrt(gamma * p_int / rho_int)
+        S_int = rho_int**gamma / p_int
 
         # Compute the isentropic factor
-        fact = self.vars["fact"] = 1.0 + 0.5 * gam1 * M_outlet * M_outlet
+        fact = 1.0 + 0.5 * gam1 * M_outlet * M_outlet
 
         # Compute the outlet speed of sound and velocity
         a_outlet = am.sqrt(T_res / fact)
         u_outlet = M_outlet * a_outlet
 
         # Compute the two invariants
-        invar_int = self.vars["invar_int"] = u_int + 2.0 * a_int / gam1
-        S_int = self.vars["S_int"] = rho_int**gamma / p_int
+        invar_int = u_int + 2.0 * a_int / gam1
+        S_int = rho_int**gamma / p_int
 
         # Compute the invariants
-        invar_outlet = self.vars["invar_outlet"] = u_outlet - 2.0 * a_outlet / gam1
+        invar_outlet = u_outlet - 2.0 * a_outlet / gam1
 
         # Based on the invariants, compute the velocity and speed of sound
-        u_b = self.vars["u_b"] = 0.5 * (invar_int + invar_outlet)
-        a_b = self.vars["a_b"] = 0.25 * gam1 * (invar_outlet - invar_int)
-        rho_b = self.vars["rho_b"] = (a_b * a_b * S_int / gamma) ** (1.0 / gam1)
+        u_b = 0.5 * (invar_int + invar_outlet)
+        a_b = 0.25 * gam1 * (invar_outlet - invar_int)
+        rho_b = (a_b * a_b * S_int / gamma) ** (1.0 / gam1)
 
         # Compute the remaining states
-        p_b = self.vars["p_b"] = rho_b * a_b * a_b / gamma
-        H_b = self.vars["H_b"] = ggam1 * p_b / rho_b + 0.5 * u_b * u_b
+        p_b = rho_b * a_b * a_b / gamma
+        H_b = ggam1 * p_b / rho_b + 0.5 * u_b * u_b
 
         self.constraints["res"] = [
             F[0] - A_outlet * rho_b * u_b,
@@ -339,8 +302,8 @@ class Objective(am.Component):
 
         # Compute the pressure
         rho = Q[0]
-        u = self.vars["u"] = Q[1] / Q[0]
-        p = self.vars["p"] = gam1 * (Q[2] - 0.5 * rho * u * u)
+        u = Q[1] / Q[0]
+        p = gam1 * (Q[2] - 0.5 * rho * u * u)
 
         self.objective["obj"] = dx * (p - p0) ** 2
 
@@ -388,11 +351,11 @@ class PseudoTransient(am.Component):
         q2 = Qp[2]
 
         # Compute the time step
-        u = self.vars["u"] = q1 / rho
-        p = self.vars["p"] = gam1 * (q2 - 0.5 * rho * u * u)
+        u = q1 / rho
+        p = gam1 * (q2 - 0.5 * rho * u * u)
         a = am.sqrt(gamma * p / rho)
         V = a + am.fabs(u)
-        dt = self.vars["dt"] = dx * CFL / V
+        dt = dx * CFL / V
 
         self.constraints["res"] = [Q[0] / dt, Q[1] / dt, Q[2] / dt]
 

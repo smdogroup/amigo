@@ -335,9 +335,6 @@ if comm is not None:
         distribute = True
 
 if comm_rank == 0:
-    with open("cart_pole_model.json", "w") as fp:
-        json.dump(model.get_serializable_data(), fp, indent=2)
-
     print(f"Num variables:              {model.num_variables}")
     print(f"Num constraints:            {model.num_constraints}")
 
@@ -384,6 +381,15 @@ for opt_iter in range(4):
         upper["cart.q"] = float("inf")
         upper["cart.qdot"] = float("inf")
         upper["cart.x"] = 50
+
+        # Serialize the model
+        with open("cart_pole_model.json", "w") as fp:
+            json.dump(model.serialize(), fp, indent=2)
+
+        # Serialize the vectors
+        vecs = {"data": data, "x": x, "lower": lower, "upper": upper}
+        with open("cart_pole_vectors.json", "w") as fp:
+            json.dump(model.serialize_vectors(vecs), fp, indent=2)
 
     # Set up the optimizer
     opt = am.Optimizer(
