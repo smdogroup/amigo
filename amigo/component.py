@@ -1172,8 +1172,10 @@ class Component:
             decl, passive, active = builder.get_cpp_lines(
                 mode="eval", template_name=template_name, data_name=data_name
             )
+
+            # Add the declarations for the output - this uses the input declarations code
             decl += builder.get_input_declarations(
-                lhs, mode="eval", template_name=template_name, input_name=data_name
+                lhs, mode="eval", template_name=template_name, input_name=output_name
             )
 
             for line in decl + passive + active:
