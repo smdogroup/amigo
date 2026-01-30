@@ -26,7 +26,7 @@ def dot(N, u):
     return N[0] * u[0] + N[1] * u[1] + N[2] * u[2] + N[3] * u[3]
 
 
-def compute_detJ(xi, eta, X, Y, vars):
+def compute_detJ(xi, eta, X, Y):
     N, N_xi, N_ea = eval_shape_funcs(xi, eta)
 
     x_xi = dot(N_xi, X)
@@ -35,34 +35,32 @@ def compute_detJ(xi, eta, X, Y, vars):
     y_xi = dot(N_xi, Y)
     y_ea = dot(N_ea, Y)
 
-    vars["detJ"] = x_xi * y_ea - x_ea * y_xi
+    detJ = x_xi * y_ea - x_ea * y_xi
 
-    return x_xi, x_ea, y_xi, y_ea
+    return x_xi, x_ea, y_xi, y_ea, detJ
 
 
-def compute_shape_derivs(xi, eta, X, Y, vars):
+def compute_shape_derivs(xi, eta, X, Y):
     N, N_xi, N_ea = eval_shape_funcs(xi, eta)
 
-    x_xi, x_ea, y_xi, y_ea = compute_detJ(xi, eta, X, Y, vars)
-    detJ = vars["detJ"]
+    x_xi, x_ea, y_xi, y_ea, detJ = compute_detJ(xi, eta, X, Y)
+    invJ = [[y_ea / detJ, -x_ea / detJ], [-y_xi / detJ, x_xi / detJ]]
 
-    invJ = vars["invJ"] = [[y_ea / detJ, -x_ea / detJ], [-y_xi / detJ, x_xi / detJ]]
-
-    vars["Nx"] = [
+    Nx = [
         invJ[0][0] * N_xi[0] + invJ[1][0] * N_ea[0],
         invJ[0][0] * N_xi[1] + invJ[1][0] * N_ea[1],
         invJ[0][0] * N_xi[2] + invJ[1][0] * N_ea[2],
         invJ[0][0] * N_xi[3] + invJ[1][0] * N_ea[3],
     ]
 
-    vars["Ny"] = [
+    Ny = [
         invJ[0][1] * N_xi[0] + invJ[1][1] * N_ea[0],
         invJ[0][1] * N_xi[1] + invJ[1][1] * N_ea[1],
         invJ[0][1] * N_xi[2] + invJ[1][1] * N_ea[2],
         invJ[0][1] * N_xi[3] + invJ[1][1] * N_ea[3],
     ]
 
-    return N, N_xi, N_ea
+    return N, Nx, Ny, detJ
 
 
 class Topology(am.Component):
@@ -117,31 +115,23 @@ class Topology(am.Component):
         # Extract the input data
         X = self.data["x_coord"]
         Y = self.data["y_coord"]
-        N, N_xi, N_ea = compute_shape_derivs(xi, eta, X, Y, self.vars)
 
-        # Set the values of the derivatives of the shape functions
-        Nx = self.vars["Nx"]
-        Ny = self.vars["Ny"]
+        # Compute the derivatives of the shape functions wrt x and y
+        N, Nx, Ny, detJ = compute_shape_derivs(xi, eta, X, Y)
 
         rho0 = dot(N, rho)
-        # self.vars["E0"] = E * (rho0**p + kappa)
-        E0 = self.vars["E0"] = E * (rho0 + kappa)
+        # E0 = E * (rho0**p + kappa)
+        E0 = E * (rho0 + kappa)
 
-        Ux = self.vars["Ux"] = [[dot(Nx, u), dot(Ny, u)], [dot(Nx, v), dot(Ny, v)]]
+        Ux = [[dot(Nx, u), dot(Ny, u)], [dot(Nx, v), dot(Ny, v)]]
+        e = [Ux[0][0], Ux[1][1], (Ux[0][1] + Ux[1][0])]
 
-        e = self.vars["e"] = [
-            Ux[0][0],
-            Ux[1][1],
-            (Ux[0][1] + Ux[1][0]),
-        ]
-
-        s = self.vars["s"] = [
+        s = [
             E0 / (1.0 - nu * nu) * (e[0] + nu * e[1]),
             E0 / (1.0 - nu * nu) * (e[1] + nu * e[0]),
             0.5 * E0 / (1.0 + nu) * e[2],
         ]
 
-        detJ = self.vars["detJ"]
         self.constraints["u_res"] = [
             detJ * (Nx[0] * s[0] + Ny[0] * s[2]),
             detJ * (Nx[1] * s[0] + Ny[1] * s[2]),
@@ -201,8 +191,7 @@ class MassConstraint(am.Component):
         X = self.data["x_coord"]
         Y = self.data["y_coord"]
 
-        compute_detJ(xi, eta, X, Y, self.vars)
-        detJ = self.vars["detJ"]
+        _, _, _, _, detJ = compute_detJ(xi, eta, X, Y)
         rho0 = 0.25 * (rho[0] + rho[1] + rho[2] + rho[3])
 
         self.constraints["mass_con"] = detJ * (rho0 - mass_fraction)
@@ -316,8 +305,8 @@ parser.add_argument(
 )
 args = parser.parse_args()
 
-nx = 256
-ny = 128
+nx = 32
+ny = 16
 
 nnodes = (nx + 1) * (ny + 1)
 nelems = nx * ny
@@ -455,13 +444,13 @@ end = time.perf_counter()
 print(f"Matrix initialization time: {end - start:.6f} seconds")
 
 start = time.perf_counter()
-prob.hessian(x.get_vector(), mat_obj)
+prob.hessian(1.0, x.get_vector(), mat_obj)
 end = time.perf_counter()
 print(f"Matrix computation time:    {end - start:.6f} seconds")
 
 grad = prob.create_vector()
 start = time.perf_counter()
-prob.gradient(x.get_vector(), grad)
+prob.gradient(1.0, x.get_vector(), grad)
 end = time.perf_counter()
 print(f"Residual computation time:  {end - start:.6f} seconds")
 
@@ -480,16 +469,25 @@ if args.use_lnks:
         gmres_subspace_size=50,
     )
 
+# Serialize the model
+with open("compliance_model.json", "w") as fp:
+    json.dump(model.serialize(), fp, indent=2)
+
+# Serialize the vectors
+vecs = {"data": data, "x": x, "lower": lower, "upper": upper}
+with open("compliance_vectors.json", "w") as fp:
+    json.dump(model.serialize_vectors(vecs), fp, indent=2)
+
 opt = am.Optimizer(model, x=x, lower=lower, upper=upper, solver=solver)
 
 options = {
-    "max_iterations": 100,
+    "max_iterations": 50,
     "initial_barrier_param": 0.1,
     "max_line_search_iterations": 1,
 }
 data = opt.optimize(options)
 
-with open("cart_opt_data.json", "w") as fp:
+with open("compliance_data.json", "w") as fp:
     json.dump(data, fp, indent=2)
 
 norms = []

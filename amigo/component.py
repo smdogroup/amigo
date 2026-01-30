@@ -1,3 +1,4 @@
+import types
 from .expressions import *
 from .expressions import _normalize_shape, _type_to_str, _str_to_type
 
@@ -601,7 +602,9 @@ class Component:
         # Set the compute function arguments
         self.args = [{}]
 
-        # Set whether this is a continuation component or not
+        # Set default flags
+        self.compute_empty = False
+        self.compute_output_empty = False
         self.continuation_component = False
 
         # Flag to keep track if the expressions are initialized
@@ -615,6 +618,8 @@ class Component:
         data = {}
         data["name"] = self.name
         data["args"] = self.args
+        data["compute_empty"] = self.compute_empty
+        data["compute_output_empty"] = self.compute_output_empty
         data["continuation_component"] = self.continuation_component
         data["constants"] = self.constants.serialize()
         data["inputs"] = self.inputs.serialize()
@@ -629,6 +634,8 @@ class Component:
     def deserialize(cls, data):
         obj = cls(name=data["name"])
         obj.args = data["args"]
+        obj.compute_empty = data["compute_empty"]
+        obj.compute_output_empty = data["compute_output_empty"]
         obj.continuation_component = data["continuation_component"]
         obj.constants = ConstantSet.deserialize(data["constants"])
         obj.inputs = InputSet.deserialize(data["inputs"])
@@ -636,6 +643,8 @@ class Component:
         obj.constraints = ConstraintSet.deserialize(data["constraints"])
         obj.objective = ObjectiveSet.deserialize(data["objective"])
         obj.outputs = OutputSet.deserialize(data["outputs"])
+
+        # The expressions in this object have been initialized
         obj.initialized = True
 
         return obj
@@ -665,6 +674,18 @@ class Component:
 
     def is_continuation_component(self):
         return self.continuation_component
+
+    def is_compute_empty(self):
+        if self.initialized:
+            return self.compute_empty
+        else:
+            return not self._is_overridden("compute")
+
+    def is_compute_output_empty(self):
+        if self.initialized:
+            return self.compute_output_empty
+        else:
+            return not self._is_overridden("compute_output")
 
     def add_constant(self, name, value, **kwargs):
         """
@@ -715,16 +736,6 @@ class Component:
 
     def compute_output(self, **kwargs):
         pass
-
-    def is_compute_empty(self):
-        if len(self.constraints) == 0 and len(self.objective) == 0:
-            return True
-        return False
-
-    def is_output_empty(self):
-        if len(self.outputs) == 0:
-            return True
-        return False
 
     def get_input_names(self):
         inputs = []
@@ -786,7 +797,22 @@ class Component:
 
         return
 
+    def _is_overridden(self, method_name):
+        instance_method = getattr(self, method_name)
+        base_method = getattr(type(self).__bases__[0], method_name, None)
+
+        # Unbind methods so we compare function objects directly
+        if isinstance(instance_method, types.MethodType):
+            instance_method = instance_method.__func__
+        if isinstance(base_method, types.MethodType):
+            base_method = base_method.__func__
+
+        return instance_method is not base_method
+
     def _initialize_expressions(self):
+        # Check if the functions are defined or not
+        self.compute_empty = not self._is_overridden("compute")
+        self.compute_output_empty = not self._is_overridden("compute_output")
 
         for index, args in enumerate(self.args):
             # Perform the computation to get the constraints and outputs
@@ -939,7 +965,7 @@ class Component:
 
         # Is compute_output actually empty?
         truth = "false"
-        if self.is_output_empty():
+        if self.is_compute_output_empty():
             truth = "true"
         cpp += "  " + f"static constexpr bool is_output_empty = {truth};\n"
 
@@ -1103,9 +1129,7 @@ class Component:
                 + " {\n"
             )
 
-        is_empty = self.is_compute_empty()
-
-        if not is_empty:
+        if not self.is_compute_empty():
             decl, passive, active = builder.get_cpp_lines(
                 mode=mode,
                 template_name=template_name,
@@ -1142,7 +1166,7 @@ class Component:
                     cpp += "    " + f"{stack_name}.hforward();\n"
                     cpp += "    " + f"{stack_name}.hreverse();\n"
 
-        if mode == "eval" and is_empty:
+        if mode == "eval" and self.is_compute_empty():
             cpp += "    " + f"return {template_name}(0.0);\n"
 
         cpp += "  }\n"
@@ -1168,7 +1192,7 @@ class Component:
             + " {\n"
         )
 
-        if not self.is_output_empty():
+        if not self.is_compute_output_empty():
             decl, passive, active = builder.get_cpp_lines(
                 mode="eval", template_name=template_name, data_name=data_name
             )
