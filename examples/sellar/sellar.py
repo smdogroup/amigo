@@ -1,5 +1,6 @@
 import amigo as am
 import argparse
+import json
 
 
 class Disp1(am.Component):
@@ -131,7 +132,8 @@ if args.build:
 
 model.initialize()
 
-# Set the starting point and the bounds
+# Get the vectors needed for the problem
+data = model.get_data_vector()
 x = model.create_vector()
 lower = model.create_vector()
 upper = model.create_vector()
@@ -154,6 +156,14 @@ upper["disp1.y2"] = float("inf")
 upper["disp1.z1"] = float("inf")
 upper["disp1.z2"] = float("inf")
 
+# Serialize the model
+with open("sellar_model.json", "w") as fp:
+    json.dump(model.serialize(), fp, indent=2)
+
+# Serialize the vectors
+vecs = {"data": data, "x": x, "lower": lower, "upper": upper}
+with open("sellar_vectors.json", "w") as fp:
+    json.dump(model.serialize_vectors(vecs), fp, indent=2)
 
 opt = am.Optimizer(model, x, lower=lower, upper=upper)
 data = opt.optimize(
