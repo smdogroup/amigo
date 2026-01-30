@@ -138,10 +138,10 @@ class CartComponent(am.Component):
         res = 4 * [None]
         res[0] = q[2] - qdot[0]
         res[1] = q[3] - qdot[1]
-        res[2] = (m1 + m2 * (1.0 - cost * cost)) * qdot[2] - (
+        res[2] = (m1 + m2 * sint**2) * qdot[2] - (
             L * m2 * sint * q[3] * q[3] * x + m2 * g * cost * sint
         )
-        res[3] = L * (m1 + m2 * (1.0 - cost * cost)) * qdot[3] + (
+        res[3] = L * (m1 + m2 * sint**2) * qdot[3] + (
             L * m2 * cost * sint * q[3] * q[3] + x * cost + (m1 + m2) * g * sint
         )
 
