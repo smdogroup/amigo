@@ -1,0 +1,18 @@
+# UQPCE input file for cart-pole robust optimal control
+# Uncertain parameters: pole mass (m2) and pole length (L)
+
+Variable 0:
+    name: m2
+    distribution: uniform
+    interval_low: 0.24
+    interval_high: 0.36
+
+Variable 1:
+    name: L
+    distribution: uniform
+    interval_low: 0.4
+    interval_high: 0.6
+
+Settings:
+    order: 3
+    significance: 0.05
