@@ -3,6 +3,8 @@ import amigo as am
 from pathlib import Path
 
 
+source_dir = Path(__file__).resolve().parent
+
 # Set the filenames
 filename = "cart_pole_model.json"
 vecfile = "cart_pole_vectors.json"
@@ -13,7 +15,6 @@ with open(filename, "r") as fp:
 model = am.Model.deserialize(data)
 
 # Build the model module
-source_dir = Path(__file__).resolve().parent
 model.build_module(source_dir=source_dir)
 
 # Initialize everything

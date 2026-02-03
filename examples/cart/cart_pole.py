@@ -73,22 +73,17 @@ class CartComponent(am.Component):
         q = self.inputs["q"]
         qdot = self.inputs["qdot"]
 
-        # Compute the declared variable values
         sint = am.sin(q[1])
         cost = am.cos(q[1])
 
         res = 4 * [None]
-        # Kinematic constraints
         res[0] = q[2] - qdot[0]
         res[1] = q[3] - qdot[1]
-
-        res[2] = (m1 + m2 * sint * sint) * qdot[2] - (
-            x + m2 * L0 * sint * q[3] * q[3] + m2 * g * cost * sint
+        res[2] = (m1 + m2 * sint**2) * qdot[2] - (
+            x + m2 * L0 * sint * q[3] ** 2 + m2 * g * cost * sint
         )
-
-        # Pole acceleration:
-        res[3] = L0 * (m1 + m2 * sint * sint) * qdot[3] - (
-            -x * cost - m2 * L0 * cost * sint * q[3] * q[3] - (m1 + m2) * g * sint
+        res[3] = L0 * (m1 + m2 * sint**2) * qdot[3] - (
+            -x * cost - m2 * L0 * cost * sint * q[3] ** 2 - (m1 + m2) * g * sint
         )
 
         self.constraints["res"] = res

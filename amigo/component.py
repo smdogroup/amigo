@@ -501,7 +501,6 @@ class OutputSet:
             self.expr = {}
 
         def serialize(self):
-            print(self.expr)
             return {
                 "name": self.name,
                 "shape": self.shape,
