@@ -28,6 +28,10 @@ include/amigo_include_paths.h
 /examples/**/lib/
 /examples/**/*.txt
 /examples/**/_amigo_build/
+/examples/**/*.inp
+/examples/**/*.tex
+/examples/**/*.tikz
+
 
 # Virtual environments and packaging
 venv/
