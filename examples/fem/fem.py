@@ -2,6 +2,9 @@ import amigo as am
 import numpy as np
 import re
 import basis
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+import matplotlib.tri as mtri
 
 
 class InpParser:
@@ -97,15 +100,80 @@ class Mesh:
     def get_domains(self):
         domains = self.parser.get_domains()
 
+        element_types = ["CPS3", "CPS4", "CPS6", "M3D9"]
+
         volumes = {}
         for name in domains:
-            if "CPS3" in domains[name] or "CPS4" in domains[name]:
-                volumes[name] = domains[name]
+            for etype in element_types:
+                if etype in domains[name]:
+                    volumes[name] = domains[name]
+                    break
 
         return volumes
 
     def get_conn(self, name, etype):
         return self.parser.get_conn(name, etype)
+
+    def plot(self, u, ax=None, nlevels=30, cmap="coolwarm"):
+        min_level = np.min(u)
+        max_level = np.max(u)
+        levels = np.linspace(min_level, max_level, nlevels)
+
+        if ax is None:
+            fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(8, 6))
+
+        volumes = self.get_domains()
+        x = self.X[:, 0]
+        y = self.X[:, 1]
+
+        for name in volumes:
+            for etype in volumes[name]:
+                # Get the connectivity
+                conn = self.convert_conn(etype, self.get_conn(name, etype))
+                tri = mtri.Triangulation(x, y, conn)
+
+                # Set the contour plot
+                ax.tricontourf(tri, u, levels=levels, cmap=cmap)
+                ax.tricontour(
+                    tri, u, levels=levels, colors="k", linewidths=0.3, alpha=0.5
+                )
+
+        return ax
+
+    def convert_conn(self, etype, conn):
+        if etype == "CPS3":
+            return conn
+        elif etype == "CPS4":
+            c = [[0, 1, 2], [0, 2, 3]]
+        elif etype == "CPS6":
+            # 2
+            # |  .
+            # 5     4
+            # |        .
+            # 0 --- 3 --- 1
+            c = [[0, 3, 5], [3, 4, 5], [3, 1, 4], [5, 4, 2]]
+        elif etype == "M3D9":
+            # 3 --- 6 --- 2
+            # |           |
+            # 7     8     5
+            # |           |
+            # 0 --- 4 --- 1
+            c = [
+                [0, 4, 7],
+                [4, 8, 7],
+                [4, 1, 8],
+                [1, 5, 8],
+                [7, 8, 3],
+                [8, 6, 3],
+                [8, 5, 6],
+                [5, 2, 6],
+            ]
+
+        cs = []
+        for c0 in c:
+            cs.append(conn[:, c0])
+
+        return np.vstack(cs)
 
 
 class NodeSource(am.Component):
@@ -144,13 +212,6 @@ class Problem:
         self.weakform = weakform
 
         return
-
-    # def add_weak_form(self, name, weakform):
-    #     if name in self.domains:
-    #         self.weakform[name] = weakform
-    #     else:
-    #         raise KeyError(f"{name} not in domains")
-    #     return
 
     def create_model(self, module_name: str):
         """Create and link the Amigo model"""
@@ -211,10 +272,16 @@ class Problem:
     def get_basis(self, etype, space, names=[], kind="input"):
         if etype == "CPS3":
             if space == "H1":
-                return basis.LinearH1TriangleBasis(names, kind=kind)
+                return basis.TriangleLagrangeBasis(1, names, kind=kind)
         elif etype == "CPS4":
             if space == "H1":
-                return basis.LinearH1QuadBasis(names, kind=kind)
+                return basis.QuadLagrangeBasis(1, names, kind=kind)
+        elif etype == "CPS6":
+            if space == "H1":
+                return basis.TriangleLagrangeBasis(2, names, kind=kind)
+        elif etype == "M3D9":
+            if space == "H1":
+                return basis.QuadLagrangeBasis(2, names, kind=kind)
 
         raise NotImplementedError(
             f"Basis for element {etype} with space {space} not implemented"
@@ -222,9 +289,13 @@ class Problem:
 
     def get_quadrature(self, etype):
         if etype == "CPS3":
-            return basis.TriangleQuadrature()
+            return basis.TriangleQuadrature(2)
         elif etype == "CPS4":
-            return basis.QuadQuadrature()
+            return basis.QuadQuadrature(2)
+        elif etype == "CPS6":
+            return basis.TriangleQuadrature(4)
+        elif etype == "M3D9":
+            return basis.QuadQuadrature(3)
 
         raise NotImplementedError(f"Quadrature for element {etype} not implemented")
 
@@ -290,7 +361,8 @@ def weakform(soln, data=None, geo=None):
 soln_space = basis.SolutionSpace({"u": "H1"})
 data_space = basis.SolutionSpace({"rho": "H1"})
 
-mesh = Mesh("magnet.inp")
+# mesh = Mesh("magnet.inp")
+mesh = Mesh("magnet_order_2.inp")
 problem = Problem(mesh, soln_space, weakform, data_space=data_space, ndim=2)
 model = problem.create_model("test")
 
@@ -303,104 +375,6 @@ model = problem.create_model("test")
 # )
 # nnodes = X.shape[0]
 # nelems = conn["SURFACE1"].shape[0]
-
-
-# # Set it up so that the input is
-# geo_basis = LinearH1TriangleBasis(["x", "y"], kind="data")
-# data_basis = LinearH1TriangleBasis("rho", kind="data")
-# soln_basis = LinearH1TriangleBasis("u", kind="input")
-
-# quadrature = TriangleQuadrature()
-# node_src = NodeSource()
-
-# name = "TriElement"
-# elem = FiniteElement(name, soln_basis, data_basis, geo_basis, quadrature, weakform)
-
-
-# # Amigo model
-# model = am.Model("test")
-# model.add_component("tri", nelems, elem)
-
-# # Add source components to the amigo model
-# model.add_component("src", nnodes, node_src)
-
-# # Linke source mesh to the finite element problem
-# model.link("tri.x", "src.x", tgt_indices=conn["SURFACE1"])
-# model.link("tri.y", "src.y", tgt_indices=conn["SURFACE1"])
-
-import matplotlib as mpl
-import matplotlib.pyplot as plt
-import matplotlib.tri as mtri
-
-
-def plot_solution(
-    xyz_nodeCoords, conn, z, title="fig", fname="contour.jpg", flag=False, ax=None
-):
-    """
-    Create a contour plot of the solution.
-    Inputs:
-        xyz_nodeCoords = [x,y,z] node positions
-        z = solution field vector
-
-    Parameters
-    ----------
-    xyz_nodeCoords : 2d np array
-        [x,y,z]
-    z : 1d array
-        solution vector to plot at each xyz position
-    title : str, optional
-        figure title, by default "fig"
-    fname : str, optional
-        name of figure make sure to include extension (.jpg), by default "contour.jpg"
-    flag : bool, optional
-        save figure, by default False
-    """
-    min_level = min(z)
-    max_level = max(z)
-    levels = np.linspace(min_level, max_level, 30)
-    x = xyz_nodeCoords[:, 0]
-    y = xyz_nodeCoords[:, 1]
-
-    # create a Delaunay triangulation
-    # tri = mtri.Triangulation(x, y)
-    if conn.shape[1] == 3:
-        tri = mtri.Triangulation(x, y, conn)
-    elif conn.shape[1] == 4:
-        conn2 = np.vstack([conn[:, [0, 1, 2]], conn[:, [0, 2, 3]]])
-        tri = mtri.Triangulation(x, y, conn2)
-
-    # Define colormap
-    cmap = "coolwarm"
-
-    # Plot solution
-    fig = None
-    if ax is None:
-        fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(8, 6))
-
-    cntr = ax.tricontourf(tri, z, levels=levels, cmap=cmap)
-    ax.tricontour(
-        tri, z, levels=levels, colors="k", linewidths=0.3, alpha=0.5
-    )  # optional contour lines
-
-    # Overlay mesh
-    ax.triplot(tri, color="0.7", lw=0.3, alpha=0.8)  # lighter grey
-
-    if fig is not None:
-        norm = mpl.colors.Normalize(vmin=min_level, vmax=max_level)
-        cbar = fig.colorbar(
-            mpl.cm.ScalarMappable(norm=norm, cmap=cmap), ax=ax, location="right"
-        )
-        cbar.set_ticks([min(z), (min(z) + max(z)) / 2.0, max(z)])
-
-        ax.set_title(title, fontsize=12)
-        ax.set_aspect("equal", adjustable="box")
-        fig.tight_layout()
-
-    # if flag:
-    #     plt.savefig(fname, dpi=800, edgecolor="none")
-
-    return ax
-
 
 model.build_module()
 model.initialize(order_type=am.OrderingType.NESTED_DISSECTION)
@@ -424,9 +398,5 @@ print("flag = ", flag)
 chol.solve(rhs.get_vector())
 
 u = rhs["src.u"]
-conn = mesh.get_conn("SURFACE2", "CPS3")
-ax = plot_solution(mesh.X, conn, u)
-conn = mesh.get_conn("SURFACE1", "CPS4")
-plot_solution(mesh.X, conn, u, ax=ax)
-
+mesh.plot(u)
 plt.show()
