@@ -49,6 +49,9 @@ def original_om_problem():
 
 length = 1.0
 nelems = 50
+E = 25000
+Fv = -120
+Mv = 0.0
 
 
 class beam_element(am.Component):
@@ -63,18 +66,18 @@ class beam_element(am.Component):
         self.add_input("v", shape=(2,), value=0.0)
         self.add_input("t", shape=(2,), value=0.0)
         self.add_data("h")
-        self.add_constant("E", value=1.0)
+        # self.add_constant("E", value=10.0e6)
         self.add_objective("obj")
 
     def compute(self):
         v = self.inputs["v"]
         t = self.inputs["t"]
-        E = self.constants["E"]
+        # E = self.constants["E"]
         L0 = length / nelems
 
         # thickness Optimization changes I
         h = self.data["h"]
-        I = 1.0 / 12.0 * 0.1 * h**3
+        I = 1.0 / 12.0 * 0.333 * h**3
 
         # Create beam element stiffness matrix
         Ke = np.empty((4, 4))
@@ -122,20 +125,34 @@ class AppliedLoad(am.Component):
     def __init__(self):
         super().__init__()
 
-        self.add_input("v", value=0.0)
-        self.add_input("t", value=0.0)
-        self.add_constant("Fv", value=-1.0)  # Force in v direction
-        self.add_constant("Mt", value=0.0)  # Moment (if any)
+        self.add_input("v", shape=(2,), value=0.0)
+        self.add_input("t", shape=(2,), value=0.0)
+        # self.add_constant("Fv", value=-1.0)  # Force in v direction
+        # self.add_constant("Mt", value=0.0)  # Moment (if any)
         self.add_objective("work")
         return
 
     def compute(self):
         v = self.inputs["v"]
         t = self.inputs["t"]
-        Fv = self.constants["Fv"]
-        Mt = self.constants["Mt"]
+        # Fv = self.constants["Fv"]
+        # Mt = self.constants["Mt"]
         # Work done by external forces (negative contributes to total PE)
-        self.objective["work"] = -(Fv * v + Mt * t)
+        Le = length/nelems
+        fe = [
+            Fv * Le * 0.5,
+            Fv * Le * (Le / 12),
+            Fv * Le * 0.5,
+            -Fv * Le * (Le / 12),
+        ]
+        de = np.array([v[0], t[0], v[1], t[1]])
+        # self.objective["work"] = -1*(fe @ de)
+        self.objective["work"] = -(
+            fe[0] * de[0] +
+            fe[1] * de[1] +
+            fe[2] * de[2] +
+            fe[3] * de[3]
+        )
         return
 
 
@@ -158,21 +175,33 @@ class Compliance(am.Component):
     def __init__(self):
         super().__init__()
 
-        self.add_input("v")
-        self.add_input("t")
+        self.add_input("v", shape=(2,))
+        self.add_input("t", shape=(2,))
 
-        self.add_constant("Fv", value=-1.0)  # Force in v direction
-        self.add_constant("Mt", value=0.0)  # Moment (if any)
+        # self.add_constant("Fv", value=-1.0)  # Force in v direction
+        # self.add_constant("Mt", value=0.0)  # Moment (if any)
         self.add_output("c")
 
     def compute_output(self):
         v = self.inputs["v"]
         t = self.inputs["t"]
-        Fv = self.constants["Fv"]
-        Mt = self.constants["Mt"]
+        # Fv = self.constants["Fv"]
+        # Mt = self.constants["Mt"]
+        Le = length/nelems
+        fe = [
+            Fv * Le * 0.5,
+            Fv * Le * (Le / 12),
+            Fv * Le * 0.5,
+            -Fv * Le * (Le / 12),
+        ]
+        de = np.array([v[0], t[0], v[1], t[1]])
+        # self.objective["work"] = -1*(fe @ de)
         self.outputs["c"] = (
-            Fv * v + Mt * t
-        )  # dot(Fv, v), but only for one nodal v displ.
+            fe[0] * de[0] +
+            fe[1] * de[1] +
+            fe[2] * de[2] +
+            fe[3] * de[3]
+        )
 
 
 class VolumeConstraint(am.Component):
@@ -186,7 +215,7 @@ class VolumeConstraint(am.Component):
 
     def compute_output(self):
         h = self.data["h"]
-        vol = h * 0.1 * 1.0 / 50.0  # nelems
+        vol = h * 0.33 * 1.0 / nelems
         self.outputs["con"] = vol
 
 
@@ -208,13 +237,6 @@ x_coords = np.linspace(0, length, nelems + 1)
 nodes = np.arange(nelems + 1, dtype=int)
 conn = np.array([[i, i + 1] for i in range(nelems)], dtype=int)
 
-# before buliding Amigo model, run ORIGINAL OpenMDAO example and extract optimal h to compare to amigo fem
-om_h, om_v, om_totals_obj, om_totals_con = original_om_problem()
-om_c_wrt_h = om_totals_obj["compliance_comp.compliance", "h"]["J_rev"]
-om_con_wrt_h = om_totals_con["volume_comp.volume", "h"]["J_rev"]
-###################################
-
-# Build Amigo Model
 model = am.Model("beam")
 
 # Allocate the components
@@ -233,21 +255,23 @@ model.link("src.t", "bcs.t", src_indices=[nodes[0]])
 
 # Apply load at free end (contributes to potential energy)
 load = AppliedLoad()
-model.add_component("load", 1, load)
-model.link("src.v", "load.v", src_indices=[nodes[-1]])
-model.link("src.t", "load.t", src_indices=[nodes[-1]])
+model.add_component("load", nelems, load)
+model.link("src.v", "load.v", src_indices=conn)
+model.link("src.t", "load.t", src_indices=conn)
 
 # Link variables for compliance calculation
 compliance = Compliance()
-model.add_component("comp", 1, compliance)
-model.link("src.v", "comp.v", src_indices=[nodes[-1]])
-model.link("src.t", "comp.t", src_indices=[nodes[-1]])
+model.add_component("comp", nelems, compliance)
+model.link("src.v", "comp.v", src_indices=conn)
+model.link("src.t", "comp.t", src_indices=conn)
 
 # Add Volume Constraint
 vol_con = VolumeConstraint()
 model.add_component("vol_con", nelems, vol_con)
 model.link("beam_element.h", "vol_con.h")
 
+
+model.link("comp.c[1:]", "comp.c[0]")
 # Summing constraints as output
 model.link("vol_con.con[1:]", "vol_con.con[0]")
 
@@ -266,43 +290,67 @@ x[:] = 0.0
 
 # Set bounds on displacements
 # lower["src.v"] = -float("inf")
-lower["src.v"] = -15000
+lower["src.v"] = -5
 upper["src.v"] = float("inf")
 
 lower["src.t"] = -float("inf")
 upper["src.t"] = float("inf")
 
+# Amigo potential energy minimization parameters
+opt_options = {
+    "max_iterations": 200,
+    "convergence_tolerance": 5e-6,
+    "max_line_search_iterations": 1,
+    "initial_barrier_param": 0.1,
+}
+
+# #indiv. Amigo problem:
+# opt = am.Optimizer(
+#     model,
+#     x,
+#     lower = lower,
+#     upper = upper,
+# )
+# opt.optimize(opt_options)
+
+# dfdx, of_map, wrt_map = opt.compute_post_opt_derivatives(
+#     of="comp.c[0]", wrt="beam_element.h", method="adjoint"
+# )
+
+# exit()
+
+
 # OpenMDAO optimization
 prob = om.Problem()
+
+# Add recorder to the driver
+recorder = om.SqliteRecorder("opt_history.sql")
+prob.driver.add_recorder(recorder)
+
+# Optional: record iterations
+prob.driver.recording_options['record_desvars'] = True
+prob.driver.recording_options['record_objectives'] = True
+prob.driver.recording_options['record_constraints'] = True
 
 # OpenMDAO Independent Variables
 indeps = prob.model.add_subsystem("indeps", om.IndepVarComp())
 
+# # run openmdao example and extract optimal h to test amigo fem
+# om_h, om_v, om_totals_obj, om_totals_con = original_om_problem()
+# om_c_wrt_h = om_totals_obj["compliance_comp.compliance", "h"]["J_rev"]
+# om_con_wrt_h = om_totals_con["volume_comp.volume", "h"]["J_rev"]
 
-
-# set initial height distribution
-# set as a linear dist. at a scale of 5x the actual answer or...
-indeps.add_output("h", shape=nelems, val=1 * np.linspace(om_h[0], om_h[-1], len(om_h)))
-# set as uniform value
-# indeps.add_output("h", shape=nelems, val=0.1)
-
-
-# (Amigo) potential energy optimization parameters
-opt_options = {
-    "max_iterations": 500,
-    "convergence_tolerance": 1e-8,
-    "max_line_search_iterations": 1,
-    "initial_barrier_param": 0.1,
-}
+# indeps.add_output("h", shape=nelems, val=5 * np.linspace(om_h[0], om_h[-1], len(om_h)))
+indeps.add_output("h", shape=nelems, val=0.1)
 
 # Amigo Optimizer
 prob.model.add_subsystem(
     "fea",
     am.ExplicitOpenMDAOPostOptComponent(
         data=["beam_element.h"],
-        output=["comp.c", "vol_con.con[0]"],
+        output=["comp.c[0]", "vol_con.con[0]"],
         data_mapping={"beam_element.h": "h"},
-        output_mapping={"comp.c": "c", "vol_con.con[0]": "con"},
+        output_mapping={"comp.c[0]": "c", "vol_con.con[0]": "con"},
         model=model,
         x=x,
         lower=lower,
@@ -318,31 +366,35 @@ prob.driver = om.ScipyOptimizeDriver()
 
 if args.optimizer == "SLSQP":
     prob.driver.options["optimizer"] = "SLSQP"
-    prob.driver.options["maxiter"] = 200
-    prob.driver.options["tol"] = 1e-9
-    prob.driver.options["disp"] = True
 else:
     prob.driver.options["optimizer"] = args.optimizer
-    prob.driver.options["maxiter"] = 200
+
+
+prob.driver.options["maxiter"] = 200
+prob.driver.options["tol"] = 1e-5
+prob.driver.options["disp"] = True
 
 # perform optimziation
-prob.model.add_design_var("indeps.h", lower=1e-2, upper=10)
-prob.model.add_objective("fea.c", ref=20000)
-prob.model.add_constraint("fea.con", equals=0.01)
+prob.model.add_design_var("indeps.h", lower=0.001, upper=1.0, ref = 1.0e-1)
+prob.model.add_objective("fea.c", ref=1.0e3)
+prob.model.add_constraint("fea.con", equals=0.03) # formerly 0.03
 prob.setup(check=True)
 
+
+# data = prob.check_partials(compact_print=False, step=1e-6)
+# exit()
 # Run Optimization Problem
 prob.run_driver()
 h_results = prob["indeps.h"]
 print("vol: ", prob["fea.con"])
 print("compliance: ", prob["fea.c"])
 
-data = prob.check_partials(compact_print=False, step=1e-6)
+# data = prob.check_partials(compact_print=False, step=1e-6)
 
 fig, ax = plt.subplots()
 # ax.plot(prob["indeps.h"])
 ax.plot(prob["indeps.h"], marker="o", label="amigo")
-ax.plot(om_h, label="openMDAO example")
+# ax.plot(om_h, label="openMDAO example")
 ax.legend()
 ax.set_ylabel(r"$h*$")
 ax.set_xlabel(r"$x$")
@@ -350,4 +402,38 @@ ax.set_title("Optimized Thickness Distribution")
 
 fig,ax = plt.subplots()
 ax.plot(x["src.v"])
+
+def beam_coordinates(v, L):
+    n = len(v)
+    x = np.linspace(0.0, L, n)
+    return x, v
+
+def plot_deformed_beam(v, h, L, scale=1.0):
+    x, w = beam_coordinates(v, L)
+    w = scale * w
+
+    plt.figure(figsize=(10, 3))
+
+    for e in range(len(h)):
+        x_e = [x[e], x[e+1]]
+        w_e = [w[e], w[e+1]]
+
+        plt.plot(
+            x_e,
+            w_e,
+            linewidth=10 * h[e] / np.max(h),
+            solid_capstyle="round",
+            color="black"
+        )
+
+    plt.axhline(0.0, color="gray", linestyle="--", linewidth=0.8)
+    plt.xlabel("x")
+    plt.ylabel("v(x)")
+    plt.title("Deformed beam shape (thickness-scaled)")
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
+
+plot_deformed_beam(x["src.v"], prob["indeps.h"], length)
+
 plt.show()
