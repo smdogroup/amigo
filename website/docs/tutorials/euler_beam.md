@@ -1,10 +1,10 @@
 ---
-sidebar_position: 1
+sidebar_position: 2
 ---
 
 # Euler-Bernoulli Beam Optimization
 
-## Amigo-based FEM integrated within OpenMDAO
+### Amigo-based FEM integrated within OpenMDAO
 
 Author: Jack Turbush
 
@@ -430,7 +430,7 @@ data = prob.check_partials(compact_print=False, step=1e-6)
 Run the openMDAO example as a comparison
 
 ```python
-ef original_om_problem():
+def original_om_problem():
     from openmdao.test_suite.test_examples.beam_optimization.beam_group import BeamGroup
 
     # import openmdao.api as om
@@ -462,10 +462,6 @@ ef original_om_problem():
     print(prob["h"])
     h_target = prob["h"]
     displacements = prob["compliance_comp.displacements"]
-    # plt.plot(prob['h'])
-    # print(np.allclose(h_results, h_omexample))
-    # # plt.gca().invert_xaxis()  # if needed to match OpenMDAO’s plotting convention
-    # plt.show()
     return h_target, displacements, totals_obj, totals_con
   
 om_h, om_v, om_totals_obj, om_totals_con = original_om_problem()
