@@ -3,7 +3,7 @@ import numpy as np
 import argparse
 import json
 import matplotlib.pyplot as plt
-
+import niceplots
 
 """
 Maximum Range of a Hang Glider
@@ -22,7 +22,7 @@ Using NonlinearProgramming", 3rd edition, Chapter 10: Test Problems.
 """
 
 
-num_time_steps = 200
+num_time_steps = 100
 
 
 class TrapezoidRule(am.Component):
@@ -243,126 +243,178 @@ def create_hang_glide_model(scaling, num_time_steps=200, model_name="max_range_g
 
     model.link(f"gd.q[{num_time_steps},0]", "obj.xf[0]")  # pass xf
 
+    # CRITICAL: Link all tf variables to a single final time
+    # All trapezoidal rule components must share the same tf
+    model.link("trap.tf[1:]", "trap.tf[0]")
+
     return model
 
 
-parser = argparse.ArgumentParser()
-parser.add_argument(
-    "--build", dest="build", action="store_true", default=False, help="Enable building"
-)
-parser.add_argument(
-    "--with-openmp",
-    dest="use_openmp",
-    action="store_true",
-    default=False,
-    help="Enable OpenMP",
-)
-parser.add_argument(
-    "--show-sparsity",
-    dest="show_sparsity",
-    action="store_true",
-    default=False,
-    help="Show the sparsity pattern",
-)
-parser.add_argument(
-    "--single-mesh",
-    dest="single_mesh",
-    action="store_true",
-    default=False,
-    help="Use single mesh instead of mesh refinement",
-)
-args = parser.parse_args()
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--build",
+        dest="build",
+        action="store_true",
+        default=False,
+        help="Enable building",
+    )
+    parser.add_argument(
+        "--with-openmp",
+        dest="use_openmp",
+        action="store_true",
+        default=False,
+        help="Enable OpenMP",
+    )
+    parser.add_argument(
+        "--show-sparsity",
+        dest="show_sparsity",
+        action="store_true",
+        default=False,
+        help="Show the sparsity pattern",
+    )
+    parser.add_argument(
+        "--single-mesh",
+        dest="single_mesh",
+        action="store_true",
+        default=False,
+        help="Use single mesh instead of mesh refinement",
+    )
+    args = parser.parse_args()
 
-# Set the scaling
-scaling = {"velocity": 10.0, "distance": 100.0, "time": 10.0}
-model = create_hang_glide_model(scaling)
+    # Set the scaling
+    scaling = {"velocity": 10.0, "distance": 100.0, "time": 10.0}
+    model = create_hang_glide_model(scaling, num_time_steps=num_time_steps)
 
-if args.build:
-    compile_args = []
-    link_args = []
-    define_macros = []
-    if args.use_openmp:
-        compile_args = ["-fopenmp"]
-        link_args = ["-fopenmp"]
-        define_macros = [("AMIGO_USE_OPENMP", "1")]
+    if args.build:
+        from pathlib import Path
 
-    model.build_module(
-        compile_args=compile_args, link_args=link_args, define_macros=define_macros
+        source_dir = Path(__file__).resolve().parent
+        model.build_module(source_dir=source_dir)
+
+    model.initialize(order_type=am.OrderingType.NESTED_DISSECTION)
+
+    with open("glider_model.json", "w") as fp:
+        json.dump(model.get_serializable_data(), fp, indent=2)
+
+    print(f"Num variables:              {model.num_variables}")
+    print(f"Num constraints:            {model.num_constraints}")
+
+    # Get the design variables
+    x = model.create_vector()
+    x[:] = 0.0
+
+    # Set initial guess following book recommendations:
+    tf_guess = 100.0
+    dt = tf_guess / num_time_steps
+    t_guess = np.linspace(0, tf_guess, num_time_steps + 1)
+    t_frac = t_guess / tf_guess
+
+    # Position: x goes from 0 to ~1250m
+    x_pos = 0.0 + t_frac * 1250.0
+    x[f"gd.q[:, 0]"] = x_pos / scaling["distance"]
+
+    # Altitude: y goes from 1000 to 900
+    y_pos = 1000.0 + t_frac * (900.0 - 1000.0)
+    x[f"gd.q[:, 1]"] = y_pos / scaling["distance"]
+
+    # Velocities from boundary conditions
+    vx = 13.227567500
+    vy = -1.2875005200
+    x[f"gd.q[:, 2]"] = vx / scaling["velocity"]
+    x[f"gd.q[:, 3]"] = vy / scaling["velocity"]
+
+    # CRITICAL: Initialize qdot (state derivatives) consistently with the dynamics
+    x[f"gd.qdot[:, 0]"] = (1250.0 / tf_guess) / scaling["distance"]
+    x[f"gd.qdot[:, 1]"] = (-100.0 / tf_guess) / scaling["distance"]
+    x[f"gd.qdot[:, 2]"] = 0.0
+    x[f"gd.qdot[:, 3]"] = 0.0
+
+    # Set initial control values
+    x["gd.CL"] = 1.0
+
+    # Set initial final time
+    x["trap.tf"] = tf_guess / scaling["time"]
+
+    # Set bounds
+    lower = model.create_vector()
+    upper = model.create_vector()
+    lower["gd.CL"] = 0.0
+    upper["gd.CL"] = 1.4
+    lower["trap.tf"] = 50.0 / scaling["time"]
+    upper["trap.tf"] = 200.0 / scaling["time"]
+    lower["gd.q"] = -float("inf")
+    upper["gd.q"] = float("inf")
+    lower["gd.qdot"] = -float("inf")
+    upper["gd.qdot"] = float("inf")
+
+    opt = am.Optimizer(model, x, lower=lower, upper=upper)
+    data = opt.optimize(
+        {
+            "barrier_strategy": "monotone",
+            "initial_barrier_param": 0.1,
+            "max_line_search_iterations": 30,
+            "max_iterations": 500,
+            "convergence_tolerance": 1e-8,
+            "init_least_squares_multipliers": True,
+            "init_affine_step_multipliers": False,
+            "use_armijo_line_search": False,
+            "regularization_eps_x": 1e-14,
+            "regularization_eps_z": 1e-14,
+            "adaptive_regularization": True,
+            "fraction_to_boundary": 0.995,
+        }
     )
 
-model.initialize(order_type=am.OrderingType.NESTED_DISSECTION)
+    with open("hang_glider_opt_data.json", "w") as fp:
+        json.dump(data, fp, indent=2)
 
-with open("glider_model.json", "w") as fp:
-    json.dump(model.get_serializable_data(), fp, indent=2)
+    print(f"\nConverged: {data['converged']}")
+    print(f"Final residual: {data['iterations'][-1]['residual']:.6e}")
 
-print(f"Num variables:              {model.num_variables}")
-print(f"Num constraints:            {model.num_constraints}")
+    tf_opt = x["trap.tf[0]"] * scaling["time"]
+    print(f"Optimal final time tf: {tf_opt:.2f} seconds")
 
-# Get the design variables
-x = model.create_vector()
-x[:] = 0.0
+    xf_opt = x[f"gd.q[{num_time_steps}, 0]"] * scaling["distance"]
+    print(f"Maximum range achieved: {xf_opt:.2f} meters")
 
-# Set initial guess following book recommendations:
-tf_guess = 100.0
-t_guess = np.linspace(0, tf_guess, num_time_steps + 1)
-t_frac = t_guess / tf_guess
-x[f"gd.q[:, 0]"] = (0.0 + t_frac * 1250.0) / scaling["distance"]
+    print(f"\nControl CL at start: {x['gd.CL[0]']:.4f}")
+    print(f"Control CL at end: {x[f'gd.CL[{num_time_steps}]']:.4f}")
 
-# Interpolate y from 1000 to 900
-x[f"gd.q[:, 1]"] = (1000.0 + t_frac * (900.0 - 1000.0)) / scaling["distance"]
+    t = np.linspace(0, tf_opt, num_time_steps + 1)
+    x_pos = x["gd.q[:, 0]"] * scaling["distance"]
+    y_pos = x["gd.q[:, 1]"] * scaling["distance"]
+    vx = x["gd.q[:, 2]"] * scaling["velocity"]
+    vy = x["gd.q[:, 3]"] * scaling["velocity"]
+    CL = x["gd.CL[:]"]
 
-# Keep velocities constant as per boundary conditions
-x[f"gd.q[:, 2]"] = 13.227567500 / scaling["velocity"]
-x[f"gd.q[:, 3]"] = -1.2875005200 / scaling["velocity"]
-
-# Set initial control values (as recommended in the book: CL(0) = CL(tF) = 1)
-x["gd.CL"] = 1.0
-
-# Set initial final time (from the book's plots, optimal time is around 100 seconds)
-x["trap.tf"] = tf_guess / scaling["time"]
-
-# Set bounds for the optimization problem:
-lower = model.create_vector()
-upper = model.create_vector()
-
-# Control bounds (from problem specification)
-lower["gd.CL"] = -4.0
-upper["gd.CL"] = 4.0  # 1.4
-
-# Time bounds
-lower["trap.tf"] = 50.0 / scaling["time"]
-# upper["trap.tf"] = 150.0 / scaling["time"]
-upper["trap.tf"] = float("inf")
-
-# State bounds - add reasonable physical bounds
-# Horizontal position (x)
-lower["gd.q[:, 0]"] = -2000.0 / scaling["distance"]
-upper["gd.q[:, 0]"] = 2000.0 / scaling["distance"]
-
-# Altitude (y)
-lower["gd.q[:, 1]"] = -2000.0 / scaling["distance"]
-upper["gd.q[:, 1]"] = 2000.0 / scaling["distance"]
-
-# Horizontal velocity (vx)
-lower["gd.q[:, 2]"] = -200.0 / scaling["velocity"]
-upper["gd.q[:, 2]"] = 200.0 / scaling["velocity"]
-
-# Vertical velocity (vy)
-lower["gd.q[:, 3]"] = -200.0 / scaling["velocity"]
-upper["gd.q[:, 3]"] = 200.0 / scaling["velocity"]
-
-lower["gd.qdot"] = -float("inf")
-upper["gd.qdot"] = float("inf")
-
-opt = am.Optimizer(model, x, lower=lower, upper=upper)
-data = opt.optimize(
-    {
-        "initial_barrier_param": 0.1,
-        "max_line_search_iterations": 1,
-        "max_iterations": 500,
-        "init_affine_step_multipliers": False,
-    }
-)
-
-with open("hang_glider_opt_data.json", "w") as fp:
-    json.dump(data, fp, indent=2)
+    with plt.style.context(niceplots.get_style()):
+        fig, axes = plt.subplots(3, 2, figsize=(12, 12))
+        axes[0, 0].plot(x_pos, y_pos)
+        axes[0, 0].set_xlabel("x (m)")
+        axes[0, 0].set_ylabel("y (m)")
+        axes[0, 0].set_title("Glider Trajectory")
+        axes[0, 0].grid(True)
+        axes[0, 1].plot(t, x_pos)
+        axes[0, 1].set_xlabel("Time (s)")
+        axes[0, 1].set_ylabel("x (m)")
+        axes[0, 1].grid(True)
+        axes[1, 0].plot(t, y_pos)
+        axes[1, 0].set_xlabel("Time (s)")
+        axes[1, 0].set_ylabel("y (m)")
+        axes[1, 0].grid(True)
+        axes[1, 1].plot(t, vx)
+        axes[1, 1].set_xlabel("Time (s)")
+        axes[1, 1].set_ylabel("vx (m/s)")
+        axes[1, 1].grid(True)
+        axes[2, 0].plot(t, vy)
+        axes[2, 0].set_xlabel("Time (s)")
+        axes[2, 0].set_ylabel("vy (m/s)")
+        axes[2, 0].grid(True)
+        axes[2, 1].plot(t, CL)
+        axes[2, 1].set_xlabel("Time (s)")
+        axes[2, 1].set_ylabel("CL")
+        axes[2, 1].grid(True)
+        plt.tight_layout()
+        plt.savefig("hang_glider_solution.png", dpi=300, bbox_inches="tight")
+        plt.show()
