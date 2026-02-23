@@ -256,6 +256,100 @@ void add_residual(T barrier_param, T gamma, const OptInfo<T>& info,
   }
 }
 
+// Fills the condensed Newton RHS (identical to add_residual) AND accumulates
+// the true dual/primal infeasibility squared norms needed by the quality
+// function (Nocedal-Wachter-Waltz 2009, eq 4.2).
+//
+//   dual_infeas_sq   = ||g - zl + zu||^2   (full stationarity)
+//   primal_infeas_sq = ||h - lbh||^2 + ||c - s||^2
+//
+// Using the condensed residual at mu=0 for these quantities is wrong:
+// variable rows give -g[i] (bound multipliers cancelled out), not -(g-zl+zu).
+template <typename T>
+void compute_residual_and_infeasibility(T barrier_param, T gamma,
+                                        const OptInfo<T>& info,
+                                        OptStateData<const T>& pt,
+                                        const T* g, T* r,
+                                        T& dual_infeas_sq,
+                                        T& primal_infeas_sq) {
+  dual_infeas_sq = 0.0;
+  primal_infeas_sq = 0.0;
+
+  // Variable rows
+  for (int i = 0; i < info.num_variables; i++) {
+    int index = info.design_variable_indices[i];
+    T x = pt.xlam[index];
+
+    // True stationarity (g - zl + zu) before bound-complementarity condensation
+    T rd = g[index] - pt.zl[i] + pt.zu[i];
+    dual_infeas_sq += rd * rd;
+
+    // Condensed Newton RHS (identical to add_residual)
+    T bx = -rd;
+    if (!std::isinf(info.lbx[i])) {
+      T bzl = -((x - info.lbx[i]) * pt.zl[i] - barrier_param);
+      bx += bzl / (x - info.lbx[i]);
+    }
+    if (!std::isinf(info.ubx[i])) {
+      T bzu = -((info.ubx[i] - x) * pt.zu[i] - barrier_param);
+      bx -= bzu / (info.ubx[i] - x);
+    }
+    r[index] = bx;
+  }
+
+  // Equality rows
+  for (int i = 0; i < info.num_equalities; i++) {
+    int index = info.equality_indices[i];
+    T rp = g[index] - info.lbh[i];
+    primal_infeas_sq += rp * rp;
+    r[index] = -rp;
+  }
+
+  // Inequality rows
+  for (int i = 0; i < info.num_inequalities; i++) {
+    int index = info.inequality_indices[i];
+    T lam = pt.xlam[index];
+
+    // True primal infeasibility c(x) - s
+    T rp = g[index] - pt.s[i];
+    primal_infeas_sq += rp * rp;
+
+    // Condensed Newton RHS (identical to add_residual)
+    T bc = -rp;
+    T blam = -(-lam - pt.zsl[i] + pt.zsu[i]);
+    T C = 0.0;
+    T d = blam;
+    if (!std::isinf(info.lbc[i])) {
+      T blaml = -(gamma - pt.zsl[i] - pt.ztl[i]);
+      T bsl = -(pt.s[i] - info.lbc[i] - pt.sl[i] + pt.tl[i]);
+      T bzsl = -(pt.sl[i] * pt.zsl[i] - barrier_param);
+      T bztl = -(pt.tl[i] * pt.ztl[i] - barrier_param);
+      T inv_zsl = 1.0 / pt.zsl[i];
+      T inv_ztl = 1.0 / pt.ztl[i];
+      T Fl = inv_zsl * pt.sl[i] + inv_ztl * pt.tl[i];
+      T dl = bsl + inv_zsl * bzsl - inv_ztl * (bztl + pt.tl[i] * blaml);
+      T inv_Fl = 1.0 / Fl;
+      d += inv_Fl * dl;
+      C += inv_Fl;
+    }
+    if (!std::isinf(info.ubc[i])) {
+      T blamu = -(gamma - pt.zsu[i] - pt.ztu[i]);
+      T bsu = -(info.ubc[i] - pt.s[i] - pt.su[i] + pt.tu[i]);
+      T bzsu = -(pt.su[i] * pt.zsu[i] - barrier_param);
+      T bztu = -(pt.tu[i] * pt.ztu[i] - barrier_param);
+      T inv_zsu = 1.0 / pt.zsu[i];
+      T inv_ztu = 1.0 / pt.ztu[i];
+      T Fu = inv_zsu * pt.su[i] + inv_ztu * pt.tu[i];
+      T du = bsu + inv_zsu * bzsu - inv_ztu * (bztu + pt.tu[i] * blamu);
+      T inv_Fu = 1.0 / Fu;
+      d -= inv_Fu * du;
+      C += inv_Fu;
+    }
+    bc += d / C;
+    r[index] = bc;
+  }
+}
+
 template <typename T>
 void compute_update(T barrier_param, T gamma, const OptInfo<T>& info,
                     OptStateData<const T>& pt, OptStateData<T>& up) {
@@ -596,6 +690,104 @@ void compute_complementarity_pairs(const OptInfo<T>& info,
       local_min = A2D::min2(local_min, A2D::min2(comp_su, comp_tu));
     }
   }
+}
+
+template <typename T>
+void compute_kkt_error_components(const OptInfo<T>& info,
+                                   OptStateData<const T>& pt, const T* g,
+                                   T& dual_infeas_sq, T& primal_infeas_sq,
+                                   T& comp_sq) {
+  dual_infeas_sq = 0.0;
+  primal_infeas_sq = 0.0;
+  comp_sq = 0.0;
+
+  // Design variables: dual feasibility and complementarity
+  for (int i = 0; i < info.num_variables; i++) {
+    int index = info.design_variable_indices[i];
+    T x = pt.xlam[index];
+
+    // Dual feasibility: stationarity of Lagrangian wrt x
+    // g[index] = grad_f + J_h^T lam_h + J_c^T lam_c (computed by problem)
+    // KKT: g[index] - zl + zu = 0
+    T rd = g[index] - pt.zl[i] + pt.zu[i];
+    dual_infeas_sq += rd * rd;
+
+    // Complementarity: (x - lb) * zl, (ub - x) * zu
+    if (!std::isinf(info.lbx[i])) {
+      T c = (x - info.lbx[i]) * pt.zl[i];
+      comp_sq += c * c;
+    }
+    if (!std::isinf(info.ubx[i])) {
+      T c = (info.ubx[i] - x) * pt.zu[i];
+      comp_sq += c * c;
+    }
+  }
+
+  // Equality constraints: primal feasibility h(x) - lbh = 0
+  for (int i = 0; i < info.num_equalities; i++) {
+    int index = info.equality_indices[i];
+    T rp = g[index] - info.lbh[i];
+    primal_infeas_sq += rp * rp;
+  }
+
+  // Inequality constraints: primal feasibility c(x) = s
+  // Plus complementarity from slack decomposition
+  for (int i = 0; i < info.num_inequalities; i++) {
+    int index = info.inequality_indices[i];
+
+    // Primal feasibility: c(x) - s = 0
+    T rp = g[index] - pt.s[i];
+    primal_infeas_sq += rp * rp;
+
+    // Complementarity from slack variables
+    if (!std::isinf(info.lbc[i])) {
+      T c_sl = pt.sl[i] * pt.zsl[i];
+      T c_tl = pt.tl[i] * pt.ztl[i];
+      comp_sq += c_sl * c_sl + c_tl * c_tl;
+    }
+    if (!std::isinf(info.ubc[i])) {
+      T c_su = pt.su[i] * pt.zsu[i];
+      T c_tu = pt.tu[i] * pt.ztu[i];
+      comp_sq += c_su * c_su + c_tu * c_tu;
+    }
+  }
+}
+
+// Compute ||ZXe||^2 = sum of squared complementarity products at point pt.
+// Equivalent to the comp_sq term in compute_kkt_error_components but requires
+// no gradient vector. Used by the linear quality function (NWW 2009 eq 4.2).
+template <typename T>
+T compute_complementarity_sq(const OptInfo<T>& info,
+                             OptStateData<const T>& pt) {
+  T comp_sq = 0.0;
+
+  for (int i = 0; i < info.num_variables; i++) {
+    int index = info.design_variable_indices[i];
+    T x = pt.xlam[index];
+    if (!std::isinf(info.lbx[i])) {
+      T c = (x - info.lbx[i]) * pt.zl[i];
+      comp_sq += c * c;
+    }
+    if (!std::isinf(info.ubx[i])) {
+      T c = (info.ubx[i] - x) * pt.zu[i];
+      comp_sq += c * c;
+    }
+  }
+
+  for (int i = 0; i < info.num_inequalities; i++) {
+    if (!std::isinf(info.lbc[i])) {
+      T c_sl = pt.sl[i] * pt.zsl[i];
+      T c_tl = pt.tl[i] * pt.ztl[i];
+      comp_sq += c_sl * c_sl + c_tl * c_tl;
+    }
+    if (!std::isinf(info.ubc[i])) {
+      T c_su = pt.su[i] * pt.zsu[i];
+      T c_tu = pt.tu[i] * pt.ztu[i];
+      comp_sq += c_su * c_su + c_tu * c_tu;
+    }
+  }
+
+  return comp_sq;
 }
 
 template <typename T>

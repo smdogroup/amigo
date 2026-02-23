@@ -1,8 +1,9 @@
 import sys
 import time
 import numpy as np
+from collections import deque
 from scipy.sparse import csr_matrix
-from scipy.sparse.linalg import splu, eigsh
+from scipy.sparse.linalg import splu
 
 from .amigo import InteriorPointOptimizer, MemoryLocation
 from .model import ModelVector
@@ -102,6 +103,44 @@ def gmres(mult, precon, b, x, msub=20, rtol=1e-2, atol=1e-30):
     return
 
 
+def _find_diag_indices(rowp, cols, nrows):
+    """Find the CSR data-array index of each diagonal entry (row == col)."""
+    diag_idx = np.empty(nrows, dtype=np.intp)
+    for i in range(nrows):
+        start, end = rowp[i], rowp[i + 1]
+        row_cols = cols[start:end]
+        pos = np.searchsorted(row_cols, i)
+        if pos < len(row_cols) and row_cols[pos] == i:
+            diag_idx[i] = start + pos
+        else:
+            diag_idx[i] = start  # fallback (should not happen)
+    return diag_idx
+
+
+class _HessianDiagMixin:
+    """Shared Hessian-diagonal helpers for CSR-based solvers.
+
+    Requires subclass to have: self.problem, self.hess, self._diag_indices.
+    """
+
+    def assemble_hessian(self, alpha, x):
+        """Assemble Lagrangian Hessian and return its diagonal.
+
+        Leaves the assembled matrix in self.hess for a subsequent
+        add_diagonal_and_factor() call.  Cost: one Hessian evaluation +
+        one device-to-host copy.  No factorization.
+        """
+        self.problem.hessian(alpha, x, self.hess)
+        self.hess.copy_data_device_to_host()
+        return self.hess.get_data()[self._diag_indices].copy()
+
+    def get_hessian_diagonal(self, alpha, x):
+        """Evaluate Hessian and return its diagonal. O(n), no factorization."""
+        self.problem.hessian(alpha, x, self.hess)
+        self.hess.copy_data_device_to_host()
+        return self.hess.get_data()[self._diag_indices]
+
+
 class DirectCudaSolver:
     def __init__(self, problem, pivot_eps=1e-12):
         self.problem = problem
@@ -119,14 +158,12 @@ class DirectCudaSolver:
         self.problem.hessian(alpha, x, self.hess)
         self.problem.add_diagonal(diag, self.hess)
         self.solver.factor()
-        return
 
     def solve(self, bx, px):
         self.solver.solve(bx, px)
-        return
 
 
-class DirectScipySolver:
+class DirectScipySolver(_HessianDiagMixin):
     def __init__(self, problem):
         self.problem = problem
         loc = MemoryLocation.HOST_AND_DEVICE
@@ -134,55 +171,159 @@ class DirectScipySolver:
         self.nrows, self.ncols, self.nnz, self.rowp, self.cols = (
             self.hess.get_nonzero_structure()
         )
-
+        self._diag_indices = _find_diag_indices(self.rowp, self.cols, self.nrows)
         self.lu = None
-        return
 
-    def factor(self, alpha, x, diag):
-        """
-        Compute and factor the Hessian matrix
-        """
+    def add_diagonal_and_factor(self, diag):
+        """Add diagonal to the already-assembled Hessian and factorize.
 
-        # Compute the Hessian and add the diagonal values
-        self.problem.hessian(alpha, x, self.hess)
+        Must be called after assemble_hessian().  Modifies self.hess
+        in-place, so a subsequent retry must use factor() (which
+        re-assembles from scratch).
+        """
         self.problem.add_diagonal(diag, self.hess)
         self.hess.copy_data_device_to_host()
-
-        # Build the CSR matrix and convert to CSC
         shape = (self.nrows, self.ncols)
         data = self.hess.get_data()
         H = csr_matrix((data, self.cols, self.rowp), shape=shape).tocsc()
-
-        # Compute the LU factorization
         self.lu = splu(H, permc_spec="COLAMD", diag_pivot_thresh=1.0)
 
-        return
+    def factor(self, alpha, x, diag):
+        """Assemble Hessian, add diagonal, and factorize (one shot).
+
+        Used for inertia-correction retries where we need a fresh
+        assembly (since add_diagonal_and_factor mutates self.hess).
+        """
+        self.problem.hessian(alpha, x, self.hess)
+        self.problem.add_diagonal(diag, self.hess)
+        self.hess.copy_data_device_to_host()
+        shape = (self.nrows, self.ncols)
+        data = self.hess.get_data()
+        H = csr_matrix((data, self.cols, self.rowp), shape=shape).tocsc()
+        self.lu = splu(H, permc_spec="COLAMD", diag_pivot_thresh=1.0)
 
     def solve(self, bx, px):
-        """
-        Solve the KKT system
-        """
-
+        """Solve the KKT system."""
         bx.copy_device_to_host()
         px.get_array()[:] = self.lu.solve(bx.get_array())
         px.copy_host_to_device()
 
-        return
+    def solve_array(self, rhs):
+        """Solve K*x = rhs using existing factorization. Returns numpy array."""
+        return self.lu.solve(rhs)
 
-    def compute_eigenvalues(self, alpha, x, diag=None, k=20, sigma=0.0, which="LM"):
+    def get_inertia(self):
+        """Approximate inertia from LU diagonal (heuristic).
+
+        With diag_pivot_thresh=1.0 (strong diagonal pivoting), the signs of
+        U's diagonal approximate the eigenvalue signs of the original matrix.
+        Returns (n_positive, n_negative).
         """
-        Compute the eigenvalues and eigenvectors
+        if self.lu is None:
+            raise RuntimeError("Must call factor() before get_inertia()")
+        u_diag = self.lu.U.diagonal()
+        return int(np.sum(u_diag > 0)), int(np.sum(u_diag < 0))
+
+
+class PardisoSolver(_HessianDiagMixin):
+    """Sparse LDL^T solver via Intel MKL PARDISO with inertia detection.
+
+    Uses symmetric indefinite factorization (mtype=-2) which provides
+    exact inertia (positive/negative eigenvalue counts) after factorization.
+    This enables inertia correction for nonconvex optimization.
+
+    The upper-triangle sparsity structure is cached at construction time
+    so that factor() only copies data (O(nnz)) without rebuilding the
+    CSR structure. Passing the same matrix object to pypardiso lets it
+    skip symbolic analysis (phase 11) after the first factorization.
+
+    Falls back to DirectScipySolver if pypardiso is not installed.
+    """
+
+    def __init__(self, problem):
+        from pypardiso import PyPardisoSolver
+
+        self.problem = problem
+        loc = MemoryLocation.HOST_AND_DEVICE
+        self.hess = self.problem.create_matrix(loc)
+        self.nrows, self.ncols, self.nnz, self.rowp, self.cols = (
+            self.hess.get_nonzero_structure()
+        )
+        # mtype=-2: real symmetric indefinite
+        self.pardiso = PyPardisoSolver(mtype=-2)
+
+        # Pre-compute upper-triangle mask (sparsity structure is fixed).
+        # For each entry in the full CSR, mark True if col >= row.
+        upper_mask = np.empty(self.nnz, dtype=bool)
+        for i in range(self.nrows):
+            start, end = self.rowp[i], self.rowp[i + 1]
+            upper_mask[start:end] = self.cols[start:end] >= i
+        self._upper_mask = upper_mask
+
+        # Build upper-triangle CSR structure once (indices/indptr are fixed).
+        upper_cols = self.cols[upper_mask]
+        upper_indptr = np.zeros(self.nrows + 1, dtype=self.rowp.dtype)
+        for i in range(self.nrows):
+            start, end = self.rowp[i], self.rowp[i + 1]
+            upper_indptr[i + 1] = upper_indptr[i] + int(
+                np.sum(self.cols[start:end] >= i)
+            )
+        upper_data = np.zeros(len(upper_cols))
+
+        # Persistent CSR matrix — same object passed to pardiso every time
+        # so symbolic analysis (phase 11) runs once, then only numerical
+        # factorization (phase 22) on subsequent calls.
+        self._matrix = csr_matrix(
+            (upper_data, upper_cols.copy(), upper_indptr.copy()),
+            shape=(self.nrows, self.ncols),
+        )
+
+        # Pre-compute diagonal entry indices for fast diagonal extraction
+        self._diag_indices = _find_diag_indices(self.rowp, self.cols, self.nrows)
+
+    def add_diagonal_and_factor(self, diag):
+        """Add diagonal to the already-assembled Hessian and LDL^T factorize.
+
+        Must be called after assemble_hessian().  Modifies self.hess
+        in-place, so a subsequent retry must use factor() (which
+        re-assembles from scratch).
+        """
+        self.problem.add_diagonal(diag, self.hess)
+        self.hess.copy_data_device_to_host()
+        data = self.hess.get_data()
+        self._matrix.data[:] = data[self._upper_mask]
+        self.pardiso.factorize(self._matrix)
+
+    def factor(self, alpha, x, diag):
+        """Assemble Hessian, add diagonal, and LDL^T factorize (one shot).
+
+        Used for inertia-correction retries where we need a fresh
+        assembly (since add_diagonal_and_factor mutates self.hess).
         """
         self.problem.hessian(alpha, x, self.hess)
-        if diag is not None:
-            self.problem.add_diagonal(diag, self.hess)
-
+        self.problem.add_diagonal(diag, self.hess)
+        self.hess.copy_data_device_to_host()
         data = self.hess.get_data()
-        H = csr_matrix((data, self.cols, self.rowp), shape=(self.nrows, self.ncols))
+        self._matrix.data[:] = data[self._upper_mask]
+        self.pardiso.factorize(self._matrix)
 
-        eigs, vecs = eigsh(H, k=k, sigma=sigma, which=which)
+    def get_inertia(self):
+        """Return (n_positive, n_negative) eigenvalue counts from LDL^T.
 
-        return eigs, vecs
+        Uses PARDISO iparm(22) and iparm(23) (1-based Fortran indexing),
+        which are iparm[21] and iparm[22] in 0-based Python indexing.
+        """
+        return int(self.pardiso.iparm[21]), int(self.pardiso.iparm[22])
+
+    def solve(self, bx, px):
+        """Solve the KKT system."""
+        bx.copy_device_to_host()
+        px.get_array()[:] = self.pardiso.solve(self._matrix, bx.get_array())
+        px.copy_host_to_device()
+
+    def solve_array(self, rhs):
+        """Solve K*x = rhs using existing factorization. Returns numpy array."""
+        return self.pardiso.solve(self._matrix, rhs)
 
 
 class LNKSInexactSolver:
@@ -221,8 +362,6 @@ class LNKSInexactSolver:
         upper = model.num_variables
         self.design_indices = np.sort(np.setdiff1d(np.arange(upper), all_states))
 
-        return
-
     def factor(self, alpha, x, diag):
 
         # Compute the Hessian
@@ -240,12 +379,8 @@ class LNKSInexactSolver:
         self.A_lu = splu(self.A.tocsc(), permc_spec="COLAMD", diag_pivot_thresh=1.0)
         self.Hxx_lu = splu(self.Hxx.tocsc(), permc_spec="COLAMD", diag_pivot_thresh=1.0)
 
-        return
-
     def mult(self, x, y):
         y[:] = self.Hmat @ x
-
-        return
 
     def precon(self, b, x):
         x[self.res_indices] = self.A_lu.solve(b[self.state_indices], trans="T")
@@ -253,8 +388,6 @@ class LNKSInexactSolver:
         x[self.design_indices] = self.Hxx_lu.solve(bx)
         bu = b[self.res_indices] - self.dRdx @ x[self.design_indices]
         x[self.state_indices] = self.A_lu.solve(bu)
-
-        return
 
     def solve(self, bx, px):
         bx.copy_device_to_host()
@@ -267,8 +400,6 @@ class LNKSInexactSolver:
             rtol=self.gmres_rtol,
         )
         px.copy_host_to_device()
-
-        return
 
 
 class DirectPetscSolver:
@@ -290,8 +421,6 @@ class DirectPetscSolver:
         # Right-hand side and solution vector
         self.b = PETSc.Vec().createMPI(s, bsize=1, comm=comm)
         self.x = PETSc.Vec().createMPI(s, bsize=1, comm=comm)
-
-        return
 
     def factor(self, alpha, x, diag):
         # Compute the Hessian
@@ -326,9 +455,6 @@ class DirectPetscSolver:
         M.setMumpsIcntl(4, 1)  # Set verbosity of the output
         M.setMumpsCntl(1, 0.01)
 
-        # ksp.setMonitor(
-        #     lambda ksp, its, rnorm: print(f"Iter {its}: ||r|| = {rnorm:.3e}")
-        # )
         self.ksp.setUp()
 
     def solve(self, bx, px):
@@ -338,11 +464,229 @@ class DirectPetscSolver:
         self.ksp.solve(self.b, self.x)
         px.get_array()[: self.nrows_local] = self.x.getArray()[:]
 
-        # if self.comm.size == 1:
-        #     H = tocsr(self.hess)
-        #     px.get_array()[:] = spsolve(H, bx.get_array())
 
-        return
+class CurvatureProbeConvexifier:
+    """Three-layer inertia regularization for nonconvex interior-point methods.
+
+    Layer 1 — Diagonal Hessian regularization (per-variable, exact):
+        Extract W_ii (diagonal of the Lagrangian Hessian) from the assembled
+        matrix.  For each primal variable where W_ii + Sigma_ii < 0, set
+        E_ii = |W_ii + Sigma_ii| + eps to flip the diagonal to positive.
+        Handles all diagonal negative curvature with zero lag and no blind spots.
+
+    Layer 2 — Targeted inertia correction (nonconvex primal vars):
+        After Layer 1, factorize and check inertia via LDL^T.  If wrong,
+        add scalar delta only to primal variables that appear in nonconvex
+        constraints (identified from KKT sparsity at init).  Handles
+        off-diagonal coupling (e.g. friction circle) with minimal distortion.
+
+    Layer 3 — Global inertia correction (safety net):
+        If targeted correction fails, add delta to ALL primal variables.
+        Guarantees correct inertia under any circumstance.
+
+    eps_z (virtual control) is applied selectively to nonconvex constraint
+    multipliers and tracks the barrier parameter mu.
+    """
+
+    def __init__(
+        self, options, barrier_param, model, problem, solver, distribute, tol=1e-6
+    ):
+        # eps_z / VC parameters
+        self.cz = options["convex_eps_z_coeff"]
+        self.eps_z_floor = min(1e-10, tol * 1e-2)
+        self.eps_z = max(self.eps_z_floor, self.cz * barrier_param)
+        self.tol = tol
+        self._barrier = barrier_param
+        self.theta = 0.0
+        self.eta = 0.0
+        self.vc_floor = 0.0
+        self.max_rejections = options["max_consecutive_rejections"]
+        self.barrier_inc = options["barrier_increase_factor"]
+        self.initial_barrier = options["initial_barrier_param"]
+        self.step_rejected = False
+        self.consecutive_rejections = 0
+
+        self.numerical_eps = 1e-12
+
+        # Inertia correction state
+        self.last_inertia_delta = 0.0
+
+        # Multiplier indicator
+        self.mult_ind = np.array(problem.get_multiplier_indicator(), dtype=bool)
+        self.n_neg = 0
+        self.max_reg = 0.0
+
+        # Resolve nonconvex constraint MULTIPLIER indices (for selective eps_z)
+        nc_constraints = options["nonconvex_constraints"]
+        if nc_constraints and not distribute:
+            self._nonconvex_indices = np.sort(model.get_indices(nc_constraints))
+            print(
+                f"  Selective eps_z: {len(self._nonconvex_indices)} "
+                f"nonconvex constraint entries"
+            )
+        else:
+            self._nonconvex_indices = None
+
+        # Resolve nonconvex PRIMAL variable indices (for targeted inertia)
+        # From the KKT sparsity: primal columns coupled to nonconvex rows
+        self._nonconvex_primal_indices = None
+        if self._nonconvex_indices is not None and hasattr(solver, "rowp"):
+            nc_primal = set()
+            for k in self._nonconvex_indices:
+                row_cols = solver.cols[solver.rowp[k] : solver.rowp[k + 1]]
+                nc_primal.update(row_cols[~self.mult_ind[row_cols]])
+            self._nonconvex_primal_indices = np.array(sorted(nc_primal))
+            print(
+                f"  Targeted inertia: {len(self._nonconvex_primal_indices)} "
+                f"nonconvex primal vars"
+            )
+
+    def _compute_schur_diagonal(self, solver, diag_base):
+        """Diagonal of J^T |D^{-1}| J (Schur complement contribution)."""
+        data = solver.hess.get_data()
+        rowp = solver.rowp
+        cols = solver.cols
+        n = len(self.mult_ind)
+
+        # Constraint diagonal weights: |1/D_kk|
+        D_abs = np.abs(diag_base[self.mult_ind])
+        safe = D_abs > 1e-30
+        w = np.zeros_like(D_abs)
+        w[safe] = 1.0 / D_abs[safe]
+
+        # Per-row weight: nonzero only for constraint rows
+        row_weight = np.zeros(n)
+        row_weight[self.mult_ind] = w
+
+        # Expand to per-NNZ-entry weight via CSR row lengths
+        row_nnz = np.diff(rowp)
+        entry_weight = np.repeat(row_weight, row_nnz)
+
+        # J_ki^2 * w_k for each NNZ entry in constraint rows
+        weighted_sq = data**2 * entry_weight
+
+        # Scatter-add to column indices (only primal columns get nonzero)
+        schur_diag = np.zeros(n)
+        np.add.at(schur_diag, cols, weighted_sq)
+
+        return schur_diag[~self.mult_ind]
+
+    def build_regularization(
+        self,
+        diag,
+        W_diag,
+        diag_base,
+        zero_hessian_indices=None,
+        zero_hessian_eps=None,
+        solver=None,
+    ):
+        """Layer 1: per-variable regularization from Hessian diagonal + Schur complement."""
+        diag.copy_device_to_host()
+        diag_arr = diag.get_array()
+        n = len(diag_arr)
+
+        primal = ~self.mult_ind
+
+        full_diag = W_diag + diag_base
+        effective_diag = full_diag.copy()
+        if solver is not None and hasattr(solver, "hess"):
+            schur_contrib = self._compute_schur_diagonal(solver, diag_base)
+            effective_diag[primal] += schur_contrib
+
+        reg = np.full(n, self.numerical_eps)
+        neg_curv = primal & (effective_diag < 0)
+        reg[neg_curv] = np.abs(effective_diag[neg_curv]) + self.numerical_eps
+
+        if zero_hessian_indices is not None and zero_hessian_eps is not None:
+            np.maximum(
+                reg[zero_hessian_indices],
+                zero_hessian_eps,
+                out=reg[zero_hessian_indices],
+            )
+
+        self.n_neg = int(np.sum(neg_curv))
+        primal_reg = reg[primal]
+        self.max_reg = float(np.max(primal_reg)) if len(primal_reg) > 0 else 0.0
+
+        diag_arr[primal] += reg[primal]
+
+        # Dual eps_z (selective to nonconvex constraints)
+        eps_z_num = self.eps_z_floor
+        diag_arr[self.mult_ind] -= eps_z_num
+        if self._nonconvex_indices is not None and self.eps_z > eps_z_num:
+            diag_arr[self._nonconvex_indices] -= self.eps_z - eps_z_num
+        elif self._nonconvex_indices is None and self.eps_z > eps_z_num:
+            diag_arr[self.mult_ind] -= self.eps_z - eps_z_num
+
+        diag.copy_host_to_device()
+
+    # --- Shared interface ---
+
+    def decompose_residual(self, res, vars):
+        """Compute theta (feasibility), eta (optimality), and vc_floor."""
+        res_arr = np.array(res.get_array())
+        self.theta = np.linalg.norm(res_arr[self.mult_ind])
+        self.eta = np.linalg.norm(res_arr[~self.mult_ind])
+
+        x_sol = np.array(vars.get_solution())
+        if self._nonconvex_indices is not None:
+            lam_nc_norm = np.linalg.norm(x_sol[self._nonconvex_indices])
+        else:
+            lam_nc_norm = np.linalg.norm(x_sol[self.mult_ind])
+        self.vc_floor = self.eps_z * lam_nc_norm
+
+    def update_eps_z(self, barrier_param):
+        self.eps_z = max(self.eps_z_floor, self.cz * barrier_param)
+
+    def should_force_barrier_reduction(self):
+        """Force barrier reduction when eps_z limits convergence."""
+        total_res = max(self.theta, self.eta)
+        if total_res < 1e-30:
+            return False
+        # theta must be limited by eps_z AND be a meaningful part of the residual
+        return self.theta <= 3.0 * self.vc_floor and self.theta > 0.1 * total_res
+
+    def begin_iteration(self, barrier_param):
+        self._barrier = barrier_param
+        self.update_eps_z(barrier_param)
+        if self.step_rejected:
+            self.step_rejected = False
+
+    def reject_step(self):
+        """Mark step as rejected."""
+        self.step_rejected = True
+        self.consecutive_rejections += 1
+
+    def handle_rejection_escape(self, barrier_param):
+        if self.consecutive_rejections >= self.max_rejections:
+            new_barrier = min(barrier_param * self.barrier_inc, self.initial_barrier)
+            if new_barrier > barrier_param:
+                self.eps_z = self.cz * new_barrier
+                self.consecutive_rejections = 0
+                return new_barrier, True
+            else:
+                self.consecutive_rejections = 0
+                return barrier_param, False
+        return barrier_param, None
+
+    def check_stagnation(
+        self, stagnation_count, threshold, barrier_param, barrier_fraction, tol
+    ):
+        if stagnation_count >= threshold and barrier_param > tol:
+            new_barrier = max(barrier_param * barrier_fraction, tol)
+            return new_barrier, True
+        return barrier_param, False
+
+    def iter_data(self):
+        return {
+            "eps_x": self.max_reg if self.max_reg > 0 else self.numerical_eps,
+            "eps_z": self.eps_z,
+            "theta": self.theta,
+            "eta": self.eta,
+            "vc_floor": self.vc_floor,
+            "inertia_delta": self.last_inertia_delta,
+            "n_neg": self.n_neg,
+        }
 
 
 class Optimizer:
@@ -356,6 +700,24 @@ class Optimizer:
         comm=None,
         distribute=False,
     ):
+        """
+        Initialize the optimizer.
+
+        Parameters
+        ----------
+        model : Model
+            The amigo model to optimize
+        x : array-like, optional
+            Initial point
+        lower, upper : array-like, optional
+            Variable bounds
+        solver : Solver, optional
+            Linear solver for KKT system
+        comm : MPI communicator, optional
+            For distributed optimization
+        distribute : bool
+            Whether to distribute the problem
+        """
         self.model = model
         self.problem = self.model.get_problem()
 
@@ -411,10 +773,14 @@ class Optimizer:
             self.problem.scatter_vector(self.upper, self.mpi_problem, self.mpi_upper)
 
         # Set the solver for the KKT system
+        # Prefer PardisoSolver (LDL^T with inertia detection) when available
         if solver is None and self.distribute:
             self.solver = DirectPetscSolver(self.comm, self.mpi_problem)
         elif solver is None:
-            self.solver = DirectScipySolver(self.problem)
+            try:
+                self.solver = PardisoSolver(self.problem)
+            except (ImportError, Exception):
+                self.solver = DirectScipySolver(self.problem)
         else:
             self.solver = solver
 
@@ -453,8 +819,6 @@ class Optimizer:
             self.diag = self.problem.create_vector()
             self.px = self.problem.create_vector()
 
-        return
-
     def write_log(self, iteration, iter_data):
         # Write out to the log information about this line
         if iteration % 10 == 0:
@@ -475,21 +839,19 @@ class Optimizer:
         print(line)
         sys.stdout.flush()
 
-        return
-
     def get_options(self, options={}):
         default = {
             "max_iterations": 100,
-            "barrier_strategy": "monotone",
+            "barrier_strategy": "heuristic",  # "heuristic", "monotone", "quality_function"
             "monotone_barrier_fraction": 0.1,
-            "convergence_tolerance": 1e-6,
+            "convergence_tolerance": 1e-8,
             "fraction_to_boundary": 0.95,
             "initial_barrier_param": 1.0,
             "max_line_search_iterations": 10,
             "check_update_step": False,
-            "backtracting_factor": 0.5,
+            "backtracking_factor": 0.5,
             "record_components": [],
-            "gamma_peanlty": 1e3,
+            "gamma_penalty": 1e3,
             "equal_primal_dual_step": False,
             "init_least_squares_multipliers": True,
             "init_affine_step_multipliers": False,
@@ -498,6 +860,42 @@ class Optimizer:
             "heuristic_barrier_r": 0.95,
             "verbose_barrier": False,
             "continuation_control": None,
+            # Regularization options
+            "regularization_eps_x": 1e-8,  # Primal regularization
+            "regularization_eps_z": 1e-8,  # Dual regularization
+            "adaptive_regularization": True,  # Increase regularization on failure
+            "max_regularization": 1e-2,  # Maximum regularization value
+            "regularization_increase_factor": 10.0,  # Factor to increase regularization
+            # Line search options
+            "armijo_constant": 1e-4,  # Armijo sufficient decrease constant
+            "use_armijo_line_search": True,  # Use Armijo condition
+            # Acceptable convergence (like IPOPT)
+            "acceptable_tol": None,  # Acceptable residual threshold (None = 100x convergence_tolerance)
+            "acceptable_iter": 10,  # Iterations without progress to trigger acceptable
+            # Advanced features
+            "adaptive_tau": True,  # Adaptive fraction-to-boundary
+            "tau_min": 0.99,  # Minimum tau value
+            "progress_based_barrier": True,  # Only reduce barrier when making progress
+            "barrier_progress_tol": 10.0,  # kappa_epsilon factor for barrier subproblem tolerance
+            # Variable-specific regularization for zero-Hessian (linearly-appearing) variables
+            "zero_hessian_variables": [],  # Variable names (e.g., ["dyn.qdot"])
+            "regularization_eps_x_zero_hessian": 1.0,  # Strong eps_x for those variables
+            # Three-layer inertia regularization (see CurvatureProbeConvexifier)
+            # Layer 1: per-variable reg from Hessian diagonal
+            # Layer 2: targeted inertia correction on nonconvex primal vars
+            # Layer 3: global inertia correction (fallback)
+            "curvature_probe_convexification": False,
+            "convex_eps_z_coeff": 1.0,  # C_z: eps_z = C_z * mu
+            "nonconvex_constraints": [],  # Constraint names for selective eps_z
+            "max_consecutive_rejections": 5,  # Before barrier increase
+            "barrier_increase_factor": 5.0,  # Barrier *= this when stuck
+            "max_inertia_corrections": 8,  # Max refactorizations for inertia
+            # Quality function barrier (Nocedal-Wachter-Waltz 2009, Section 4)
+            "quality_function_sigma_max": 1000.0,  # Upper bound for sigma search
+            "quality_function_golden_iters": 12,  # Golden section iterations
+            "quality_function_kappa_free": 0.9999,  # Nonmonotone acceptance ratio (paper: kappa=0.9999)
+            "quality_function_l_max": 5,  # Lookback window for free mode
+            "quality_function_norm_scaling": True,  # Section 6: divide each term by element count
         }
 
         for name in options:
@@ -508,18 +906,160 @@ class Optimizer:
 
         return default
 
-    def _compute_barrier_heuristic(self, xi, complementarity, gamma, r):
-        """
-        Compute the heuristic barrier parameter.
-        Formula: μ = γ * min((1-r)*(1-ξ)/ξ, 2)^3 * complementarity
-        """
+    def _compute_barrier_heuristic(self, xi, complementarity, gamma, r, tol=1e-12):
+        """Compute LOQO-style barrier parameter (NWW 2009, eq 3.6)."""
         if xi > 1e-10:
             term = (1 - r) * (1 - xi) / xi
             heuristic_factor = min(term, 2.0) ** 3
         else:
             heuristic_factor = 2.0**3
 
-        return gamma * heuristic_factor * complementarity, heuristic_factor
+        mu_new = gamma * heuristic_factor * complementarity
+
+        # Floor at tolerance (only safeguard in the paper)
+        mu_new = max(mu_new, tol)
+
+        return mu_new, heuristic_factor
+
+    def _compute_adaptive_tau(self, barrier_param, tau_min=0.99):
+        """Adaptive fraction-to-boundary: tau = max(tau_min, 1 - mu)."""
+        return max(tau_min, 1.0 - barrier_param)
+
+    def _should_reduce_barrier(self, res_norm, barrier_param, kappa_epsilon=10.0):
+        """Reduce barrier when subproblem is solved: res <= kappa_eps * mu."""
+        barrier_tol = kappa_epsilon * barrier_param
+        return res_norm <= barrier_tol
+
+    def _golden_section_search(self, f, a, b, n_iters=12):
+        """Golden section search for minimum of f on [a, b].
+
+        Returns (x_opt, f_opt).
+        """
+        gr = (np.sqrt(5.0) + 1.0) / 2.0
+        c = b - (b - a) / gr
+        d = a + (b - a) / gr
+        fc = f(c)
+        fd = f(d)
+
+        for _ in range(n_iters):
+            if b - a < b * 1e-2:
+                break
+            if fc < fd:
+                b = d
+                d = c
+                fd = fc
+                c = b - (b - a) / gr
+                fc = f(c)
+            else:
+                a = c
+                c = d
+                fc = fd
+                d = a + (b - a) / gr
+                fd = f(d)
+
+        return (c, fc) if fc < fd else (d, fd)
+
+    def _compute_quality_function_barrier(
+        self, tau_min, use_adaptive_tau, options, comm_rank
+    ):
+        """Choose barrier parameter via quality function (NWW 2009, Section 4).
+
+        Returns (sigma_star, mu_new).
+        """
+        avg_comp, xi = self.optimizer.compute_complementarity(self.vars)
+        if avg_comp < 1e-30:
+            return 1.0, self.barrier_param
+
+        mu_nat = avg_comp  # x^T z / n
+
+        # Affine-scaling RHS (mu=0) and dual/primal infeasibility norms
+        dual_infeas_sq, primal_infeas_sq = (
+            self.optimizer.compute_residual_and_infeasibility(
+                0.0, self.gamma_penalty, self.vars, self.grad, self.res
+            )
+        )
+
+        # Delta(0): affine scaling direction (mu=0)
+        rhs0 = self.res.get_array().copy()
+        if hasattr(self.solver, "solve_array"):
+            px0 = self.solver.solve_array(rhs0).copy()
+        else:
+            self.solver.solve(self.res, self.px)
+            px0 = self.px.get_array().copy()
+
+        # Delta(1): centering direction (mu=avg_comp)
+        self.optimizer.compute_residual(
+            mu_nat, self.gamma_penalty, self.vars, self.grad, self.res
+        )
+        if hasattr(self.solver, "solve_array"):
+            px1 = self.solver.solve_array(self.res.get_array().copy()).copy()
+        else:
+            self.solver.solve(self.res, self.px)
+            px1 = self.px.get_array().copy()
+
+        dpx = px1 - px0
+
+        # sigma_min floor (paper Sec 4)
+        tol_qf = options["convergence_tolerance"]
+        mu_floor = max(tol_qf * 0.01, 1e-14)
+        sigma_min_floor = (mu_floor / mu_nat) if mu_nat > mu_floor else 1e-6
+
+        # Fixed tau for q_L probing (paper eq 2.8)
+        tau_qf = options["fraction_to_boundary"]
+
+        # Section 6 norm scaling (computed once in optimize(), stored on self)
+        qf_sd = self._qf_sd
+        qf_sp = self._qf_sp
+        qf_sc = self._qf_sc
+
+        def eval_qf(sigma):
+            """Evaluate q_L(sigma) — paper eq (4.2)."""
+            mu_s = max(sigma * mu_nat, mu_floor)
+            self.px.get_array()[:] = px0 + sigma * dpx
+            self.px.copy_host_to_device()
+            self.optimizer.compute_update(
+                mu_s, self.gamma_penalty, self.vars, self.px, self.update
+            )
+            alpha_x, _, alpha_z, _ = self.optimizer.compute_max_step(
+                tau_qf, self.vars, self.update
+            )
+            self.optimizer.apply_step_update(
+                alpha_x, alpha_z, self.vars, self.update, self.temp
+            )
+            trial_comp_sq = self.optimizer.compute_complementarity_sq(self.temp)
+            return (
+                (1.0 - alpha_z) ** 2 * dual_infeas_sq * qf_sd
+                + (1.0 - alpha_x) ** 2 * primal_infeas_sq * qf_sp
+                + trial_comp_sq * qf_sc
+            )
+
+        # Interval selection (paper Section 4): test q_L(0.99) vs q_L(1)
+        # to choose [sigma_min, 1] or [1, sigma_max], then golden section.
+        sigma_min = max(1e-6, sigma_min_floor)
+        sigma_max = options["quality_function_sigma_max"]
+        n_gs_iters = options["quality_function_golden_iters"]
+
+        qL_099 = eval_qf(0.99)
+        qL_1 = eval_qf(1.0)
+
+        if qL_099 <= qL_1:
+            sigma_star, _ = self._golden_section_search(
+                eval_qf, sigma_min, 1.0, n_iters=n_gs_iters
+            )
+        else:
+            sigma_star, _ = self._golden_section_search(
+                eval_qf, 1.0, sigma_max, n_iters=n_gs_iters
+            )
+
+        mu_new = sigma_star * mu_nat
+
+        if comm_rank == 0:
+            print(
+                f"  QF: sigma={sigma_star:.4f}, "
+                f"mu={mu_new:.4e} (comp={avg_comp:.4e})"
+            )
+
+        return sigma_star, mu_new
 
     def _compute_least_squares_multipliers(self):
         """
@@ -554,8 +1094,6 @@ class Optimizer:
 
         # Copy the multipiler values from self.px to x
         self.optimizer.copy_multipliers(x, self.px)
-
-        return
 
     def _compute_affine_multipliers(self, gamma_penalty=1e3, beta_min=1.0):
         """
@@ -602,17 +1140,307 @@ class Optimizer:
 
         return barrier
 
-    def _add_regularization_terms(self, diag, eps_x=1e-4, eps_z=1e-4):
-        self.optimizer.set_design_vars_value(eps_x, diag)
-        self.optimizer.set_multipliers_value(-eps_z, diag)
+    def _add_regularization_terms(
+        self,
+        diag,
+        eps_x=1e-4,
+        eps_z=1e-4,
+        zero_hessian_indices=None,
+        eps_x_zero=None,
+        nonconvex_indices=None,
+    ):
+        """
+        Add regularization to the KKT diagonal: +eps_x for primal, -eps_z for dual.
 
-        return
+        When nonconvex_indices is provided, eps_z is applied selectively:
+        tiny eps on all multipliers, full eps_z only on nonconvex constraints.
+        """
+        diag.copy_device_to_host()
+        d = diag.get_array()
+
+        problem = self.mpi_problem if self.distribute else self.problem
+        mult = np.array(problem.get_multiplier_indicator(), dtype=bool)
+
+        if nonconvex_indices is not None:
+            eps_z_num = 1e-10
+            d[~mult] += eps_x
+            d[mult] -= eps_z_num
+            if eps_z > eps_z_num:
+                d[nonconvex_indices] -= eps_z - eps_z_num
+        else:
+            d[~mult] += eps_x
+            d[mult] -= eps_z
+
+        if zero_hessian_indices is not None and eps_x_zero is not None:
+            d[zero_hessian_indices] += eps_x_zero - eps_x
+
+        diag.copy_host_to_device()
 
     def _zero_multipliers(self, x):
-        # Zero the multiplier contributions
         self.optimizer.set_multipliers_value(0.0, x)
 
-        return
+    def _update_gradient(self, x):
+        """Evaluate problem functions and gradient at x."""
+        if self.distribute:
+            self.mpi_problem.update(x)
+            self.mpi_problem.gradient(1.0, x, self.grad)
+        else:
+            self.problem.update(x)
+            self.problem.gradient(1.0, x, self.grad)
+
+    def _factorize_kkt(
+        self,
+        x,
+        diag_base,
+        probe_convex,
+        options,
+        zero_hessian_indices,
+        zero_hessian_eps,
+        comm_rank,
+    ):
+        """Regularize and factorize KKT matrix (three-layer inertia correction)."""
+        self.diag.get_array()[:] = diag_base
+        self.diag.copy_host_to_device()
+
+        if probe_convex and hasattr(self.solver, "assemble_hessian"):
+            # --- Layer 1: Diagonal Hessian regularization ---
+            W_diag = self.solver.assemble_hessian(1.0, x)
+            probe_convex.build_regularization(
+                self.diag,
+                W_diag,
+                diag_base,
+                zero_hessian_indices,
+                zero_hessian_eps,
+                solver=self.solver,
+            )
+
+            # First factorization uses the already-assembled Hessian
+            reg_diag = self.diag.get_array().copy()
+            primal_mask = ~probe_convex.mult_ind
+            n_primal = int(np.sum(primal_mask))
+            n_dual = int(np.sum(probe_convex.mult_ind))
+            has_inertia = hasattr(self.solver, "get_inertia")
+            max_corrections = options["max_inertia_corrections"]
+            delta = probe_convex.last_inertia_delta / 3.0
+
+            # Targeted inertia correction variable set
+            nc_primal = probe_convex._nonconvex_primal_indices
+            use_targeted = nc_primal is not None and len(nc_primal) > 0
+
+            inertia_ok = False
+            try:
+                self.solver.add_diagonal_and_factor(self.diag)
+                if has_inertia:
+                    n_pos, n_neg = self.solver.get_inertia()
+                    inertia_ok = n_pos == n_primal and n_neg == n_dual
+                else:
+                    inertia_ok = True
+            except Exception:
+                pass  # factorization failed; proceed to correction
+
+            if not inertia_ok and has_inertia:
+                # --- Layers 2/3: Inertia correction ---
+                # Layer 2: targeted delta on nonconvex primal vars (first half)
+                # Layer 3: global delta on all primal vars (second half)
+                delta = max(delta, 1e-8)
+                for attempt in range(max_corrections):
+                    self.diag.get_array()[:] = reg_diag
+                    if use_targeted and attempt < max_corrections // 2:
+                        self.diag.get_array()[nc_primal] += delta
+                    else:
+                        if attempt == max_corrections // 2 and comm_rank == 0:
+                            print(
+                                f"  Inertia: targeted failed, " f"switching to global"
+                            )
+                        self.diag.get_array()[primal_mask] += delta
+                    self.diag.copy_host_to_device()
+
+                    try:
+                        self.solver.factor(1.0, x, self.diag)
+                    except Exception as e:
+                        delta = max(1e-8, delta * 10)
+                        if comm_rank == 0:
+                            print(f"  Inertia: factor failed, " f"delta -> {delta:.2e}")
+                        if attempt == max_corrections - 1:
+                            raise e
+                        continue
+
+                    n_pos, n_neg = self.solver.get_inertia()
+                    if n_pos == n_primal and n_neg == n_dual:
+                        inertia_ok = True
+                        break
+                    delta = max(1e-8, delta * 10)
+                    if comm_rank == 0:
+                        layer = (
+                            "targeted"
+                            if use_targeted and attempt < max_corrections // 2
+                            else "global"
+                        )
+                        print(
+                            f"  Inertia ({layer}): expected "
+                            f"({n_primal}+, {n_dual}-), got "
+                            f"({n_pos}+, {n_neg}-), "
+                            f"delta -> {delta:.2e}"
+                        )
+
+            probe_convex.last_inertia_delta = delta
+        elif probe_convex:
+            # Solver without assemble_hessian: use Layer 1 with separate call
+            if hasattr(self.solver, "get_hessian_diagonal"):
+                W_diag = self.solver.get_hessian_diagonal(1.0, x)
+            else:
+                W_diag = np.zeros(len(diag_base))
+            probe_convex.build_regularization(
+                self.diag, W_diag, diag_base, zero_hessian_indices, zero_hessian_eps
+            )
+            try:
+                self.solver.factor(1.0, x, self.diag)
+            except Exception:
+                # Fallback: add uniform delta
+                self.diag.get_array()[~probe_convex.mult_ind] += 1e-4
+                self.diag.copy_host_to_device()
+                self.solver.factor(1.0, x, self.diag)
+        else:
+            # Plain scalar regularization with adaptive retry
+            eps_x = options["regularization_eps_x"]
+            eps_z = options["regularization_eps_z"]
+            self._add_regularization_terms(
+                self.diag, eps_x, eps_z, zero_hessian_indices, zero_hessian_eps
+            )
+
+            max_reg = options["max_regularization"]
+            reg_factor = options["regularization_increase_factor"]
+            for attempt in range(15):
+                try:
+                    self.solver.factor(1.0, x, self.diag)
+                    break
+                except Exception as e:
+                    if options["adaptive_regularization"] and eps_x < max_reg:
+                        eps_x *= reg_factor
+                        eps_z *= reg_factor
+                        if comm_rank == 0:
+                            print(f"  Factorization failed, eps_x -> {eps_x:.2e}")
+                        self.diag.get_array()[:] = diag_base
+                        self.diag.copy_host_to_device()
+                        self._add_regularization_terms(
+                            self.diag,
+                            eps_x,
+                            eps_z,
+                            zero_hessian_indices,
+                            zero_hessian_eps,
+                        )
+                    else:
+                        raise e
+
+    def _solve_with_mu(self, mu):
+        """Back-solve for Newton direction with given barrier parameter.
+
+        Requires _factorize_kkt() to have been called first.
+        Modifies self.res, self.px, and self.update in-place.
+        """
+        self.optimizer.compute_residual(
+            mu, self.gamma_penalty, self.vars, self.grad, self.res
+        )
+        self.solver.solve(self.res, self.px)
+        self.optimizer.compute_update(
+            mu, self.gamma_penalty, self.vars, self.px, self.update
+        )
+
+    def _find_direction(
+        self,
+        x,
+        diag_base,
+        probe_convex,
+        options,
+        zero_hessian_indices,
+        zero_hessian_eps,
+        comm_rank,
+    ):
+        """Compute Newton direction: factorize + solve.
+
+        Convenience wrapper that calls _factorize_kkt then _solve_with_mu.
+        """
+        self._factorize_kkt(
+            x,
+            diag_base,
+            probe_convex,
+            options,
+            zero_hessian_indices,
+            zero_hessian_eps,
+            comm_rank,
+        )
+        self._solve_with_mu(self.barrier_param)
+
+    def _line_search(self, alpha_x, alpha_z, convex, options, comm_rank):
+        """Backtracking line search on ||KKT|| merit function.
+
+        Returns (alpha, line_iters, step_accepted).
+        """
+        max_iters = options["max_line_search_iterations"]
+        armijo_c = options["armijo_constant"]
+        use_armijo = options["use_armijo_line_search"]
+        backtrack = options["backtracking_factor"]
+
+        ls_baseline = self.optimizer.compute_residual(
+            self.barrier_param, self.gamma_penalty, self.vars, self.grad, self.res
+        )
+        dphi_0 = -ls_baseline
+
+        alpha = 1.0
+        for j in range(max_iters):
+            self.optimizer.apply_step_update(
+                alpha * alpha_x, alpha * alpha_z, self.vars, self.update, self.temp
+            )
+
+            xt = self.temp.get_solution()
+            self._update_gradient(xt)
+
+            res_new = self.optimizer.compute_residual(
+                self.barrier_param, self.gamma_penalty, self.temp, self.grad, self.res
+            )
+
+            # Acceptance criterion
+            if use_armijo:
+                threshold = ls_baseline + armijo_c * alpha * dphi_0
+                acceptable = res_new <= threshold
+            else:
+                acceptable = res_new < ls_baseline
+
+            if acceptable:
+                self.vars.copy(self.temp)
+                return alpha, j + 1, True
+
+            if j < max_iters - 1:
+                alpha *= backtrack
+                continue
+
+            # Last iteration: relaxed acceptance / rejection
+            if convex:
+                if res_new <= ls_baseline:
+                    self.vars.copy(self.temp)
+                    return alpha, j + 1, True
+                convex.reject_step()
+                self._update_gradient(self.vars.get_solution())
+                if comm_rank == 0:
+                    print(f"  Step REJECTED ({convex.consecutive_rejections}x)")
+                return alpha, j + 1, False
+            elif res_new < 1.1 * ls_baseline:
+                self.vars.copy(self.temp)
+                if comm_rank == 0 and res_new >= ls_baseline:
+                    print(f"  Warning: Accepted step with slight increase")
+                return alpha, j + 1, True
+            else:
+                alpha = 0.01
+                self.optimizer.apply_step_update(
+                    alpha * alpha_x, alpha * alpha_z, self.vars, self.update, self.temp
+                )
+                self._update_gradient(self.temp.get_solution())
+                self.vars.copy(self.temp)
+                if comm_rank == 0:
+                    print(f"  Warning: Line search failed, taking minimal step")
+                return alpha, j + 1, True
+
+        return alpha, max_iters, False
 
     def optimize(self, options={}):
         """
@@ -634,9 +1462,11 @@ class Optimizer:
         opt_data = {"options": options, "converged": False, "iterations": []}
 
         self.barrier_param = options["initial_barrier_param"]
-        self.gamma_penalty = options["gamma_peanlty"]
+        self.gamma_penalty = options["gamma_penalty"]
         max_iters = options["max_iterations"]
-        tau = options["fraction_to_boundary"]
+        base_tau = options["fraction_to_boundary"]
+        tau_min = options["tau_min"]
+        use_adaptive_tau = options["adaptive_tau"]
         tol = options["convergence_tolerance"]
         record_components = options["record_components"]
         continuation_control = options["continuation_control"]
@@ -649,41 +1479,23 @@ class Optimizer:
         if not self.distribute:
             xview = ModelVector(self.model, x=x)
 
-        # Zero the multipliers so that the gradient consists of the objective gradient and
-        # constraint values
         self._zero_multipliers(x)
+        self._update_gradient(x)
 
-        # Compute the gradient
-        if self.distribute:
-            self.mpi_problem.update(x)
-            self.mpi_problem.gradient(1.0, x, self.grad)
-        else:
-            self.problem.update(x)
-            self.problem.gradient(1.0, x, self.grad)
-
-        # Set the initial point and slack variable
+        # Initialize multipliers and slacks
         self.optimizer.initialize_multipliers_and_slacks(
             self.barrier_param, self.grad, self.vars
         )
 
-        # Initialize the multipliers
         if options["init_affine_step_multipliers"]:
             self._compute_least_squares_multipliers()
-
-            # Compute the affine step multipliers and the new barrier parameter
             self.barrier_param = self._compute_affine_multipliers(
                 beta_min=self.barrier_param, gamma_penalty=self.gamma_penalty
             )
         elif options["init_least_squares_multipliers"]:
             self._compute_least_squares_multipliers()
 
-        # Compute the gradient
-        if self.distribute:
-            self.mpi_problem.update(x)
-            self.mpi_problem.gradient(1.0, x, self.grad)
-        else:
-            self.problem.update(x)
-            self.problem.gradient(1.0, x, self.grad)
+        self._update_gradient(x)
 
         line_iters = 0
         alpha_x_prev = 0.0
@@ -691,16 +1503,91 @@ class Optimizer:
         x_index_prev = -1
         z_index_prev = -1
 
-        # Storage for heuristic barrier table (to display after optimization)
-        heuristic_data = []
+        # Stagnation tracking for acceptable convergence
+        acceptable_tol = options["acceptable_tol"]
+        if acceptable_tol is None:
+            acceptable_tol = tol * 100
+        acceptable_iter = options["acceptable_iter"]
+        prev_res_norm = float("inf")
+        best_res_norm = float(
+            "inf"
+        )  # Track best residual to detect stagnation across cycles
+        stagnation_count = 0
+        precision_floor_count = 0  # Count of bit-identical residuals
+
+        # Curvature probe convexification with inertia correction
+        problem_ref = self.mpi_problem if self.distribute else self.problem
+        probe_convex = None
+        convex = None
+        if options["curvature_probe_convexification"]:
+            probe_convex = CurvatureProbeConvexifier(
+                options,
+                self.barrier_param,
+                self.model,
+                problem_ref,
+                self.solver,
+                self.distribute,
+                tol=tol,
+            )
+            convex = probe_convex
+            if comm_rank == 0:
+                n_primal = int(np.sum(~probe_convex.mult_ind))
+                solver_name = type(self.solver).__name__
+                print(
+                    f"  Three-layer inertia regularization "
+                    f"({solver_name}): {n_primal} primal vars"
+                )
+
+        zero_step_count = 0  # Zero-step recovery (plain path only)
+
+        # Resolve zero-Hessian variable indices
+        zero_hessian_indices = None
+        zero_hessian_eps = options["regularization_eps_x_zero_hessian"]
+        zh_vars = options["zero_hessian_variables"]
+        if zh_vars and not self.distribute:
+            zero_hessian_indices = np.sort(self.model.get_indices(zh_vars))
+            if comm_rank == 0:
+                print(
+                    f"  Variable-specific regularization: {len(zero_hessian_indices)} "
+                    f"zero-Hessian vars, eps_x_zero={zero_hessian_eps:.2e}"
+                )
+
+        # Quality function state (Algorithm A, NWW 2009)
+        quality_func = options["barrier_strategy"] == "quality_function"
+        qf_free_mode = True
+        qf_kappa = options["quality_function_kappa_free"]
+        qf_l_max = options["quality_function_l_max"]
+        qf_kkt_history = deque(maxlen=qf_l_max + 1)
+        qf_mu_floor = max(tol * 0.01, 1e-14)
+        qf_monotone_mu = None
+        qf_M_k_at_entry = None
+        # Section 6 norm scaling: divide each term by element count
+        qf_sd = qf_sp = qf_sc = 1.0  # default: no scaling
+        if quality_func and options["quality_function_norm_scaling"]:
+            n_d, n_p, n_c = self.optimizer.get_kkt_element_counts()
+            qf_sd = 1.0 / max(n_d, 1)
+            qf_sp = 1.0 / max(n_p, 1)
+            qf_sc = 1.0 / max(n_c, 1)
+            if comm_rank == 0:
+                print(f"  QF norm scaling: n_d={n_d}, n_p={n_p}, n_c={n_c}")
+        self._qf_sd = qf_sd
+        self._qf_sp = qf_sp
+        self._qf_sc = qf_sc
+
+        # Seed phi_0 so M_0 = Phi_0 (Algorithm A)
+        if quality_func:
+            d0, p0, c0 = self.optimizer.compute_kkt_error(self.vars, self.grad)
+            qf_kkt_history.append(d0 * qf_sd + p0 * qf_sp + c0 * qf_sc)
 
         for i in range(max_iters):
-            iter_data = {}
-
             # Compute the complete KKT residual
             res_norm = self.optimizer.compute_residual(
                 self.barrier_param, self.gamma_penalty, self.vars, self.grad, self.res
             )
+
+            if convex:
+                convex.update_eps_z(self.barrier_param)
+                convex.decompose_residual(self.res, self.vars)
 
             # Compute the elapsed time
             elapsed_time = time.perf_counter() - start_time
@@ -709,7 +1596,6 @@ class Optimizer:
             if continuation_control is not None:
                 continuation_control(i, res_norm)
 
-            # Set information about the residual norm into the
             iter_data = {
                 "iteration": i,
                 "time": elapsed_time,
@@ -721,6 +1607,8 @@ class Optimizer:
                 "alpha_z": alpha_z_prev,
                 "z_index": z_index_prev,
             }
+            if convex:
+                iter_data.update(convex.iter_data())
 
             # Compute and store xi and complementarity for heuristic (display table after optimization)
             if (
@@ -730,9 +1618,6 @@ class Optimizer:
                 complementarity, xi = self.optimizer.compute_complementarity(self.vars)
                 iter_data["xi"] = xi
                 iter_data["complementarity"] = complementarity
-                heuristic_data.append(
-                    {"iteration": i, "xi": xi, "complementarity": complementarity}
-                )
 
             if comm_rank == 0:
                 self.write_log(i, iter_data)
@@ -744,69 +1629,200 @@ class Optimizer:
 
             opt_data["iterations"].append(iter_data)
 
-            barrier_converged = False
-            if self.barrier_param <= 0.999 * tol and res_norm < tol:
+            # Check convergence
+            if res_norm < tol:
                 opt_data["converged"] = True
                 break
-            elif res_norm <= 0.1 * self.barrier_param:
-                barrier_converged = True
 
-            # Check if the barrier problem has converged and update barrier parameter
-            if options["barrier_strategy"] == "heuristic":
-                # Heuristic barrier update - compute xi and complementarity if not already done
-                if "xi" in iter_data:
-                    xi = iter_data["xi"]
-                    complementarity = iter_data["complementarity"]
+            # Precision floor detection: bit-identical residuals mean we've
+            # hit numerical limits. Exit immediately instead of cycling.
+            rel_change = abs(res_norm - prev_res_norm) / max(res_norm, 1e-30)
+            if rel_change < 1e-14 and i > 0:
+                precision_floor_count += 1
+            else:
+                precision_floor_count = 0
+
+            if precision_floor_count >= 3 and res_norm < acceptable_tol:
+                if comm_rank == 0:
+                    print(
+                        f"  Precision floor: residual {res_norm:.6e} unchanged "
+                        f"for {precision_floor_count} iterations"
+                    )
+                opt_data["converged"] = True
+                opt_data["acceptable"] = True
+                opt_data["precision_floor"] = True
+                break
+
+            # Check for stagnation and acceptable convergence
+            # Track best residual (robust to barrier cycling that resets prev_res_norm)
+            if res_norm < 0.99 * best_res_norm:
+                best_res_norm = res_norm
+                stagnation_count = 0
+            elif res_norm < 0.99 * prev_res_norm:
+                # Improving vs previous iteration but not vs best — don't reset
+                stagnation_count += 1
+            else:
+                stagnation_count += 1
+
+            # Acceptable convergence: stuck for N iterations at acceptable residual
+            if stagnation_count >= acceptable_iter and res_norm < acceptable_tol:
+                if comm_rank == 0:
+                    print(
+                        f"  Acceptable convergence: residual {res_norm:.6e} < {acceptable_tol:.0e} for {stagnation_count} iterations"
+                    )
+                opt_data["converged"] = True
+                opt_data["acceptable"] = True
+                break
+
+            if convex and res_norm >= tol:
+                new_barrier, should_reset = convex.check_stagnation(
+                    stagnation_count,
+                    2 * acceptable_iter,
+                    self.barrier_param,
+                    options["monotone_barrier_fraction"],
+                    tol,
+                )
+                if should_reset:
+                    if comm_rank == 0:
+                        print(
+                            f"  Stagnation: forcing barrier {self.barrier_param:.2e} -> "
+                            f"{new_barrier:.2e}"
+                        )
+                    self.barrier_param = new_barrier
+                    stagnation_count = 0
+                    # Sync QF monotone mu so the QF block doesn't override it
+                    if quality_func and not qf_free_mode:
+                        qf_monotone_mu = new_barrier
+                        if comm_rank == 0:
+                            print(f"  QF monotone mu synced: {qf_monotone_mu:.2e}")
+
+            prev_res_norm = res_norm
+
+            if convex:
+                convex.begin_iteration(self.barrier_param)
+            else:
+                # Legacy zero-step recovery
+                if i > 0 and max(alpha_x_prev, alpha_z_prev) < 1e-10:
+                    zero_step_count += 1
+                    if zero_step_count >= 3:
+                        old_barrier = self.barrier_param
+                        self.barrier_param = min(self.barrier_param * 10.0, 1.0)
+                        if comm_rank == 0 and self.barrier_param != old_barrier:
+                            print(
+                                f"  Zero step recovery: barrier {old_barrier:.2e} -> {self.barrier_param:.2e}"
+                            )
+                        zero_step_count = 0
                 else:
-                    xi = self._compute_uniformity_measure()
-                    complementarity = self.optimizer.compute_complementarity(self.vars)
+                    zero_step_count = 0
 
-                self.barrier_param, _ = self._compute_barrier_heuristic(
-                    xi,
-                    complementarity,
-                    options["heuristic_barrier_gamma"],
-                    options["heuristic_barrier_r"],
-                )
-
-                # Re-compute the reduced residual for the right-hand-side of the KKT system
-                res_norm = self.optimizer.compute_residual(
-                    self.barrier_param,
-                    self.gamma_penalty,
-                    self.vars,
-                    self.grad,
-                    self.res,
-                )
-            elif barrier_converged:
-                frac = options["monotone_barrier_fraction"]
-                self.barrier_param *= frac
-
-                # Re-compute the reduced residual for the right-hand-side of the KKT system
-                res_norm = self.optimizer.compute_residual(
-                    self.barrier_param,
-                    self.gamma_penalty,
-                    self.vars,
-                    self.grad,
-                    self.res,
-                )
-
-            # Add the diagonal contributions to the Hessian matrix
+            # Compute and cache the base diagonal (barrier Sigma)
             self.optimizer.compute_diagonal(self.vars, self.diag)
+            self.diag.copy_device_to_host()
+            diag_base = self.diag.get_array().copy()
 
-            # Solve the KKT system with the computed diagonal entries
-            self.solver.factor(1.0, x, self.diag)
-            self.solver.solve(self.res, self.px)
+            barrier_before = self.barrier_param
 
-            # Compute the full update based on the reduced variable update
-            self.optimizer.compute_update(
-                self.barrier_param, self.gamma_penalty, self.vars, self.px, self.update
-            )
+            if quality_func:
+                # --- Quality function barrier (Algorithm A, NWW 2009) ---
+                self._factorize_kkt(
+                    x,
+                    diag_base,
+                    probe_convex,
+                    options,
+                    zero_hessian_indices,
+                    zero_hessian_eps,
+                    comm_rank,
+                )
 
-            # Check the update
-            if options["check_update_step"]:
-                if self.distribute:
-                    hess = self.mpi_problem.create_matrix()
+                if qf_free_mode:
+                    sigma_opt, mu_qf = self._compute_quality_function_barrier(
+                        tau_min, use_adaptive_tau, options, comm_rank
+                    )
+                    self.barrier_param = max(mu_qf, qf_mu_floor)
                 else:
-                    hess = self.problem.create_matrix()
+                    # Monotone mode: fixed mu, decrease when subproblem solved
+                    if res_norm <= options["barrier_progress_tol"] * qf_monotone_mu:
+                        new_mono_mu = max(
+                            qf_monotone_mu * options["monotone_barrier_fraction"],
+                            qf_mu_floor,
+                        )
+                        if comm_rank == 0:
+                            print(
+                                f"  QF monotone mu: "
+                                f"{qf_monotone_mu:.4e} -> {new_mono_mu:.4e}"
+                            )
+                        qf_monotone_mu = new_mono_mu
+                    self.barrier_param = qf_monotone_mu
+                    if comm_rank == 0:
+                        print(f"  QF monotone step: " f"mu={self.barrier_param:.4e}")
+
+                if convex:
+                    convex.update_eps_z(self.barrier_param)
+
+                self._solve_with_mu(self.barrier_param)
+            else:
+                # --- Existing heuristic/monotone barrier strategy ---
+                heuristic = options["barrier_strategy"] == "heuristic"
+                if heuristic:
+                    complementarity, xi = self.optimizer.compute_complementarity(
+                        self.vars
+                    )
+
+                if options["progress_based_barrier"]:
+                    should_reduce = self._should_reduce_barrier(
+                        res_norm, self.barrier_param, options["barrier_progress_tol"]
+                    )
+                elif heuristic:
+                    should_reduce = True
+                else:
+                    should_reduce = res_norm <= 0.1 * self.barrier_param
+
+                # VC floor override
+                if (
+                    convex
+                    and not should_reduce
+                    and self.barrier_param > tol
+                    and convex.should_force_barrier_reduction()
+                ):
+                    should_reduce = True
+                    if comm_rank == 0:
+                        print(
+                            f"  VC floor: theta={convex.theta:.2e} <= "
+                            f"3*vc={3*convex.vc_floor:.2e}, "
+                            f"forcing barrier reduction"
+                        )
+
+                if should_reduce:
+                    if heuristic:
+                        self.barrier_param, _ = self._compute_barrier_heuristic(
+                            xi,
+                            complementarity,
+                            options["heuristic_barrier_gamma"],
+                            options["heuristic_barrier_r"],
+                            tol,
+                        )
+                    else:
+                        self.barrier_param = max(
+                            self.barrier_param * options["monotone_barrier_fraction"],
+                            tol,
+                        )
+
+                # Direction finding (regularize, factor, solve)
+                self._find_direction(
+                    x,
+                    diag_base,
+                    probe_convex,
+                    options,
+                    zero_hessian_indices,
+                    zero_hessian_eps,
+                    comm_rank,
+                )
+
+            # Check the update (debug only)
+            if options["check_update_step"]:
+                hess = (
+                    self.mpi_problem if self.distribute else self.problem
+                ).create_matrix()
                 self.optimizer.check_update(
                     self.barrier_param,
                     self.gamma_penalty,
@@ -816,61 +1832,136 @@ class Optimizer:
                     hess,
                 )
 
-            # Compute the max step in the multipliers
+            # Compute step sizes
+            tau = (
+                self._compute_adaptive_tau(self.barrier_param, tau_min)
+                if use_adaptive_tau
+                else base_tau
+            )
             alpha_x, x_index, alpha_z, z_index = self.optimizer.compute_max_step(
                 tau, self.vars, self.update
             )
 
-            # Set the line search step length for the primal and dual variables to be equal to one another
+            # Diagnostic: Newton direction norms
+            if comm_rank == 0 and i < 10:
+                problem_ref = self.mpi_problem if self.distribute else self.problem
+                mult_ind = (
+                    convex.mult_ind
+                    if convex
+                    else np.array(problem_ref.get_multiplier_indicator(), dtype=bool)
+                )
+                dx_full = np.array(self.update.get_solution())
+                print(
+                    f"  Newton: ||dx||={np.linalg.norm(dx_full[~mult_ind]):.2e}, "
+                    f"||dlam||={np.linalg.norm(dx_full[mult_ind]):.2e}, "
+                    f"a_x={alpha_x:.4f}, a_z={alpha_z:.4f}"
+                )
+
             if options["equal_primal_dual_step"]:
                 alpha_x = alpha_z = min(alpha_x, alpha_z)
 
-            # # Check if this is a line search
+            # Line search
+            alpha, line_iters, step_accepted = self._line_search(
+                alpha_x, alpha_z, convex, options, comm_rank
+            )
 
-            # # Compute the derivative of the line search function
-            # self._compute_line_search_deriv()
+            if convex and convex.step_rejected:
+                # Step rejected: stay at current point, undo barrier reduction
+                alpha_x_prev = 0.0
+                alpha_z_prev = 0.0
+                x_index_prev = -1
+                z_index_prev = -1
+                self.barrier_param = barrier_before
 
-            # Compute the step length
-            max_line_iters = options["max_line_search_iterations"]
-            alpha = 1.0
-            line_iters = 1
-            for j in range(max_line_iters):
-                # Apply the update to get the new variable values at candidate step length alpha
-                self.optimizer.apply_step_update(
-                    alpha * alpha_x, alpha * alpha_z, self.vars, self.update, self.temp
+                # Algorithm A: rejected step in free mode -> monotone mode
+                if quality_func and qf_free_mode:
+                    comp, _ = self.optimizer.compute_complementarity(self.vars)
+                    qf_monotone_mu_cand = max(0.8 * comp, qf_mu_floor)
+                    M_k = max(qf_kkt_history)
+                    if qf_monotone_mu_cand > qf_mu_floor:
+                        qf_free_mode = False
+                        qf_M_k_at_entry = M_k
+                        qf_monotone_mu = qf_monotone_mu_cand
+                        if comm_rank == 0:
+                            print(
+                                f"  QF -> monotone (step rejected): "
+                                f"mu_bar={qf_monotone_mu:.4e}"
+                            )
+                    elif comm_rank == 0:
+                        print(f"  QF: comp at floor ({comp:.2e}), " f"skip monotone")
+
+                new_barrier, increased = convex.handle_rejection_escape(
+                    self.barrier_param
                 )
+                if increased is True:
+                    if comm_rank == 0:
+                        print(
+                            f"  Barrier increased: {self.barrier_param:.2e} -> "
+                            f"{new_barrier:.2e}"
+                        )
+                    self.barrier_param = new_barrier
+                    if quality_func and not qf_free_mode:
+                        qf_monotone_mu = new_barrier
+                        if comm_rank == 0:
+                            print(f"  QF monotone mu synced: {new_barrier:.2e}")
+                elif increased is False:
+                    if comm_rank == 0:
+                        print(
+                            f"  Barrier at max ({self.barrier_param:.2e}), "
+                            f"cannot increase further"
+                        )
+            else:
+                alpha_x_prev = alpha * alpha_x
+                alpha_z_prev = alpha * alpha_z
+                x_index_prev = x_index
+                z_index_prev = z_index
 
-                # Compute the gradient at the new point
-                xt = self.temp.get_solution()
-                if self.distribute:
-                    self.mpi_problem.update(xt)
-                    self.mpi_problem.gradient(1.0, xt, self.grad)
-                else:
-                    self.problem.update(xt)
-                    self.problem.gradient(1.0, xt, self.grad)
+                if convex:
+                    convex.consecutive_rejections = 0
 
-                # Compute the residual at the perturbed point
-                res_norm_new = self.optimizer.compute_residual(
-                    self.barrier_param,
-                    self.gamma_penalty,
-                    self.temp,
-                    self.grad,
-                    self.res,
-                )
+                # Algorithm A: evaluate Phi, update mode for next iteration
+                if quality_func:
+                    dual_sq, primal_sq, comp_sq = self.optimizer.compute_kkt_error(
+                        self.vars, self.grad
+                    )
+                    phi_new = dual_sq * qf_sd + primal_sq * qf_sp + comp_sq * qf_sc
 
-                if res_norm_new < res_norm or j == max_line_iters - 1:
-                    self.vars.copy(self.temp)
-                    break
-                else:
-                    line_iters += 1
+                    M_k = max(qf_kkt_history)
 
-                    # Apply a simple backtracking algorithm
-                    alpha *= options["backtracting_factor"]
-
-            alpha_x_prev = alpha * alpha_x
-            alpha_z_prev = alpha * alpha_z
-            x_index_prev = x_index
-            z_index_prev = z_index
+                    if qf_free_mode:
+                        if phi_new > qf_kappa * M_k:
+                            # Failed nonmonotone check -> monotone mode
+                            comp, _ = self.optimizer.compute_complementarity(self.vars)
+                            qf_monotone_mu_cand = max(0.8 * comp, qf_mu_floor)
+                            if qf_monotone_mu_cand > qf_mu_floor:
+                                qf_free_mode = False
+                                qf_M_k_at_entry = M_k
+                                qf_monotone_mu = qf_monotone_mu_cand
+                                if comm_rank == 0:
+                                    print(
+                                        f"  QF -> monotone: "
+                                        f"Phi={phi_new:.4e} > "
+                                        f"kappa*M={qf_kappa * M_k:.4e}"
+                                    )
+                                    print(
+                                        f"  QF monotone: "
+                                        f"mu_bar={qf_monotone_mu:.4e}"
+                                    )
+                            elif comm_rank == 0:
+                                print(
+                                    f"  QF: comp at floor ({comp:.2e}), "
+                                    f"skip monotone"
+                                )
+                        else:
+                            qf_kkt_history.append(phi_new)
+                    else:
+                        if phi_new <= qf_kappa * qf_M_k_at_entry:
+                            qf_kkt_history.append(phi_new)
+                            qf_free_mode = True
+                            qf_monotone_mu = None
+                            qf_M_k_at_entry = None
+                            if comm_rank == 0:
+                                print(f"  QF resume free: " f"Phi={phi_new:.4e}")
 
         return opt_data
 

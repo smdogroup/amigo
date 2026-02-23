@@ -1022,7 +1022,7 @@ class Component:
                 for line in decl + passive + active:
                     cpp += "    " + line + ";\n"
                 cpp += "    " + f"return {lhs.to_cpp()};\n"
-            else:
+            elif len(active) > 0:
                 for line in decl + passive:
                     cpp += "    " + line + ";\n"
 

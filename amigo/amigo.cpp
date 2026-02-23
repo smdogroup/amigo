@@ -598,6 +598,48 @@ PYBIND11_MODULE(amigo, mod) {
             return py::make_tuple(complementarity, uniformity);
           },
           py::arg("vars"))
+      .def(
+          "compute_complementarity_sq",
+          [](const amigo::InteriorPointOptimizer<double, detail::policy>& self,
+             const std::shared_ptr<amigo::OptVector<double>> vars) {
+            double comp_sq;
+            self.compute_complementarity_sq(vars, comp_sq);
+            return comp_sq;
+          },
+          py::arg("vars"))
+      .def(
+          "compute_kkt_error",
+          [](const amigo::InteriorPointOptimizer<double, detail::policy>& self,
+             const std::shared_ptr<amigo::OptVector<double>> vars,
+             const std::shared_ptr<amigo::Vector<double>> grad) {
+            double dual_infeas_sq, primal_infeas_sq, comp_sq;
+            self.compute_kkt_error(vars, grad, dual_infeas_sq, primal_infeas_sq,
+                                   comp_sq);
+            return py::make_tuple(dual_infeas_sq, primal_infeas_sq, comp_sq);
+          },
+          py::arg("vars"), py::arg("grad"))
+      .def(
+          "compute_residual_and_infeasibility",
+          [](const amigo::InteriorPointOptimizer<double, detail::policy>& self,
+             double barrier_param, double gamma,
+             const std::shared_ptr<amigo::OptVector<double>> vars,
+             const std::shared_ptr<amigo::Vector<double>> grad,
+             std::shared_ptr<amigo::Vector<double>> res) {
+            double dual_infeas_sq, primal_infeas_sq;
+            self.compute_residual_and_infeasibility(
+                barrier_param, gamma, vars, grad, res,
+                dual_infeas_sq, primal_infeas_sq);
+            return py::make_tuple(dual_infeas_sq, primal_infeas_sq);
+          },
+          py::arg("barrier_param"), py::arg("gamma"),
+          py::arg("vars"), py::arg("grad"), py::arg("res"))
+      .def(
+          "get_kkt_element_counts",
+          [](const amigo::InteriorPointOptimizer<double, detail::policy>& self) {
+            int n_dual, n_primal, n_comp;
+            self.get_kkt_element_counts(n_dual, n_primal, n_comp);
+            return py::make_tuple(n_dual, n_primal, n_comp);
+          })
       .def("compute_affine_start_point",
            &amigo::InteriorPointOptimizer<
                double, detail::policy>::compute_affine_start_point)

@@ -700,6 +700,110 @@ class InteriorPointOptimizer {
   }
 
   /**
+   * @brief Compute ||ZXe||^2 (sum of squared complementarity products)
+   *
+   * Computes the complementarity term from paper eq (4.2) of
+   * Nocedal-Wachter-Waltz 2009. Does NOT require gradients.
+   */
+  void compute_complementarity_sq(const std::shared_ptr<OptVector<T>> vars,
+                                  T& comp_sq) const {
+    detail::OptStateData<const T> pt =
+        detail::OptStateData<const T>::template make<policy>(vars);
+
+    T local_comp_sq = detail::compute_complementarity_sq(info, pt);
+
+    MPI_Allreduce(&local_comp_sq, &comp_sq, 1, get_mpi_type<T>(), MPI_SUM,
+                  comm);
+  }
+
+  /**
+   * @brief Compute the three unreduced NLP KKT error components
+   *
+   * Returns the squared norms of:
+   * 1. Dual infeasibility: ||grad_x L - zl + zu||^2
+   * 2. Primal infeasibility: ||h(x) - lbh||^2 + ||c(x) - s||^2
+   * 3. Complementarity: ||(x-lb)*zl||^2 + ||(ub-x)*zu||^2 + slack terms
+   */
+  void compute_kkt_error(const std::shared_ptr<OptVector<T>> vars,
+                         const std::shared_ptr<Vector<T>> grad,
+                         T& dual_infeas_sq, T& primal_infeas_sq,
+                         T& comp_sq) const {
+    detail::OptStateData<const T> pt =
+        detail::OptStateData<const T>::template make<policy>(vars);
+    const T* g = grad->template get_array<policy>();
+
+    T local_dual = 0.0, local_primal = 0.0, local_comp = 0.0;
+
+    if constexpr (policy == ExecPolicy::SERIAL ||
+                  policy == ExecPolicy::OPENMP) {
+      detail::compute_kkt_error_components(info, pt, g,
+                                           local_dual, local_primal,
+                                           local_comp);
+    }
+#ifdef AMIGO_USE_CUDA
+    else {
+      detail::compute_kkt_error_components(info, pt, g,
+                                           local_dual, local_primal,
+                                           local_comp);
+    }
+#endif
+
+    T local_vals[3] = {local_dual, local_primal, local_comp};
+    T global_vals[3];
+    MPI_Allreduce(local_vals, global_vals, 3, get_mpi_type<T>(), MPI_SUM, comm);
+
+    dual_infeas_sq = global_vals[0];
+    primal_infeas_sq = global_vals[1];
+    comp_sq = global_vals[2];
+  }
+
+  /**
+   * @brief Compute residual and separate infeasibility components in one pass
+   */
+  void compute_residual_and_infeasibility(
+      T barrier_param, T gamma,
+      const std::shared_ptr<OptVector<T>> vars,
+      const std::shared_ptr<Vector<T>> grad,
+      std::shared_ptr<Vector<T>> res,
+      T& dual_infeas_sq, T& primal_infeas_sq) const {
+    detail::OptStateData<const T> pt =
+        detail::OptStateData<const T>::template make<policy>(vars);
+    const T* g = grad->template get_array<policy>();
+    T* r = res->template get_array<policy>();
+
+    T local_dual = 0.0, local_primal = 0.0;
+
+    if constexpr (policy == ExecPolicy::SERIAL ||
+                  policy == ExecPolicy::OPENMP) {
+      detail::compute_residual_and_infeasibility(
+          barrier_param, gamma, info, pt, g, r, local_dual, local_primal);
+    }
+
+    T local_vals[2] = {local_dual, local_primal};
+    T global_vals[2];
+    MPI_Allreduce(local_vals, global_vals, 2, get_mpi_type<T>(), MPI_SUM, comm);
+    dual_infeas_sq = global_vals[0];
+    primal_infeas_sq = global_vals[1];
+  }
+
+  /**
+   * @brief Get the element counts for KKT error scaling (NWW 2009, Section 6)
+   */
+  void get_kkt_element_counts(int& n_dual, int& n_primal, int& n_comp) const {
+    n_dual = info.num_variables;
+    n_primal = info.num_equalities + info.num_inequalities;
+    n_comp = 0;
+    for (int i = 0; i < info.num_variables; i++) {
+      if (!std::isinf(info.lbx[i])) n_comp++;
+      if (!std::isinf(info.ubx[i])) n_comp++;
+    }
+    for (int i = 0; i < info.num_inequalities; i++) {
+      if (!std::isinf(info.lbc[i])) n_comp += 2;
+      if (!std::isinf(info.ubc[i])) n_comp += 2;
+    }
+  }
+
+  /**
    * @brief Check whether the computed updates satisfy the linearization of the
    * optimality conditions
    *

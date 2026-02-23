@@ -214,7 +214,7 @@ class Expr:
         self.node = node
 
     def __neg__(self):
-        return Expr(UnaryNode("-", self.node))
+        return Expr(UnaryNode("-", self))
 
     def __add__(self, other):
         return Expr(BinaryNode("+", self, _to_expr(other)))
