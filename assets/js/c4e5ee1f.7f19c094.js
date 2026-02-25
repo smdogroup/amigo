@@ -1,0 +1,1 @@
+"use strict";(globalThis.webpackChunkamigo_docs=globalThis.webpackChunkamigo_docs||[]).push([[5651],{276:o=>{o.exports=JSON.parse('{"metadata":{"permalink":"/amigo/blog","page":1,"postsPerPage":10,"totalPages":1,"totalCount":1,"blogDescription":"Blog","blogTitle":"Blog"}}')}}]);

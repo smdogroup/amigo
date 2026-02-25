@@ -1,0 +1,1 @@
+"use strict";(globalThis.webpackChunkamigo_docs=globalThis.webpackChunkamigo_docs||[]).push([[1903],{1912:o=>{o.exports=JSON.parse('{"blogBasePath":"/amigo/blog","blogTitle":"Blog","authorsListPath":"/amigo/blog/authors"}')}}]);

@@ -1,1 +1,0 @@
-"use strict";(globalThis.webpackChunkamigo_docs=globalThis.webpackChunkamigo_docs||[]).push([[874],{6959:a=>{a.exports=JSON.parse('{"tags":[{"label":"amigo","permalink":"/amigo/blog/tags/amigo","count":1},{"label":"documentation","permalink":"/amigo/blog/tags/documentation","count":1},{"label":"optimization","permalink":"/amigo/blog/tags/optimization","count":1}]}')}}]);
