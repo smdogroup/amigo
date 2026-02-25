@@ -5,6 +5,7 @@ include/amigo_include_paths.h
 /build/*
 *.so
 *.png
+!website/docs/**/*.png
 *.pdf
 *.aux
 *.log
