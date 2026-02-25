@@ -34,6 +34,8 @@ const sidebars: SidebarsConfig = {
       label: 'Tutorials',
       items: [
         'tutorials/cart-pole',
+        'tutorials/hang-glider',
+        'tutorials/free-flying-robot',
       ],
     },
     {
