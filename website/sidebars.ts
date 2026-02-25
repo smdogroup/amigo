@@ -36,6 +36,7 @@ const sidebars: SidebarsConfig = {
         'tutorials/cart-pole',
         'tutorials/hang-glider',
         'tutorials/free-flying-robot',
+        'tutorials/euler_beam',
       ],
     },
     {

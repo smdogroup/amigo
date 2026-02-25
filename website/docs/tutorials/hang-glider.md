@@ -111,8 +111,8 @@ $$
 
 ### System Parameters
 
-<div style={{display: 'flex', justifyContent: 'center', margin: '2rem 0'}}>
-  <table style={{borderCollapse: 'collapse', fontSize: '0.95em', border: '1px solid #d0d7de'}}>
+<div style={{overflowX: 'auto'}}>
+  <table style={{width: '100%', borderCollapse: 'collapse', fontSize: '0.95em'}}>
     <thead>
       <tr style={{borderBottom: '2px solid #d0d7de'}}>
         <th style={{padding: '12px', textAlign: 'center', fontWeight: 600}}>Parameter</th>
@@ -311,16 +311,6 @@ class TrapezoidRule(am.Component):
         # Trapezoidal integration
         self.constraints["res"] = q2 - q1 - 0.5*dt*(q1dot + q2dot)
 ```
-
-:::warning
-
-All trapezoidal rule instances must use the **same final time variable** to ensure consistent time discretization. This is enforced through linking:
-
-```python
-model.link("trap.tf[1:]", "trap.tf[0]")
-```
-
-:::
 
 ### Boundary Conditions and Objective
 
