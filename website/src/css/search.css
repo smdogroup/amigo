@@ -2,34 +2,42 @@
    SEARCH STYLING
    ============================================== */
 
-/* Hide navbar search (keep sidebar only) */
+/* Hide navbar search (keep sidebar only), but NOT the dark mode toggle button */
 .navbar__items--right input,
-.navbar__items--right button,
+.navbar__items--right button:not([class*="colorModeToggle"]):not([class*="toggleButton"]),
 .navbar__items--right form,
 .navbar__items--right > div:last-child,
 .navbar .cmfcmf-search-button {
   display: none !important;
 }
 
-/* Sidebar search styling */
-aside input[type="search"],
-.theme-doc-sidebar-container input[type="search"],
-.menu input[type="search"] {
+/* Sidebar search styling — plugin uses class aa-Input with type="text" */
+aside .aa-Input,
+.theme-doc-sidebar-container .aa-Input,
+.menu .aa-Input {
   border: 1px solid #999 !important;
   border-radius: 4px !important;
+  color: #699bde !important;
 }
 
-aside input[type="search"]:focus,
-.theme-doc-sidebar-container input[type="search"]:focus,
-.menu input[type="search"]:focus {
+aside .aa-Input::placeholder,
+.theme-doc-sidebar-container .aa-Input::placeholder,
+.menu .aa-Input::placeholder {
+  color: #699bde !important;
+  opacity: 1 !important;
+}
+
+aside .aa-Input:focus,
+.theme-doc-sidebar-container .aa-Input:focus,
+.menu .aa-Input:focus {
   outline: none !important;
   border-color: #999 !important;
   box-shadow: none !important;
 }
 
-[data-theme='dark'] aside input[type="search"],
-[data-theme='dark'] .theme-doc-sidebar-container input[type="search"],
-[data-theme='dark'] .menu input[type="search"] {
+[data-theme='dark'] aside .aa-Input,
+[data-theme='dark'] .theme-doc-sidebar-container .aa-Input,
+[data-theme='dark'] .menu .aa-Input {
   border-color: #555 !important;
 }
 
@@ -104,11 +112,11 @@ input[class*="searchInput"] {
 }
 
 input[class*="searchInput"]::placeholder {
-  color: #999 !important;
+  color: #699bde !important;
 }
 
 [data-theme='dark'] input[class*="searchInput"]::placeholder {
-  color: #666 !important;
+  color: #699bde !important;
 }
 
 /* Results area */

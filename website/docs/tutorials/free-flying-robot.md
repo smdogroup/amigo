@@ -136,44 +136,12 @@ $$
 
 ### System Parameters
 
-<div style={{overflowX: 'auto'}}>
-  <table style={{width: '100%', borderCollapse: 'collapse', fontSize: '0.95em'}}>
-    <thead>
-      <tr style={{backgroundColor: '#f6f8fa', borderBottom: '2px solid #d0d7de'}}>
-        <th style={{padding: '12px', textAlign: 'center', fontWeight: 600, color: '#1f2328'}}>Parameter</th>
-        <th style={{padding: '12px', textAlign: 'center', fontWeight: 600, color: '#1f2328'}}>Symbol</th>
-        <th style={{padding: '12px', textAlign: 'center', fontWeight: 600, color: '#1f2328'}}>Value</th>
-        <th style={{padding: '12px', textAlign: 'center', fontWeight: 600, color: '#1f2328'}}>Description</th>
-      </tr>
-    </thead>
-    <tbody>
-      <tr style={{borderBottom: '1px solid #d0d7de'}}>
-        <td style={{padding: '12px', textAlign: 'center'}}>Thruster 1 torque coefficient</td>
-        <td style={{padding: '12px', textAlign: 'center'}}>$\alpha$</td>
-        <td style={{padding: '12px', textAlign: 'center'}}>0.2</td>
-        <td style={{padding: '12px', textAlign: 'center'}}>rad/(N·s²)</td>
-      </tr>
-      <tr style={{backgroundColor: '#f6f8fa', borderBottom: '1px solid #d0d7de'}}>
-        <td style={{padding: '12px', textAlign: 'center'}}>Thruster 2 torque coefficient</td>
-        <td style={{padding: '12px', textAlign: 'center'}}>$\beta$</td>
-        <td style={{padding: '12px', textAlign: 'center'}}>0.2</td>
-        <td style={{padding: '12px', textAlign: 'center'}}>rad/(N·s²)</td>
-      </tr>
-      <tr style={{borderBottom: '1px solid #d0d7de'}}>
-        <td style={{padding: '12px', textAlign: 'center'}}>Maximum thrust per control</td>
-        <td style={{padding: '12px', textAlign: 'center'}}>$u_{\max}$</td>
-        <td style={{padding: '12px', textAlign: 'center'}}>1.0</td>
-        <td style={{padding: '12px', textAlign: 'center'}}>N</td>
-      </tr>
-      <tr style={{backgroundColor: '#f6f8fa', borderBottom: '1px solid #d0d7de'}}>
-        <td style={{padding: '12px', textAlign: 'center'}}>Final time</td>
-        <td style={{padding: '12px', textAlign: 'center'}}>$t_f$</td>
-        <td style={{padding: '12px', textAlign: 'center'}}>12.0</td>
-        <td style={{padding: '12px', textAlign: 'center'}}>s</td>
-      </tr>
-    </tbody>
-  </table>
-</div>
+| Parameter | Symbol | Value | Description |
+|---|---|---|---|
+| Thruster 1 torque coefficient | $\alpha$ | 0.2 | rad/(N·s²) |
+| Thruster 2 torque coefficient | $\beta$ | 0.2 | rad/(N·s²) |
+| Maximum thrust per control | $u_{\max}$ | 1.0 | N |
+| Final time | $t_f$ | 12.0 | s |
 
 ### Boundary Conditions
 

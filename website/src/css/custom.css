@@ -42,6 +42,14 @@
 
   /* Sidebar */
   --doc-sidebar-width: 280px !important;
+
+  /* Tables */
+  --ifm-table-background: transparent;
+  --ifm-table-stripe-background: transparent;
+  --ifm-table-border-color: #d0d7de;
+  --ifm-table-border-width: 1px;
+  --ifm-table-head-background: transparent;
+  --ifm-table-cell-padding: 0.45rem 0.75rem;
 }
 
 /* Dark mode colors */
@@ -121,24 +129,24 @@
 /* Dark mode - Figure captions */
 [data-theme='dark'] div[align="center"] p strong,
 [data-theme='dark'] p[align="center"] strong {
-  color: #5eead4;
+  color: #6b8afb;
 }
 
 /* Dark mode - Headings */
 [data-theme='dark'] .markdown h1 {
-  color: #5eead4;
+  color: #6b8afb;
 }
 
 [data-theme='dark'] .markdown h2 {
-  color: #5eead4;
+  color: #6b8afb;
 }
 
 [data-theme='dark'] .markdown h3 {
-  color: #67e8f9;
+  color: #8aa2fc;
 }
 
 [data-theme='dark'] .markdown h4 {
-  color: #67e8f9;
+  color: #9baffc;
 }
 
 /* Dark mode code blocks - removed, let Prism theme handle it */
@@ -293,9 +301,9 @@
   display: none !important;
 }
 
-/* Also target the icon element itself */
-.navbar__link svg,
-.navbar__link .iconExternalLink {
+/* Hide external link icons on anchor navbar links only (not buttons like the dark-mode toggle) */
+a.navbar__link svg,
+a.navbar__link .iconExternalLink {
   display: none !important;
 }
 
@@ -906,31 +914,16 @@ code {
   border-color: rgba(107, 138, 251, 0.25);
 }
 
-/* Tables */
-table {
-  border-collapse: collapse;
-  width: 100%;
-  margin: 1rem 0;
+/* Tables — center-align, horizontal borders only, uniform color */
+.markdown table th,
+.markdown table td {
+  text-align: center;
+  border-left: none !important;
+  border-right: none !important;
 }
 
-table thead tr {
-  background-color: var(--ifm-background-surface-color);
-  border-bottom: 2px solid var(--ifm-color-primary);
-}
-
-table th {
-  font-weight: 700;
-  text-align: left;
-  padding: 0.75rem;
-}
-
-table td {
-  padding: 0.75rem;
-  border-bottom: 1px solid var(--ifm-toc-border-color);
-}
-
-table tr:hover {
-  background-color: rgba(64, 99, 216, 0.03);
+.markdown table thead tr {
+  border-bottom: 1px solid #d0d7de !important;
 }
 
 /* Version badge */

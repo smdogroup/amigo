@@ -111,68 +111,16 @@ $$
 
 ### System Parameters
 
-<div style={{overflowX: 'auto'}}>
-  <table style={{width: '100%', borderCollapse: 'collapse', fontSize: '0.95em'}}>
-    <thead>
-      <tr style={{borderBottom: '2px solid #d0d7de'}}>
-        <th style={{padding: '12px', textAlign: 'center', fontWeight: 600}}>Parameter</th>
-        <th style={{padding: '12px', textAlign: 'center', fontWeight: 600}}>Symbol</th>
-        <th style={{padding: '12px', textAlign: 'center', fontWeight: 600}}>Value</th>
-        <th style={{padding: '12px', textAlign: 'center', fontWeight: 600}}>Description</th>
-      </tr>
-    </thead>
-    <tbody>
-      <tr style={{borderBottom: '1px solid #d0d7de'}}>
-        <td style={{padding: '12px', textAlign: 'center'}}>Mass</td>
-        <td style={{padding: '12px', textAlign: 'center'}}>$m$</td>
-        <td style={{padding: '12px', textAlign: 'center'}}>100</td>
-        <td style={{padding: '12px', textAlign: 'center'}}>kg</td>
-      </tr>
-      <tr style={{borderBottom: '1px solid #d0d7de'}}>
-        <td style={{padding: '12px', textAlign: 'center'}}>Gravitational acceleration</td>
-        <td style={{padding: '12px', textAlign: 'center'}}>$g$</td>
-        <td style={{padding: '12px', textAlign: 'center'}}>9.80665</td>
-        <td style={{padding: '12px', textAlign: 'center'}}>m/s²</td>
-      </tr>
-      <tr style={{borderBottom: '1px solid #d0d7de'}}>
-        <td style={{padding: '12px', textAlign: 'center'}}>Wing area</td>
-        <td style={{padding: '12px', textAlign: 'center'}}>$S$</td>
-        <td style={{padding: '12px', textAlign: 'center'}}>14</td>
-        <td style={{padding: '12px', textAlign: 'center'}}>m²</td>
-      </tr>
-      <tr style={{borderBottom: '1px solid #d0d7de'}}>
-        <td style={{padding: '12px', textAlign: 'center'}}>Air density</td>
-        <td style={{padding: '12px', textAlign: 'center'}}>$\rho$</td>
-        <td style={{padding: '12px', textAlign: 'center'}}>1.13</td>
-        <td style={{padding: '12px', textAlign: 'center'}}>kg/m³</td>
-      </tr>
-      <tr style={{borderBottom: '1px solid #d0d7de'}}>
-        <td style={{padding: '12px', textAlign: 'center'}}>Parasitic drag coefficient</td>
-        <td style={{padding: '12px', textAlign: 'center'}}>$C_0$</td>
-        <td style={{padding: '12px', textAlign: 'center'}}>0.034</td>
-        <td style={{padding: '12px', textAlign: 'center'}}>-</td>
-      </tr>
-      <tr style={{borderBottom: '1px solid #d0d7de'}}>
-        <td style={{padding: '12px', textAlign: 'center'}}>Induced drag factor</td>
-        <td style={{padding: '12px', textAlign: 'center'}}>$k$</td>
-        <td style={{padding: '12px', textAlign: 'center'}}>0.069662</td>
-        <td style={{padding: '12px', textAlign: 'center'}}>-</td>
-      </tr>
-      <tr style={{borderBottom: '1px solid #d0d7de'}}>
-        <td style={{padding: '12px', textAlign: 'center'}}>Peak updraft strength</td>
-        <td style={{padding: '12px', textAlign: 'center'}}>$u_M$</td>
-        <td style={{padding: '12px', textAlign: 'center'}}>2.5</td>
-        <td style={{padding: '12px', textAlign: 'center'}}>m/s</td>
-      </tr>
-      <tr>
-        <td style={{padding: '12px', textAlign: 'center'}}>Thermal radius</td>
-        <td style={{padding: '12px', textAlign: 'center'}}>$R$</td>
-        <td style={{padding: '12px', textAlign: 'center'}}>100</td>
-        <td style={{padding: '12px', textAlign: 'center'}}>m</td>
-      </tr>
-    </tbody>
-  </table>
-</div>
+| Parameter | Symbol | Value | Description |
+|---|---|---|---|
+| Mass | $m$ | 100 | kg |
+| Gravitational acceleration | $g$ | 9.80665 | m/s² |
+| Wing area | $S$ | 14 | m² |
+| Air density | $\rho$ | 1.13 | kg/m³ |
+| Parasitic drag coefficient | $C_0$ | 0.034 | — |
+| Induced drag factor | $k$ | 0.069662 | — |
+| Peak updraft strength | $u_M$ | 2.5 | m/s |
+| Thermal radius | $R$ | 100 | m |
 
 ### Boundary Conditions
 

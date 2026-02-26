@@ -1,10 +1,11 @@
 import type {SidebarsConfig} from '@docusaurus/plugin-content-docs';
 
 const sidebars: SidebarsConfig = {
-  tutorialSidebar: [
+
+  docsSidebar: [
     {
       type: 'category',
-      label: 'Getting Started',
+      label: 'Getting started',
       items: [
         'getting-started/introduction',
         'getting-started/installation',
@@ -16,7 +17,7 @@ const sidebars: SidebarsConfig = {
       items: [
         {
           type: 'category',
-          label: 'Define Problem',
+          label: 'Define a problem',
           items: [
             'manual/define-problem/components',
             'manual/define-problem/variables',
@@ -25,31 +26,16 @@ const sidebars: SidebarsConfig = {
             'manual/define-problem/models',
           ],
         },
+        'manual/set-initial-guess',
         'manual/solve-problem',
         'manual/solve-on-gpu',
+        'manual/compute-flow',
+        'manual/plot-solution',
       ],
     },
     {
       type: 'category',
-      label: 'Tutorials',
-      items: [
-        'tutorials/cart-pole',
-        'tutorials/hang-glider',
-        'tutorials/free-flying-robot',
-        'tutorials/euler_beam',
-      ],
-    },
-    {
-      type: 'category',
-      label: 'Examples Gallery',
-      items: [
-        'examples/overview',
-        'examples/brachistochrone',
-      ],
-    },
-    {
-      type: 'category',
-      label: 'API Reference',
+      label: 'API reference',
       items: [
         'api/overview',
         'api/component',
@@ -58,7 +44,63 @@ const sidebars: SidebarsConfig = {
       ],
     },
   ],
+
+  tutorialsSidebar: [
+    {
+      type: 'category',
+      label: 'Tutorials and background',
+      items: [
+        {
+          type: 'doc',
+          id: 'tutorials/intro',
+          label: 'Getting started',
+        },
+        {
+          type: 'category',
+          label: 'Theory',
+          items: [
+            'tutorials/background/discretization-methods',
+            'tutorials/background/direct-collocation',
+            'tutorials/background/shooting-methods',
+            'tutorials/background/automatic-differentiation',
+            'tutorials/background/interior-point-methods',
+          ],
+        },
+        {
+          type: 'category',
+          label: 'Tutorials',
+          items: [
+            'tutorials/cart-pole',
+            'tutorials/euler_beam',
+          ],
+        },
+      ],
+    },
+  ],
+
+  examplesSidebar: [
+    {
+      type: 'category',
+      label: 'Examples',
+      items: [
+        {
+          type: 'doc',
+          id: 'examples/overview',
+          label: 'Examples browser',
+        },
+        {
+          type: 'category',
+          label: 'List of examples',
+          items: [
+            'tutorials/hang-glider',
+            'tutorials/free-flying-robot',
+            'examples/brachistochrone',
+          ],
+        },
+      ],
+    },
+  ],
+
 };
 
 export default sidebars;
-
