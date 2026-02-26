@@ -90,19 +90,21 @@ const config: Config = {
       items: [
         {
           type: 'docSidebar',
-          sidebarId: 'tutorialSidebar',
+          sidebarId: 'docsSidebar',
           position: 'left',
           label: 'Documentation',
         },
         {
-          to: '/docs/tutorials/intro',
-          label: 'Tutorials',
+          type: 'docSidebar',
+          sidebarId: 'tutorialsSidebar',
           position: 'left',
+          label: 'Tutorials',
         },
         {
-          to: '/docs/examples/overview',
-          label: 'Applications',
+          type: 'docSidebar',
+          sidebarId: 'examplesSidebar',
           position: 'left',
+          label: 'Examples',
         },
         {
           href: 'https://github.com/smdogroup/amigo',

@@ -1,7 +1,8 @@
 import type {SidebarsConfig} from '@docusaurus/plugin-content-docs';
 
 const sidebars: SidebarsConfig = {
-  tutorialSidebar: [
+
+  docsSidebar: [
     {
       type: 'category',
       label: 'Getting Started',
@@ -12,7 +13,7 @@ const sidebars: SidebarsConfig = {
     },
     {
       type: 'category',
-      label: 'Manual',
+      label: 'User Guide',
       items: [
         {
           type: 'category',
@@ -31,24 +32,6 @@ const sidebars: SidebarsConfig = {
     },
     {
       type: 'category',
-      label: 'Tutorials',
-      items: [
-        'tutorials/cart-pole',
-        'tutorials/hang-glider',
-        'tutorials/free-flying-robot',
-        'tutorials/euler_beam',
-      ],
-    },
-    {
-      type: 'category',
-      label: 'Examples Gallery',
-      items: [
-        'examples/overview',
-        'examples/brachistochrone',
-      ],
-    },
-    {
-      type: 'category',
       label: 'API Reference',
       items: [
         'api/overview',
@@ -58,7 +41,63 @@ const sidebars: SidebarsConfig = {
       ],
     },
   ],
+
+  tutorialsSidebar: [
+    {
+      type: 'category',
+      label: 'Tutorials and Background',
+      items: [
+        {
+          type: 'doc',
+          id: 'tutorials/intro',
+          label: 'Getting Started',
+        },
+        {
+          type: 'category',
+          label: 'Theory',
+          items: [
+            'tutorials/background/discretization-methods',
+            'tutorials/background/direct-collocation',
+            'tutorials/background/shooting-methods',
+            'tutorials/background/automatic-differentiation',
+            'tutorials/background/interior-point-methods',
+          ],
+        },
+        {
+          type: 'category',
+          label: 'Tutorials',
+          items: [
+            'tutorials/cart-pole',
+            'tutorials/euler_beam',
+          ],
+        },
+      ],
+    },
+  ],
+
+  examplesSidebar: [
+    {
+      type: 'category',
+      label: 'Examples',
+      items: [
+        {
+          type: 'doc',
+          id: 'examples/overview',
+          label: 'Introduction',
+        },
+        {
+          type: 'category',
+          label: 'List of Examples',
+          items: [
+            'tutorials/hang-glider',
+            'tutorials/free-flying-robot',
+            'examples/brachistochrone',
+          ],
+        },
+      ],
+    },
+  ],
+
 };
 
 export default sidebars;
-
