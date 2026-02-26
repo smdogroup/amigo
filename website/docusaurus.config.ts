@@ -110,6 +110,7 @@ const config: Config = {
           href: 'https://github.com/smdogroup/amigo',
           label: 'Github',
           position: 'left',
+          target: '_blank',
         },
       ],
     },
