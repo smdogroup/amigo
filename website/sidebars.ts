@@ -5,7 +5,7 @@ const sidebars: SidebarsConfig = {
   docsSidebar: [
     {
       type: 'category',
-      label: 'Getting Started',
+      label: 'Getting started',
       items: [
         'getting-started/introduction',
         'getting-started/installation',
@@ -13,11 +13,11 @@ const sidebars: SidebarsConfig = {
     },
     {
       type: 'category',
-      label: 'User Guide',
+      label: 'Manual',
       items: [
         {
           type: 'category',
-          label: 'Define Problem',
+          label: 'Define a problem',
           items: [
             'manual/define-problem/components',
             'manual/define-problem/variables',
@@ -26,13 +26,16 @@ const sidebars: SidebarsConfig = {
             'manual/define-problem/models',
           ],
         },
+        'manual/set-initial-guess',
         'manual/solve-problem',
         'manual/solve-on-gpu',
+        'manual/compute-flow',
+        'manual/plot-solution',
       ],
     },
     {
       type: 'category',
-      label: 'API Reference',
+      label: 'API reference',
       items: [
         'api/overview',
         'api/component',
@@ -45,12 +48,12 @@ const sidebars: SidebarsConfig = {
   tutorialsSidebar: [
     {
       type: 'category',
-      label: 'Tutorials and Background',
+      label: 'Tutorials and background',
       items: [
         {
           type: 'doc',
           id: 'tutorials/intro',
-          label: 'Getting Started',
+          label: 'Getting started',
         },
         {
           type: 'category',
@@ -83,11 +86,11 @@ const sidebars: SidebarsConfig = {
         {
           type: 'doc',
           id: 'examples/overview',
-          label: 'Introduction',
+          label: 'Examples browser',
         },
         {
           type: 'category',
-          label: 'List of Examples',
+          label: 'List of examples',
           items: [
             'tutorials/hang-glider',
             'tutorials/free-flying-robot',

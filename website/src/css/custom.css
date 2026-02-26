@@ -129,24 +129,24 @@
 /* Dark mode - Figure captions */
 [data-theme='dark'] div[align="center"] p strong,
 [data-theme='dark'] p[align="center"] strong {
-  color: #5eead4;
+  color: #6b8afb;
 }
 
 /* Dark mode - Headings */
 [data-theme='dark'] .markdown h1 {
-  color: #5eead4;
+  color: #6b8afb;
 }
 
 [data-theme='dark'] .markdown h2 {
-  color: #5eead4;
+  color: #6b8afb;
 }
 
 [data-theme='dark'] .markdown h3 {
-  color: #67e8f9;
+  color: #8aa2fc;
 }
 
 [data-theme='dark'] .markdown h4 {
-  color: #67e8f9;
+  color: #9baffc;
 }
 
 /* Dark mode code blocks - removed, let Prism theme handle it */
