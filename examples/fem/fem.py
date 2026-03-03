@@ -195,8 +195,6 @@ class Problem:
         """Tell the mesh what dof, and basis"""
         if self.ndim == 2:
             self.geo_space = basis.SolutionSpace({"x": "H1", "y": "H1"})
-        # elif self.ndim == 3:
-        #     self.geo_space = basis.SolutionSpace({"x": "H1", "y": "H1", "z": "H1"})
 
         self.weakform = weakform
 
@@ -278,6 +276,7 @@ class Problem:
                     geo_basis,
                     quadrature,
                     self.weakform,
+                    etype,
                 )
 
                 # Get the connectivity
@@ -305,7 +304,9 @@ class Problem:
 
 
 class FiniteElement(am.Component):
-    def __init__(self, name, soln_basis, data_basis, geo_basis, quadrature, weakform):
+    def __init__(
+        self, name, soln_basis, data_basis, geo_basis, quadrature, weakform, etype
+    ):
         super().__init__(name=name)
 
         self.soln_basis = soln_basis
@@ -321,11 +322,19 @@ class FiniteElement(am.Component):
         # self.geo_basis.add_declarations(self)
 
         # The x/y coordinates
-        self.add_data("x", shape=(3,))
-        self.add_data("y", shape=(3,))
+        if etype == "CPS3":
+            self.add_data("x", shape=(3,))
+            self.add_data("y", shape=(3,))
 
-        # The implicit topology input/output
-        self.add_input("rho", shape=(3,))
+            # The implicit topology input/output
+            self.add_input("rho", shape=(3,))
+
+        elif etype == "CPS4":
+            self.add_data("x", shape=(4,))
+            self.add_data("y", shape=(4,))
+
+            # The implicit topology input/output
+            self.add_input("rho", shape=(4,))
 
         # Set the arguments to the compute function for each quadrature point
         self.set_args(self.quadrature.get_args())
@@ -383,21 +392,11 @@ def weakform(soln, data=None, geo=None):
 soln_space = basis.SolutionSpace({"rho": "H1"})
 data_space = basis.SolutionSpace({"x": "H1", "y": "H1"})
 
-# mesh = Mesh("magnet.inp")
-mesh = Mesh("plate.inp")
+mesh = Mesh("magnet_order_1.inp")
+# mesh = Mesh("plate.inp")
 problem = Problem(mesh, soln_space, weakform, data_space=data_space, ndim=2)
 
 model = problem.create_model("test")
-
-# mesh = Mesh("plate.inp")
-# X, conn, lines = mesh.load_data(
-#     surface_names=["SURFACE1"],
-#     line_names=["LINE1", "LINE2", "LINE3", "LINE4"],
-#     element_type="CPS3",
-#     line_type="T3D2",
-# )
-# nnodes = X.shape[0]
-# nelems = conn["SURFACE1"].shape[0]
 
 model.build_module()
 model.initialize(order_type=am.OrderingType.NESTED_DISSECTION)
