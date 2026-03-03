@@ -186,7 +186,7 @@ class VolumeConstraint(am.Component):
 
     def compute_output(self):
         h = self.data["h"]
-        vol = h * 0.1 * 1.0 / 50.0  # nelems
+        vol = h * 0.1 * length / nelems  # nelems
         self.outputs["con"] = vol
 
 
@@ -212,7 +212,6 @@ conn = np.array([[i, i + 1] for i in range(nelems)], dtype=int)
 om_h, om_v, om_totals_obj, om_totals_con = original_om_problem()
 om_c_wrt_h = om_totals_obj["compliance_comp.compliance", "h"]["J_rev"]
 om_con_wrt_h = om_totals_con["volume_comp.volume", "h"]["J_rev"]
-###################################
 
 # Build Amigo Model
 model = am.Model("beam")
@@ -265,8 +264,7 @@ upper = model.create_vector()
 x[:] = 0.0
 
 # Set bounds on displacements
-# lower["src.v"] = -float("inf")
-lower["src.v"] = -15000
+lower["src.v"] = -float("inf")
 upper["src.v"] = float("inf")
 
 lower["src.t"] = -float("inf")
@@ -278,13 +276,11 @@ prob = om.Problem()
 # OpenMDAO Independent Variables
 indeps = prob.model.add_subsystem("indeps", om.IndepVarComp())
 
-
-
 # set initial height distribution
 # set as a linear dist. at a scale of 5x the actual answer or...
-indeps.add_output("h", shape=nelems, val=1 * np.linspace(om_h[0], om_h[-1], len(om_h)))
+# indeps.add_output("h", shape=nelems, val=1 * np.linspace(om_h[0], om_h[-1], len(om_h)))
 # set as uniform value
-# indeps.add_output("h", shape=nelems, val=0.1)
+indeps.add_output("h", shape=nelems, val=0.1)
 
 
 # (Amigo) potential energy optimization parameters

@@ -152,6 +152,31 @@ class AppliedLoad(am.Component):
         )
         return
 
+class ContactPenalty(am.Component):
+    """
+    For potential energy minimization: contributes work done by external forces
+    Total PE = Strain Energy - Work
+    Work = F Â· u (force dot displacement)
+    """
+
+    def __init__(self):
+        super().__init__()
+
+        self.add_input("v", value=0.0)
+        self.add_input("t", value=0.0)
+        self.add_objective("penalty")
+        return
+
+    def compute(self):
+        penalty_parameter = 3e9
+        v = self.inputs["v"]
+
+        gap_n = -1e-3 - v
+        epsilon = 1e-8
+        phi = 0.5 * ((gap_n**2 + epsilon**2)**0.5 - gap_n)
+        
+        self.objective["penalty"] = 0.5 * penalty_parameter * gap_n**2
+        return 
 
 class NodeSource(am.Component):
     def __init__(self):
@@ -164,14 +189,6 @@ class NodeSource(am.Component):
         # Displacement degrees of freedom
         self.add_input("v")
         self.add_input("t")
-
-    #     self.add_constraint("v_floor", lower = -1e-3)
-    
-    # def compute(self):
-    #     v = self.inputs["v"]
-    #     self.constraints["v_floor"] = v
-
-
 
 class Compliance(am.Component):
     """Compliance for an applied load condition at the tip"""
@@ -262,6 +279,12 @@ def main():
     model.link("src.v", "load.v", src_indices=conn)
     model.link("src.t", "load.t", src_indices=conn)
 
+    # # Assume 1 nodes breaking impenetrability
+    contact = ContactPenalty()
+    model.add_component("contact", 1, contact)
+    model.link("src.v", "contact.v", src_indices=nodes[-1])
+    model.link("src.t", "contact.t", src_indices=nodes[-1])
+
     # Link variables for compliance calculation
     compliance = Compliance()
     model.add_component("comp", nelems, compliance)
@@ -293,7 +316,7 @@ def main():
 
     # Set bounds on displacements
     # lower["src.v"] = -float("inf")
-    lower["src.v"] = -1e-3 # mm
+    lower["src.v"] = -float("inf")
     upper["src.v"] = float("inf")
 
     lower["src.t"] = -float("inf")
@@ -302,7 +325,7 @@ def main():
     # Amigo potential energy minimization parameters
     opt_options = {
         "max_iterations": 200,
-        "convergence_tolerance": 1e-10,
+        "convergence_tolerance": 1e-8,
         "max_line_search_iterations": 1,
         "initial_barrier_param": 0.1,
     }
@@ -320,7 +343,6 @@ def main():
     #     of="comp.c[0]", wrt="beam_element.h", method="adjoint"
     # )
 
-
     # verify the contact forces in all the elements!
     x_v = x['src.v']
     mu = opt.barrier_param
@@ -330,110 +352,45 @@ def main():
 
     return x, x_coords
 
-
-    # exit()
-
-
-    # # OpenMDAO optimization
-    # prob = om.Problem()
-
-    # # OpenMDAO Independent Variables
-    # indeps = prob.model.add_subsystem("indeps", om.IndepVarComp())
-
-    # # # run openmdao example and extract optimal h to test amigo fem
-    # # om_h, om_v, om_totals_obj, om_totals_con = original_om_problem()
-    # # om_c_wrt_h = om_totals_obj["compliance_comp.compliance", "h"]["J_rev"]
-    # # om_con_wrt_h = om_totals_con["volume_comp.volume", "h"]["J_rev"]
-
-    # # indeps.add_output("h", shape=nelems, val=5 * np.linspace(om_h[0], om_h[-1], len(om_h)))
-    # indeps.add_output("h", shape=nelems, val=0.1)
-
-    # # Amigo Optimizer
-    # prob.model.add_subsystem(
-    #     "fea",
-    #     am.ExplicitOpenMDAOPostOptComponent(
-    #         data=["beam_element.h"],
-    #         output=["comp.c[0]", "vol_con.con[0]"],
-    #         data_mapping={"beam_element.h": "h"},
-    #         output_mapping={"comp.c[0]": "c", "vol_con.con[0]": "con"},
-    #         model=model,
-    #         x=x,
-    #         lower=lower,
-    #         upper=upper,
-    #         opt_options=opt_options,
-    #     ),
-    # )
-
-    # prob.model.connect("indeps.h", "fea.h")
-
-    # # setup the OpenMDAO optimization
-    # prob.driver = om.ScipyOptimizeDriver()
-
-    # if args.optimizer == "SLSQP":
-    #     prob.driver.options["optimizer"] = "SLSQP"
-    # else:
-    #     prob.driver.options["optimizer"] = args.optimizer
-
-
-    # prob.driver.options["maxiter"] = 1
-    # prob.driver.options["tol"] = 1e-9
-    # prob.driver.options["disp"] = True
-
-    # # perform optimziation
-    # prob.model.add_design_var("indeps.h", lower=1e-6, upper=1.0, ref = 1.0e-1)
-    # prob.model.add_objective("fea.c", ref=1.0e3)
-    # prob.model.add_constraint("fea.con", equals=0.03)
-    # prob.setup(check=True)
-
-
-    # # data = prob.check_partials(compact_print=False, step=1e-6)
-    # # exit()
-    # # Run Optimization Problem
-    # prob.run_driver()
-    # h_results = prob["indeps.h"]
-    # print("vol: ", prob["fea.con"])
-    # print("compliance: ", prob["fea.c"])
-
-    # # data = prob.check_partials(compact_print=False, step=1e-6)
-
-    # # fig, ax = plt.subplots()
-    # # # ax.plot(prob["indeps.h"])
-    # # ax.plot(prob["indeps.h"], marker="o", label="amigo")
-    # # # ax.plot(om_h, label="openMDAO example")
-    # # ax.legend()
-    # # ax.set_ylabel(r"$h*$")
-    # # ax.set_xlabel(r"$x$")
-    # # ax.set_title("Optimized Thickness Distribution")
-
-    # return x
-
-
 def plot(v, x_c):
     x_ref_arr = np.linspace(0,1,51)
     EI = E
     lam = -75
     v_ref = np.empty_like(x_ref_arr)
     v_nocontact = np.empty_like(x_ref_arr)
+    v_ref_pen = np.empty_like(x_ref_arr)
+    a2 = 2.13e-3
+    a3 = -1.54e-3
+    a4 = 4.17e-4
     for i in range(len(x_ref_arr)):
         x = x_ref_arr[i]
         v_ref[i] = (Fv*x**2/(24*EI))*(x**2 + 6 - 4*x) - (lam*x**2)/(6*EI)*(3-x)
         v_nocontact[i] = (Fv*x**2/(24*EI))*(x**2 + 6 - 4*x)
+        v_ref_pen[i] = a2 * x**2 + a3*x**3 + a4*x**4
 
+    v_cant = np.load('v_cant.npy') # cantilever
+    v_unbd = np.load('v_unbounded.npy')
     fig,ax = plt.subplots()
     ax.plot(x_c,v)
-    ax.plot(x_c,v_ref)
-    ax.plot(x_c,v_nocontact)
-    ax.legend([r"$v_{\text{amigo}}$",r"$v_{\text{amigo}}$",r"$v_\text{free}$"])
-    print('max relative error: ', np.max((v-v_ref))/np.linalg.norm(v))
+    ax.plot(x_c,v_cant)
+    ax.plot(x_c,v_unbd)
+    # ax.plot(x_c, -v_ref_pen)
+    print('tip disp', v[-1], v_cant[-1])
+
+    ax.legend([r"$v_{\text{penalty}}$",r"$v_{\text{constraint}}$",r"$v_{\text{unbounded}}$",r"$v_\text{ref_pen}$"])
+    print('max relative error: ', np.max(np.abs(v-v_cant)))#/np.linalg.norm(v))
     # ax.plot((v-v_ref)/v_ref)
     ax.grid(True)
     plt.axhline(-1e-3, color = 'black')
     ax.set_ylabel('$vertical displacement (m)$')
     ax.set_xlabel('$x(m)$')
-    plt.savefig('contact.png')
+    plt.savefig('contact_penalty.png')
     # plt.show()
 
 if __name__ == "__main__":
     x,x_c = main()
-    # np.save('v_cant.npy', x['src.v'])
+    # print(np.load('v_unbounded.npy'))
+    # exit()
+    # np.save('v_unbounded.npy',x['src.v'])
     plot(x['src.v'], x_c)
+
