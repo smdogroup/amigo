@@ -52,7 +52,7 @@ def original_om_problem():
 length = 1.0
 nelems = 50
 E = 1e5
-Fv = -1000
+Fv = -10000
 Mv = 0.0
 
 
@@ -328,6 +328,10 @@ def main():
     zl = mu / (x_v - lbxv)
     print('zl:', zl)
 
+    fig, ax = plt.subplots()
+    plt.plot(x_coords,zl)
+    plt.show()
+    exit()
     return x, x_coords
 
 
@@ -421,8 +425,8 @@ def plot(v, x_c):
 
     fig,ax = plt.subplots()
     ax.plot(x_c,v)
-    ax.plot(x_c,v_ref)
-    ax.plot(x_c,v_nocontact)
+    # ax.plot(x_c,v_ref)
+    # ax.plot(x_c,v_nocontact)
     ax.legend([r"$v_{\text{amigo}}$",r"$v_{\text{amigo}}$",r"$v_\text{free}$"])
     print('max relative error: ', np.max((v-v_ref))/np.linalg.norm(v))
     # ax.plot((v-v_ref)/v_ref)
