@@ -456,14 +456,14 @@ class Problem:
 
         # Build the elements for all domains
         domains = self.mesh.get_domains()
-        mesh_name = self.weakform_map["mesh_name"]
+        wf_name = self.weakform_map["name"]
         for domain in domains:
             for etype in domains[domain]:
                 # Each element type has a dictionary of solution basis's
                 soln_basis = {}
 
                 # Build a finite-element for each weak form
-                elem_name = f"{mesh_name}_Element{etype}_{domain}"
+                elem_name = f"{wf_name}_Element{etype}_{domain}"
 
                 soln_basis = self.soln_dof.get_basis(etype)
                 data_basis = self.data_dof.get_basis(etype)
@@ -629,25 +629,28 @@ def weakform_SN_Magnet(soln, data=None, geo=None):
     return wf
 
 
+# Know number of points along shared edge
+npts_shared = 20
+
+# Domain1 slides to the right by an integer value
+# 5 is the length of the shared edge
+slide_number = 10
+x_offset = slide_number * (5.0 / npts_shared)
+
 # Define a weakform map to domains
 weakform_map_domain_0 = {
-    "mesh_name": "Domain0",
+    "name": "Mesh0_weak_forms",
     "SURFACE1": weakform_air,
-    "SURFACE2": weakform_SN_Magnet,
-    "SURFACE3": weakform_air,
+    "SURFACE2": weakform_air,
+    "SURFACE3": weakform_NS_Magnet,
 }
 
 weakform_map_domain_1 = {
-    "mesh_name": "Domain1",
+    "name": "Mesh1_weak_forms",
     "SURFACE1": weakform_air,
     "SURFACE2": weakform_NS_Magnet,
     "SURFACE3": weakform_air,
 }
-
-weakform_map = [
-    weakform_map_domain_0,
-    weakform_map_domain_1,
-]
 
 # Boundary Condition
 dirichlet_bc_map_domain_1 = {
@@ -681,78 +684,85 @@ symmetery_bc_map = {
         "scale": [1.0, 1.0],
     },
 }
-# Know number of points along shared edge
-npts_shared = 20
 
-# Domain1 slides to the right by an integer value
-# 5 is the length of the shared edge
-slide_number = 10
-x_offset = slide_number * (5.0 / npts_shared)
+# Define mesh objects
+meshes = {
+    "Mesh0": Mesh("weakform_test_mesh.inp"),
+    "Mesh1": Mesh("weakform_test_mesh.inp"),
+}
 
+# Define Dirichlet BCs for each mesh
+dirichlet_bc_meshes = {
+    "Mesh0": dirichlet_bc_map_domain_1,
+    "Mesh1": dirichlet_bc_map_domain_2,
+}
 
-# Define meshes
-meshes = ["weakform_test_mesh.inp", "weakform_test_mesh.inp"]
-dirichlet_bc_meshes = [dirichlet_bc_map_domain_1, dirichlet_bc_map_domain_2]
+# Weak form mapping for each mesh
+weakform_map = {
+    "Mesh0": weakform_map_domain_0,
+    "Mesh1": weakform_map_domain_1,
+}
 
 # Initialize the spaces (same for all domains)
 soln_space = basis.SolutionSpace({"u": "H1"})
 data_space = basis.SolutionSpace({"rho": "H1"})
 geo_space = basis.SolutionSpace({"x": "H1", "y": "H1"})
 
-global_model = am.Model("global_model")
+# Define the global amigo model
+main = am.Model("main")
 
-for i, fname in enumerate(meshes):
-    mesh = Mesh(fname)
-    domain_name = f"Domain{i}"
+# Create an amigo model for each mesh
+for mesh_name, mesh in meshes.items():
     problem = Problem(
         mesh,
         soln_space,
-        weakform_map[i],
+        weakform_map[mesh_name],
         data_space=data_space,
         geo_space=geo_space,
-        dirichlet_bc_map=dirichlet_bc_meshes[i],
+        dirichlet_bc_map=dirichlet_bc_meshes[mesh_name],
         sym_bc_map=symmetery_bc_map,
         ndim=2,
     )
-    model = problem.create_model(domain_name)
-    global_model.add_model(domain_name, model)
+    model = problem.create_model(mesh_name)
+    main.add_model(mesh_name, model)
 
-mesh_domain = Mesh("weakform_test_mesh.inp")
-nodes_line_1 = mesh_domain.get_bc_nodes("LINE1", "T3D2")
-nodes_line_3 = mesh_domain.get_bc_nodes("LINE3", "T3D2")
+# Extract the shared edge between the meshes
+mesh0 = meshes["Mesh0"]
+mesh1 = meshes["Mesh1"]
+nodes_line_1 = mesh0.get_bc_nodes("LINE1", "T3D2")
+nodes_line_3 = mesh1.get_bc_nodes("LINE3", "T3D2")
 nodes_line_3 = np.flip(nodes_line_3)
 
-# Add a continuity boundary condition to the global model
+# Add continuity BCs to the global model
 nodes_line_1_shared = nodes_line_1[slide_number:]
 nodes_line_3_shared = nodes_line_3[0:-slide_number]
 for i in range(len(nodes_line_1_shared)):
-    global_model.link(
-        f"Domain0.src_soln.u[{nodes_line_1_shared[i]}]",
-        f"Domain1.src_soln.u[{nodes_line_3_shared[i]}]",
+    main.link(
+        f"Mesh0.src_soln.u[{nodes_line_1_shared[i]}]",
+        f"Mesh1.src_soln.u[{nodes_line_3_shared[i]}]",
     )
 
-# Share the hanging edges
+# BCs for the hanging edges
 nodes_line_1_hanging = nodes_line_1[0:slide_number]
 nodes_line_3_hanging = nodes_line_3[-slide_number:]
 for i in range(len(nodes_line_1_hanging)):
-    global_model.link(
-        f"Domain0.src_soln.u[{nodes_line_1_hanging[i]}]",
-        f"Domain1.src_soln.u[{nodes_line_3_hanging[i]}]",
+    main.link(
+        f"Mesh0.src_soln.u[{nodes_line_1_hanging[i]}]",
+        f"Mesh1.src_soln.u[{nodes_line_3_hanging[i]}]",
     )
 
 
-global_model.build_module()
-global_model.initialize(order_type=am.OrderingType.NESTED_DISSECTION)
-
-# print("num_variables = ", model.num_variables)
-p = global_model.get_problem()
+# Build the model
+main.build_module()
+main.initialize(order_type=am.OrderingType.NESTED_DISSECTION)
+p = main.get_problem()
 
 # Set the problem data
-data = global_model.get_data_vector()
-data["Domain0.src_geo.x"] = mesh.X[:, 0]
-data["Domain0.src_geo.y"] = mesh.X[:, 1]
-data["Domain1.src_geo.x"] = mesh.X[:, 0]
-data["Domain1.src_geo.y"] = mesh.X[:, 1]
+data = main.get_data_vector()
+data["Mesh0.src_geo.x"] = mesh0.X[:, 0]
+data["Mesh0.src_geo.y"] = mesh0.X[:, 1]
+data["Mesh1.src_geo.x"] = mesh1.X[:, 0]
+data["Mesh1.src_geo.y"] = mesh1.X[:, 1]
 
 mat = p.create_matrix()
 alpha = 1.0
@@ -766,11 +776,8 @@ csr_mat = am.tocsr(mat)
 
 ans.get_array()[:] = spsolve(csr_mat, g.get_array())
 ans_local = ans
-u_domain0 = ans_local.get_array()[global_model.get_indices("Domain0.src_soln.u")]
-u_domain1 = ans_local.get_array()[global_model.get_indices("Domain1.src_soln.u")]
-
-print(np.allclose(u_domain0[nodes_line_1_shared], u_domain1[nodes_line_3_shared]))
-print(np.allclose(u_domain0[nodes_line_1_hanging], u_domain1[nodes_line_3_hanging]))
+u_domain0 = ans_local.get_array()[main.get_indices("Mesh0.src_soln.u")]
+u_domain1 = ans_local.get_array()[main.get_indices("Mesh1.src_soln.u")]
 
 max_domain = np.max(np.maximum(u_domain0, u_domain1))
 min_domain = np.min(np.minimum(u_domain0, u_domain1))
