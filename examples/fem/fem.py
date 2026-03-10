@@ -68,7 +68,7 @@ class SymmetryDegreesOfFreedom:
             )
 
             line_tag = self.bc[name]["target"][0]
-            nnodes = mesh.get_num_nodes_on_bc(line_tag, "T3D2")
+            nnodes = self.mesh.get_num_nodes_on_bc(line_tag, "T3D2")
 
             # Update the number of components based on whether to include start and end
             if self.bc[name]["start"] == False:
@@ -90,7 +90,7 @@ class SymmetryDegreesOfFreedom:
             input_name = self.bc[name]["input"][0]  # Extract "u"
 
             for i, line_tag in enumerate(self.bc[name]["target"]):
-                conn = mesh.get_bc_nodes(line_tag, "T3D2")
+                conn = self.mesh.get_bc_nodes(line_tag, "T3D2")
 
                 # Slice the nodes based on start and end requirement
                 if self.bc[name]["start"] == False and self.bc[name]["end"] == True:
@@ -142,7 +142,7 @@ class DirichletDegreesOfFreedom:
             input_name = self.bc[name]["input"]
             target_name = self.bc[name]["target"]
             bc_src = DirichletBCSource(input_name=input_name)
-            nnodes = mesh.get_num_nodes_on_bc(target_name, "T3D2")
+            nnodes = self.mesh.get_num_nodes_on_bc(target_name, "T3D2")
 
             # Update the number of components based on whether to include start and end
             if self.bc[name]["start"] == False:
@@ -163,7 +163,7 @@ class DirichletDegreesOfFreedom:
             # Loop through each bc target
             target = self.bc[name]["target"]
             input_name = self.bc[name]["input"][0]  # Extract "u"
-            conn = mesh.get_bc_nodes(target, "T3D2")
+            conn = self.mesh.get_bc_nodes(target, "T3D2")
 
             # Slice the nodes based on start and end requirement
             if self.bc[name]["start"] == False and self.bc[name]["end"] == True:
@@ -209,7 +209,7 @@ class DegreesOfFreedom:
         dof_src = DofSource(input_names=input_names, data_names=data_names)
 
         # Add global mesh source component
-        nnodes = mesh.get_num_nodes()
+        nnodes = self.mesh.get_num_nodes()
         model.add_component(f"src_{self.name}", nnodes, dof_src)
         # src_soln, src_data, src_geo
 
@@ -418,19 +418,19 @@ class Problem:
         # Initialize Dof's
         # Take in the soln space -> removes "H1" input
         self.soln_dof = DegreesOfFreedom(
-            mesh,
+            self.mesh,
             self.soln_space,
             kind="input",
             name="soln",
         )
         self.geo_dof = DegreesOfFreedom(
-            mesh,
+            self.mesh,
             self.geo_space,
             kind="data",
             name="geo",
         )
         self.data_dof = DegreesOfFreedom(
-            mesh,
+            self.mesh,
             self.data_space,
             kind="data",
             name="data",
