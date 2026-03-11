@@ -196,48 +196,96 @@ class DegreesOfFreedom:
 
     def add_source(self, model):
         # Get the names of things associated with H1
-        names = self.space.get_names("H1")  # u, v
 
-        # Create amigo source component with input names and geo names
-        input_names = []
-        data_names = []
-        if self.kind == "input":
-            input_names = names
-        elif self.kind == "data":
-            data_names = names
+        for sp in ["H1", "const"]:
+            names = self.space.get_names(sp)
 
-        dof_src = DofSource(input_names=input_names, data_names=data_names)
+            #! Error -> can not add two of the same comps
+            # Move on to next space if the names are empty
+            if names == []:
+                continue
 
-        # Add global mesh source component
-        nnodes = self.mesh.get_num_nodes()
-        model.add_component(f"src_{self.name}", nnodes, dof_src)
-        # src_soln, src_data, src_geo
+            # Create amigo source component with input names and geo names
+            input_names = []
+            data_names = []
+            if self.kind == "input":
+                input_names = names
+            elif self.kind == "data":
+                data_names = names
+
+            dof_src = DofSource(input_names=input_names, data_names=data_names)
+
+            # Add global mesh source component
+            nnodes = self.mesh.get_num_nodes()
+            nsurfaces = self.mesh.get_num_surfaces()
+            if sp == "H1":
+                model.add_component(f"src_{self.name}", nnodes, dof_src)
+                # print(f"src_{self.name}")
+
+            elif sp == "const":
+                model.add_component(f"src_{self.name}", nsurfaces, dof_src)
+                # print(f"src_{self.name}")
 
     def link_dof(self, model, domain, etype, elem_name):
-        names = self.space.get_names("H1")
-        conn = self.mesh.get_conn(domain, etype)
-        for name in names:
-            model.link(
-                f"src_{self.name}.{name}", f"{elem_name}.{name}", src_indices=conn
-            )
+        # names = self.space.get_names("H1")
+        for sp in ["H1", "const"]:
+            names = self.space.get_names(sp)
+
+            #! move on if the names are empty
+            if names == []:
+                continue
+
+            if sp == "H1":
+                conn = self.mesh.get_conn(domain, etype)
+                for name in names:
+                    model.link(
+                        f"src_{self.name}.{name}",
+                        f"{elem_name}.{name}",
+                        src_indices=conn,
+                    )
+                    # print(f"src_{self.name}.{name}", f"{elem_name}.{name}")
+
+            elif sp == "const":
+                gmsh_surf_index = int(domain.replace("SURFACE", ""))
+                surf_index = gmsh_surf_index - 1
+
+                for name in names:
+                    model.link(
+                        f"src_{self.name}.{name}[{surf_index}]",
+                        f"{elem_name}.{name}[:]",
+                    )
+
+                    # print(
+                    #     f"src_{self.name}.{name}[{surf_index}]",
+                    #     f"{elem_name}.{name}[:]",
+                    # )
         return
 
     def get_basis(self, etype):
         basis_list = []
 
-        for sp in ["H1"]:
-            # self._get_basis(etype, sp, names, kind) # names and kind come from space info
+        for sp in ["H1", "const"]:
             names = self.space.get_names(sp)
+
+            #! move on if the names are empty
+            if names == []:
+                continue
+
             basis_list.append(self._get_basis(etype, sp, names, self.kind))
+
         return basis.BasisCollection(basis_list)
 
     def _get_basis(self, etype, space, names=[], kind="input"):
         if etype == "CPS3":
             if space == "H1":
                 return basis.TriangleLagrangeBasis(1, names, kind=kind)
+            elif space == "const":
+                return basis.Constant(names=names, kind=kind)
         elif etype == "CPS4":
             if space == "H1":
                 return basis.QuadLagrangeBasis(1, names, kind=kind)
+            elif space == "const":
+                return basis.Constant(names=names, kind=kind)
         elif etype == "CPS6":
             if space == "H1":
                 return basis.TriangleLagrangeBasis(2, names, kind=kind)
@@ -291,6 +339,9 @@ class Mesh:
 
     def get_num_elements(self, name, etype):
         return self.parser.get_conn(name, etype).shape[0]
+
+    def get_num_surfaces(self):
+        return self.parser.get_num_surfaces()
 
     def get_bc_nodes(self, name, etype):
         return self.parser.get_edge_node(name, etype)
@@ -450,8 +501,13 @@ class Problem:
         """Create and link the Amigo model"""
         model = am.Model(module_name)
 
+        # print("\nsoln_dof source called")
         self.soln_dof.add_source(model)
+
+        # print("\ndata_dof source called")
         self.data_dof.add_source(model)
+
+        # print("\ngeo_dof source called")
         self.geo_dof.add_source(model)
 
         # Build the elements for all domains
@@ -487,8 +543,13 @@ class Problem:
                 model.add_component(elem_name, nelems, elem)
 
                 # Link all the element dof to the component
+                # print("\nsoln_dof link called")
                 self.soln_dof.link_dof(model, domain, etype, elem_name)
+
+                # print("\ndata_dof link called")
                 self.data_dof.link_dof(model, domain, etype, elem_name)
+
+                # print("\ngeo_dof link called")
                 self.geo_dof.link_dof(model, domain, etype, elem_name)
 
         # Add BC components and links
@@ -548,7 +609,9 @@ class FiniteElement(am.Component):
         data_phys = self.data_basis.transform(detJ, Jinv, data_xi)
 
         # Add the contributions directly to the Lagrangian
-        self.objective["obj"] = quad_weight * detJ * self.weakform(soln_phys, geo=geo)
+        self.objective["obj"] = (
+            quad_weight * detJ * self.weakform(soln_phys, data=data_phys, geo=geo)
+        )
         return
 
 
@@ -625,6 +688,18 @@ def weakform_SN_Magnet(soln, data=None, geo=None):
 
     M = [0.0, -1.0]
     f = basis.curl_2d(ugrad, M, n=2)
+    wf = 0.5 * (basis.dot_product(ugrad, ugrad, n=2) - f)
+    return wf
+
+
+def weakform_coils(soln, data=None, geo=None):
+    u = soln["u"]
+    uvalue = u["value"]
+    ugrad = u["grad"]
+
+    Jz = data["Jz"]["value"]
+    f = Jz * uvalue
+
     wf = 0.5 * (basis.dot_product(ugrad, ugrad, n=2) - f)
     return wf
 
@@ -742,20 +817,20 @@ weakform_map = {
     "Mesh0": {
         "name": "Mesh0_weak_forms",
         "SURFACE1": weakform_air,
-        "SURFACE2": weakform_air,
-        "SURFACE3": weakform_NS_Magnet,
+        "SURFACE2": weakform_coils,
+        "SURFACE3": weakform_coils,
     },
     "Mesh1": {
         "name": "Mesh1_weak_forms",
         "SURFACE1": weakform_air,
-        "SURFACE2": weakform_NS_Magnet,
-        "SURFACE3": weakform_air,
+        "SURFACE2": weakform_coils,
+        "SURFACE3": weakform_coils,
     },
 }
 
 # Initialize the spaces (same for all domains)
 soln_space = basis.SolutionSpace({"u": "H1"})
-data_space = basis.SolutionSpace({"rho": "H1"})
+data_space = basis.SolutionSpace({"Jz": "const"})
 geo_space = basis.SolutionSpace({"x": "H1", "y": "H1"})
 
 # Define the global amigo model
@@ -811,8 +886,17 @@ p = main.get_problem()
 data = main.get_data_vector()
 data["Mesh0.src_geo.x"] = mesh0.X[:, 0]
 data["Mesh0.src_geo.y"] = mesh0.X[:, 1]
+
 data["Mesh1.src_geo.x"] = mesh1.X[:, 0]
 data["Mesh1.src_geo.y"] = mesh1.X[:, 1]
+
+data["Mesh0.src_data.Jz[0]"] = 0.0  # SURFACE1
+data["Mesh0.src_data.Jz[1]"] = 0.0  # SURFACE2
+data["Mesh0.src_data.Jz[2]"] = 0.0  # SURFACE3
+
+data["Mesh1.src_data.Jz[0]"] = 0.0  # SURFACE1
+data["Mesh1.src_data.Jz[1]"] = 0.0  # SURFACE2
+data["Mesh1.src_data.Jz[2]"] = 10.0  # SURFACE3
 
 mat = p.create_matrix()
 alpha = 1.0

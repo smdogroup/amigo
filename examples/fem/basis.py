@@ -93,6 +93,57 @@ class BasisCollection:
         return self.basis[0].compute_transform(geo)
 
 
+# class FaceBasis:
+#     def __init__(self, names, nelems=1, kind="input"):
+#         if isinstance(names, (list, tuple)):
+#             self.names = names
+#         elif isinstance(names, str):
+#             self.names = [names]
+#         self.nelems = nelems
+#         self.kind = kind
+
+#         if not (self.kind == "input" or self.kind == "data"):
+#             raise ValueError(f"{self.kind} not recognized")
+
+#     def add_declarations(self, comp):
+#         print(self.names, self.nelems)
+#         if self.kind == "input":
+#             for name in self.names:
+#                 comp.add_input(name, shape=(self.nelems,))
+#         elif self.kind == "data":
+#             for name in self.names:
+#                 comp.add_data(name, shape=(self.nelems,))
+
+
+# class ConstantBasis2D(FaceBasis):
+#     def __init__(self, names, nelems=1, kind="input"):
+#         super().__init__(names, nelems=nelems, kind=kind)
+
+#     def transform(self, detJ, Jinv, orig):
+#         soln = {}
+#         for name in orig:
+#             value = orig[name]["value"]
+#             soln[name] = {
+#                 "value": value,
+#                 "grad": [0.0, 0.0],  # Constant has no spatial gradient
+#             }
+#         return soln
+
+#     def eval(self, comp, pt):
+#         soln = {}
+#         for name in self.names:
+#             if self.kind == "input":
+#                 u = comp.inputs[name]
+#             elif self.kind == "data":
+#                 u = comp.data[name]
+
+#             soln[name] = {
+#                 "value": u[0],
+#                 "grad": [0.0, 0.0],
+#             }
+#         return soln
+
+
 class Basis:
     def __init__(self, names, nnodes=1, kind="input"):
         if isinstance(names, (list, tuple)):
@@ -114,6 +165,35 @@ class Basis:
         elif self.kind == "data":
             for name in self.names:
                 comp.add_data(name, shape=(self.nnodes,))
+
+
+class Constant(Basis):
+    def __init__(self, names, nnodes=1, kind="input"):
+        super().__init__(names, nnodes=nnodes, kind=kind)
+
+    def transform(self, detJ, Jinv, orig):
+        soln = {}
+        for name in orig:
+            value = orig[name]["value"]
+            soln[name] = {
+                "value": value,
+                "grad": [0.0, 0.0],
+            }
+        return soln
+
+    def eval(self, comp, pt):
+        soln = {}
+        for name in self.names:
+            if self.kind == "input":
+                u = comp.inputs[name]
+            elif self.kind == "data":
+                u = comp.data[name]
+
+            soln[name] = {
+                "value": u[0],
+                "grad": [0.0, 0.0],
+            }
+        return soln
 
 
 class LagrangeBasis2D(Basis):
@@ -385,7 +465,7 @@ class QuadQuadrature(Quadrature):
 
 class SolutionSpace:
     def __init__(self, mapping):
-        self._allowed_spaces = ["H1", "L2", "H(div)", "H(curl)"]
+        self._allowed_spaces = ["H1", "L2", "H(div)", "H(curl)", "const"]
 
         self.names = {}
         for name in mapping:

@@ -46,6 +46,7 @@ def plot_mesh(X, elem_conn, edge_dict, jpg_name=None):
 class InpParser:
     def __init__(self):
         self.elements = {}
+        self.surfaces = {}
 
     def _read_file(self, filename):
         with open(filename, "r", errors="ignore") as fp:
@@ -65,6 +66,7 @@ class InpParser:
 
         self.X = {}
         self.elem_conn = {}
+        self.surfaces = []
 
         elem_type = None
 
@@ -90,6 +92,8 @@ class InpParser:
                         self.elem_conn[elset] = {}
                     if elset not in self.elem_conn[elset]:
                         self.elem_conn[elset][elem_type] = {}
+                    if "SURFACE" in elset:
+                        self.surfaces.append(elset)
                 continue
 
             if section == "NODE":
@@ -117,6 +121,9 @@ class InpParser:
                 names[elset].append(elem_type)
 
         return names
+
+    def get_num_surfaces(self):
+        return len(self.surfaces)
 
     def get_conn(self, elset, elem_type):
         conn = self.elem_conn[elset][elem_type]
