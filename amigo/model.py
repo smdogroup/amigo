@@ -9,6 +9,7 @@ import pybind11
 import networkx as nx
 from .amigo import (
     OrderingType,
+    MemoryLocation,
     reorder_model,
     VectorInt,
     OptimizationProblem,
@@ -27,9 +28,9 @@ except:
 
 if sys.version_info < (3, 11):
     Self = object
-    from typing import Union, List, Dict
+    from typing import Union, List
 else:
-    from typing import Union, Self, List, Dict
+    from typing import Union, Self, List
 
 
 def _import_class(module_name: str, class_name: str):
@@ -140,21 +141,6 @@ def _eval_ast_index_depr(node):
             return ast.literal_eval(node)
     else:
         raise NotImplementedError
-
-
-def _to_list(obj):
-    if obj is None:
-        return None
-    elif isinstance(obj, (int, np.integer)):
-        return int(obj)
-    elif isinstance(obj, np.ndarray):
-        return obj.tolist()
-    elif isinstance(obj, list):
-        return obj  # Assuming it contains JSON-serializable elements
-    else:
-        raise TypeError(
-            f"Object {obj} of type {type(obj).__name__} is not JSON serializable"
-        )
 
 
 class GlobalIndexPool:
@@ -276,10 +262,7 @@ class ComponentGroup:
         return array
 
     def create_group_object(self, module_name: str):
-        if (
-            not self.comp_obj.is_compute_empty()
-            or not self.comp_obj.is_compute_output_empty()
-        ):
+        if not self.comp_obj.is_compute_empty() or not self.comp_obj.is_output_empty():
             data_array = self.get_indices(self.data)
             vec_array = self.get_indices(self.vars)
             out_array = self.get_indices(self.outputs)
@@ -330,10 +313,9 @@ class ExternalComponent:
 
 
 class ModelVector:
-    def __init__(self, model, x, kind=None):
+    def __init__(self, model, x):
         self._model = model
         self._x = x
-        self.kind = kind
 
     def get_vector(self):
         return self._x
@@ -357,48 +339,6 @@ class ModelVector:
             x_array[expr] = item
         else:
             raise KeyError("Key type {expr} not accepted")
-
-    def extract_components(self, expr="all"):
-        if expr == "all":
-            # Get the names and set the expression based on the values
-            inputs, cons, data, outputs = self._model.get_names()
-            if self.kind == "data":
-                comp = data
-            elif self.kind == "state":
-                comp = inputs + cons
-            elif self.kind == "output":
-                comp = outputs
-            else:
-                comp = expr
-        else:
-            comp = expr
-
-        data = {"kind": self.kind}
-        data_list = []
-
-        x_array = self._x.get_array()
-        if isinstance(comp, str):
-            idx = self._model.get_indices(comp)
-            data_list.append({"comp": comp, "data": _to_list(x_array[idx])})
-        elif isinstance(comp, (list, tuple)):
-            for c in comp:
-                idx = self._model.get_indices(c)
-                data_list.append({"comp": c, "data": _to_list(x_array[idx])})
-        else:
-            raise KeyError("Key type {expr} not accepted")
-
-        data["data"] = data_list
-
-        return data
-
-    def set_components(self, data):
-        if self.kind != data["kind"]:
-            raise ValueError("Vector kind does not match")
-
-        data_list = data["data"]
-        for d in data_list:
-            self[d["comp"]] = d["data"]
-        return
 
 
 class Model:
@@ -927,16 +867,16 @@ class Model:
         return prob
 
     def get_data_vector(self):
-        return ModelVector(self, self.problem.get_data_vector(), kind="data")
+        return ModelVector(self, self.problem.get_data_vector())
 
     def create_vector(self):
-        return ModelVector(self, self.problem.create_vector(), kind="state")
+        return ModelVector(self, self.problem.create_vector())
 
     def create_output_vector(self):
-        return ModelVector(self, self.problem.create_output_vector(), kind="output")
+        return ModelVector(self, self.problem.create_output_vector())
 
     def create_data_vector(self):
-        return ModelVector(self, self.problem.create_data_vector(), kind="data")
+        return ModelVector(self, self.problem.create_data_vector())
 
     def get_problem(self):
         """Retrieve the optimization problem"""
@@ -1000,7 +940,7 @@ class Model:
                 "Must call initialize before calling get_values_from_meta"
             )
 
-        x = self.create_vector()
+        x = ModelVector(self, self.problem.create_vector())
         for comp_name, comp in self.comp.items():
             for var_name in comp.vars:
                 name = comp_name + "." + var_name
@@ -1064,6 +1004,7 @@ class Model:
         # C++ file contents
         cpp = '#include "amigo.h"\n'
         cpp += '#include "a2dcore.h"\n'
+        cpp += '#include "a2d_sed.h"\n'
         cpp += "namespace amigo {"
 
         # pybind11 file contents
@@ -1091,7 +1032,7 @@ class Model:
             class_name = self.comp[name].class_name
             if class_name not in class_names:
                 compute_empty = self.comp[name].comp_obj.is_compute_empty()
-                output_empty = self.comp[name].comp_obj.is_compute_output_empty()
+                output_empty = self.comp[name].comp_obj.is_output_empty()
                 if not compute_empty or not output_empty:
                     class_names[class_name] = True
 
@@ -1208,93 +1149,99 @@ amigo_add_python_module(
 
         return
 
-    def serialize(self):
-        """Serialize the model"""
-        if not self._initialized:
-            raise RuntimeError("Cannot serialize an uninitialized model")
-        if len(self.external_comp) > 0:
-            raise RuntimeError("Cannot serialize a model with external components")
+    def _build_tree_data(self, tree, name):
+        subtree = {
+            "name": name,
+        }
 
-        model_data = {}
-        model_data["module_name"] = self.module_name
+        if name in self.comp:
+            subtree["name"] = name
+            subtree["class"] = self.comp[name].class_name
+            subtree["size"] = self.comp[name].size
 
-        # Serialize the components
-        comp_list = []
-        for name, comp in self.comp.items():
-            comp_data = {}
-            comp_data["name"] = name
-            comp_data["size"] = comp.size
-            comp_data["class_name"] = comp.class_name
+            data = {}
+            for data_name in self.comp[name].get_data_names():
+                data[data_name] = self.comp[name].get_meta(data_name).todict()
+            subtree["data"] = data
 
-            # Serialize the component object
-            comp_data["comp_data"] = comp.comp_obj.serialize()
+            inputs = {}
+            for input_name in self.comp[name].get_input_names():
+                inputs[input_name] = self.comp[name].get_meta(input_name).todict()
+            subtree["inputs"] = inputs
 
-            # Add the serialize data
-            comp_list.append(comp_data)
+            cons = {}
+            for con_name in self.comp[name].get_constraint_names():
+                cons[con_name] = self.comp[name].get_meta(con_name).todict()
+            subtree["constraints"] = cons
+        else:
+            children = []
+            if "children" in tree:
+                for child in tree["children"]:
+                    children.append(
+                        self._build_tree_data(tree["children"][child], child)
+                    )
+            subtree["children"] = children
 
-        model_data["components"] = comp_list
+        return subtree
+
+    def _build_tree(self):
+        tree = {"children": {}}
+        for name in self.comp.keys():
+            path = name.split(".")
+
+            current = tree
+            for index, part in enumerate(path):
+                part_name = ".".join(path[: index + 1])
+                if "children" not in current:
+                    current["children"] = {}
+
+                if part_name not in current["children"]:
+                    current["children"][part_name] = {}
+                current = current["children"][part_name]
+
+        tree_data = {"module_name": self.module_name}
+        children = []
+        for child in tree["children"]:
+            children.append(self._build_tree_data(tree["children"][child], child))
+        tree_data["children"] = children
+
+        return tree_data
+
+    def get_serializable_data(self):
+
+        # Create a model data dictionary
+        model_data = self._build_tree()
+
+        def _to_list(obj):
+            if obj is None:
+                return None
+            elif isinstance(obj, (int, np.integer)):
+                return int(obj)
+            elif isinstance(obj, np.ndarray):
+                return obj.tolist()
+            elif isinstance(obj, list):
+                return obj  # Assuming it contains JSON-serializable elements
+            else:
+                raise TypeError(
+                    f"Object {obj} of type {type(obj).__name__} is not JSON serializable"
+                )
 
         # Serialize the link data
-        link_data = []
+        links = []
         for src_expr, src_idx, tgt_expr, tgt_idx in self.links:
-            link_data.append(
+            spath, sslice = _parse_var_expr(src_expr)
+            tpath, tslice = _parse_var_expr(tgt_expr)
+            links.append(
                 {
-                    "src": (src_expr, _to_list(src_idx)),
-                    "tgt": (tgt_expr, _to_list(tgt_idx)),
+                    "src": (".".join(spath), str(sslice), _to_list(src_idx)),
+                    "tgt": (".".join(tpath), str(tslice), _to_list(tgt_idx)),
                 }
             )
 
         # Set the path names
-        model_data["links"] = link_data
+        model_data["links"] = links
 
         return model_data
-
-    @classmethod
-    def deserialize(cls, model_data):
-
-        # Set the module name
-        obj = cls(model_data["module_name"])
-
-        # Deserialize the components
-        comp_list = model_data["components"]
-        for comp_data in comp_list:
-            name = comp_data["name"]
-            size = comp_data["size"]
-            comp_obj = Component.deserialize(comp_data["comp_data"])
-            obj.add_component(name, size, comp_obj)
-
-        # Deserialize the links
-        link_data = model_data["links"]
-        for data in link_data:
-            src = data["src"]
-            tgt = data["tgt"]
-            obj.link(src[0], tgt[0], src_indices=src[1], tgt_indices=tgt[1])
-
-        return obj
-
-    def serialize_vectors(self, vecs: Dict[str, ModelVector]):
-        data = {}
-        for name in vecs:
-            data[name] = vecs[name].extract_components()
-        return data
-
-    def deserialize_vectors(self, data):
-        vecs = {}
-        for name in data:
-            # Peak at the kind of vector and allocate accordingly
-            kind = data[name]["kind"]
-            if kind == "data":
-                vec = self.create_data_vector()
-            elif kind == "state":
-                vec = self.create_vector()
-            elif kind == "output":
-                vec = self.create_output_vector()
-            else:
-                raise ValueError(f"Unrecognized vector kind {kind}")
-
-            vec.set_components(data[name])
-            vecs[name] = vec
-        return vecs
 
     def create_graph(
         self,
@@ -1328,6 +1275,7 @@ amigo_add_python_module(
         # Also determine variable types from component metadata for robust coloring
         comp_time_indices = {}
         for comp_name, comp in comp_items:
+
             # Decide which timesteps to include and cache for edges
             if timestep is None:
                 time_indices = range(comp.size)

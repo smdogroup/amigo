@@ -118,28 +118,17 @@ AMIGO_KERNEL void initialize_slacks_kernel(int num_inequalities,
 
   pt.s[i] = -g[index];
 
-  pt.sl[i] = T(0);
-  pt.tl[i] = T(0);
   pt.zsl[i] = T(0);
-  pt.ztl[i] = T(0);
-
-  pt.su[i] = T(0);
-  pt.tu[i] = T(0);
   pt.zsu[i] = T(0);
-  pt.ztu[i] = T(0);
 
   if (!::isinf(info.lbc[i])) {
-    pt.sl[i] = barrier_param;
-    pt.tl[i] = barrier_param;
-    pt.zsl[i] = barrier_param;
-    pt.ztl[i] = barrier_param;
+    T gap = A2D::max2(pt.s[i] - info.lbc[i], barrier_param);
+    pt.zsl[i] = barrier_param / gap;
   }
 
   if (!::isinf(info.ubc[i])) {
-    pt.su[i] = barrier_param;
-    pt.tu[i] = barrier_param;
-    pt.zsu[i] = barrier_param;
-    pt.ztu[i] = barrier_param;
+    T gap = A2D::max2(info.ubc[i] - pt.s[i], barrier_param);
+    pt.zsu[i] = barrier_param / gap;
   }
 }
 
@@ -210,7 +199,7 @@ AMIGO_KERNEL void add_residual_eq_kernel(int num_equalities,
 
 template <typename T>
 AMIGO_KERNEL void add_residual_ineq_kernel(int num_inequalities,
-                                           T barrier_param, T gamma,
+                                           T barrier_param,
                                            const OptInfo<T> info,
                                            OptStateData<const T> pt, const T* g,
                                            T* r) {
@@ -224,53 +213,34 @@ AMIGO_KERNEL void add_residual_ineq_kernel(int num_inequalities,
   // Extract the multiplier from the solution vector
   T lam = pt.xlam[index];
 
-  // Set the right-hand-side values
+  // Primal feasibility: -(c(x) - s)
   T bc = -(g[index] - pt.s[i]);
+  // Slack stationarity: -(-lam - zsl + zsu)
   T blam = -(-lam - pt.zsl[i] + pt.zsu[i]);
 
-  // Build the components of C and compute its inverse
-  T C = 0.0;
+  T Sigma_s = 0.0;
   T d = blam;
   if (!::isinf(info.lbc[i])) {
-    // Compute the right-hand-sides for the lower bound
-    T blaml = -(gamma - pt.zsl[i] - pt.ztl[i]);
-    T bsl = -(pt.s[i] - info.lbc[i] - pt.sl[i] + pt.tl[i]);
-    T bzsl = -(pt.sl[i] * pt.zsl[i] - barrier_param);
-    T bztl = -(pt.tl[i] * pt.ztl[i] - barrier_param);
-
-    T inv_zsl = 1.0 / pt.zsl[i];
-    T inv_ztl = 1.0 / pt.ztl[i];
-    T Fl = inv_zsl * pt.sl[i] + inv_ztl * pt.tl[i];
-    T dl = bsl + inv_zsl * bzsl - inv_ztl * (bztl + pt.tl[i] * blaml);
-
-    T inv_Fl = 1.0 / Fl;
-    d += inv_Fl * dl;
-    C += inv_Fl;
+    T gap = pt.s[i] - info.lbc[i];
+    T bzsl = -(gap * pt.zsl[i] - barrier_param);
+    d += bzsl / gap;
+    Sigma_s += pt.zsl[i] / gap;
   }
 
   if (!::isinf(info.ubc[i])) {
-    T blamu = -(gamma - pt.zsu[i] - pt.ztu[i]);
-    T bsu = -(info.ubc[i] - pt.s[i] - pt.su[i] + pt.tu[i]);
-    T bzsu = -(pt.su[i] * pt.zsu[i] - barrier_param);
-    T bztu = -(pt.tu[i] * pt.ztu[i] - barrier_param);
-
-    T inv_zsu = 1.0 / pt.zsu[i];
-    T inv_ztu = 1.0 / pt.ztu[i];
-    T Fu = inv_zsu * pt.su[i] + inv_ztu * pt.tu[i];
-    T du = bsu + inv_zsu * bzsu - inv_ztu * (bztu + pt.tu[i] * blamu);
-
-    T inv_Fu = 1.0 / Fu;
-    d -= inv_Fu * du;
-    C += inv_Fu;
+    T gap = info.ubc[i] - pt.s[i];
+    T bzsu = -(gap * pt.zsu[i] - barrier_param);
+    d -= bzsu / gap;
+    Sigma_s += pt.zsu[i] / gap;
   }
 
-  bc += d / C;
+  bc += d / Sigma_s;
 
   r[index] = bc;
 }
 
 template <typename T>
-void add_residual_cuda(T barrier_param, T gamma, const OptInfo<T>& info,
+void add_residual_cuda(T barrier_param, const OptInfo<T>& info,
                        OptStateData<const T>& pt, const T* g, T* r,
                        cudaStream_t stream) {
   constexpr int TPB = 256;
@@ -282,7 +252,7 @@ void add_residual_cuda(T barrier_param, T gamma, const OptInfo<T>& info,
   add_residual_eq_kernel<T>
       <<<ge, TPB, 0, stream>>>(info.num_equalities, info, pt, g, r);
   add_residual_ineq_kernel<T><<<gi, TPB, 0, stream>>>(
-      info.num_inequalities, barrier_param, gamma, info, pt, g, r);
+      info.num_inequalities, barrier_param, info, pt, g, r);
 }
 
 template <typename T>
@@ -315,7 +285,7 @@ AMIGO_KERNEL void compute_update_vars_kernel(int num_variables, T barrier_param,
 
 template <typename T>
 AMIGO_KERNEL void compute_update_ineq_kernel(int num_inequalities,
-                                             T barrier_param, T gamma,
+                                             T barrier_param,
                                              const OptInfo<T> info,
                                              OptStateData<const T> pt,
                                              OptStateData<T> up) {
@@ -330,66 +300,45 @@ AMIGO_KERNEL void compute_update_ineq_kernel(int num_inequalities,
   T lam = pt.xlam[index];
   T plam = up.xlam[index];
 
-  // Compute all the contributions to the update
+  // Slack stationarity residual
   T blam = -(-lam - pt.zsl[i] + pt.zsu[i]);
 
-  // Build the components of C and compute its inverse
-  T C = 0.0;
+  // Build Sigma_s and condensed RHS (mirrors add_residual)
+  T Sigma_s = 0.0;
   T d = blam;
-  T Fl = 0.0, dl = 0.0, blaml = 0.0, bsl = 0.0, bzsl = 0.0, bztl = 0.0;
-  T Fu = 0.0, du = 0.0, blamu = 0.0, bsu = 0.0, bzsu = 0.0, bztu = 0.0;
 
   if (!::isinf(info.lbc[i])) {
-    // Compute the right-hand-sides for the lower bound
-    blaml = -(gamma - pt.zsl[i] - pt.ztl[i]);
-    bsl = -(pt.s[i] - info.lbc[i] - pt.sl[i] + pt.tl[i]);
-    bzsl = -(pt.sl[i] * pt.zsl[i] - barrier_param);
-    bztl = -(pt.tl[i] * pt.ztl[i] - barrier_param);
-
-    T inv_zsl = 1.0 / pt.zsl[i];
-    T inv_ztl = 1.0 / pt.ztl[i];
-    Fl = inv_zsl * pt.sl[i] + inv_ztl * pt.tl[i];
-    dl = bsl + inv_zsl * bzsl - inv_ztl * (bztl + pt.tl[i] * blaml);
-
-    T inv_Fl = 1.0 / Fl;
-    d += inv_Fl * dl;
-    C += inv_Fl;
+    T gap = pt.s[i] - info.lbc[i];
+    T bzsl = -(gap * pt.zsl[i] - barrier_param);
+    d += bzsl / gap;
+    Sigma_s += pt.zsl[i] / gap;
   }
 
   if (!::isinf(info.ubc[i])) {
-    blamu = -(gamma - pt.zsu[i] - pt.ztu[i]);
-    bsu = -(info.ubc[i] - pt.s[i] - pt.su[i] + pt.tu[i]);
-    bzsu = -(pt.su[i] * pt.zsu[i] - barrier_param);
-    bztu = -(pt.tu[i] * pt.ztu[i] - barrier_param);
-
-    T inv_zsu = 1.0 / pt.zsu[i];
-    T inv_ztu = 1.0 / pt.ztu[i];
-    Fu = inv_zsu * pt.su[i] + inv_ztu * pt.tu[i];
-    du = bsu + inv_zsu * bzsu - inv_ztu * (bztu + pt.tu[i] * blamu);
-
-    T inv_Fu = 1.0 / Fu;
-    d -= inv_Fu * du;
-    C += inv_Fu;
+    T gap = info.ubc[i] - pt.s[i];
+    T bzsu = -(gap * pt.zsu[i] - barrier_param);
+    d -= bzsu / gap;
+    Sigma_s += pt.zsu[i] / gap;
   }
 
-  up.s[i] = (plam + d) / C;
+  // Recover slack step from condensed system
+  up.s[i] = (plam + d) / Sigma_s;
 
+  // Back-substitute for slack bound duals (mirrors variable bound duals)
   if (!::isinf(info.lbc[i])) {
-    up.zsl[i] = (-up.s[i] + dl) / Fl;
-    up.ztl[i] = -blaml - up.zsl[i];
-    up.sl[i] = (bzsl - pt.sl[i] * up.zsl[i]) / pt.zsl[i];
-    up.tl[i] = (bztl - pt.tl[i] * up.ztl[i]) / pt.ztl[i];
+    T gap = pt.s[i] - info.lbc[i];
+    T bzsl = -(gap * pt.zsl[i] - barrier_param);
+    up.zsl[i] = (bzsl - pt.zsl[i] * up.s[i]) / gap;
   }
   if (!::isinf(info.ubc[i])) {
-    up.zsu[i] = (up.s[i] + du) / Fu;
-    up.ztu[i] = -blamu - up.zsu[i];
-    up.su[i] = (bzsu - pt.su[i] * up.zsu[i]) / pt.zsu[i];
-    up.tu[i] = (bztu - pt.tu[i] * up.ztu[i]) / pt.ztu[i];
+    T gap = info.ubc[i] - pt.s[i];
+    T bzsu = -(gap * pt.zsu[i] - barrier_param);
+    up.zsu[i] = (bzsu + pt.zsu[i] * up.s[i]) / gap;
   }
 }
 
 template <typename T>
-void compute_update_cuda(T barrier_param, T gamma, const OptInfo<T>& info,
+void compute_update_cuda(T barrier_param, const OptInfo<T>& info,
                          OptStateData<const T>& pt, OptStateData<T>& up,
                          cudaStream_t stream) {
   constexpr int TPB = 256;
@@ -398,7 +347,7 @@ void compute_update_cuda(T barrier_param, T gamma, const OptInfo<T>& info,
   compute_update_vars_kernel<T>
       <<<gv, TPB, 0, stream>>>(info.num_variables, barrier_param, info, pt, up);
   compute_update_ineq_kernel<T><<<gi, TPB, 0, stream>>>(
-      info.num_inequalities, barrier_param, gamma, info, pt, up);
+      info.num_inequalities, barrier_param, info, pt, up);
 }
 
 template <typename T>
@@ -439,19 +388,17 @@ AMIGO_KERNEL void compute_diagonal_slack_kernel(int num_inequalities,
 
   int index = info.inequality_indices[i];
 
-  // Build the components of C and compute its inverse
-  T C = 0.0;
+  // Sigma_s = zsl/(s-lbc) + zsu/(ubc-s), mirrors variable bound diagonal
+  T Sigma_s = 0.0;
   if (!::isinf(info.lbc[i])) {
-    T Fl = pt.sl[i] / pt.zsl[i] + pt.tl[i] / pt.ztl[i];
-    C += 1.0 / Fl;
+    Sigma_s += pt.zsl[i] / (pt.s[i] - info.lbc[i]);
   }
   if (!::isinf(info.ubc[i])) {
-    T Fu = pt.su[i] / pt.zsu[i] + pt.tu[i] / pt.ztu[i];
-    C += 1.0 / Fu;
+    Sigma_s += pt.zsu[i] / (info.ubc[i] - pt.s[i]);
   }
 
-  if (C != 0.0) {
-    diag[index] = -1.0 / C;
+  if (Sigma_s != 0.0) {
+    diag[index] = -1.0 / Sigma_s;
   }
 }
 
@@ -595,33 +542,18 @@ AMIGO_KERNEL void compute_max_step_slack_kernel(
   for (int i = tid; i < num_inequalities; i += stride) {
     int idx = info.inequality_indices[i];
 
+    // Slack primal: s + alpha*ds must stay within [lbc, ubc]
     if (!::isinf(info.lbc[i])) {
-      // Slack variables
-      if (up.sl[i] < 0.0) {
-        T alpha = -tau * pt.sl[i] / up.sl[i];
+      if (up.s[i] < 0.0) {
+        T alpha = -tau * (pt.s[i] - info.lbc[i]) / up.s[i];
         if (alpha < local_alpha_x) {
           local_alpha_x = alpha;
           local_x_idx = idx;
         }
       }
-      if (up.tl[i] < 0.0) {
-        T alpha = -tau * pt.tl[i] / up.tl[i];
-        if (alpha < local_alpha_x) {
-          local_alpha_x = alpha;
-          local_x_idx = idx;
-        }
-      }
-
-      // Dual variables
+      // Dual: zsl must stay positive
       if (up.zsl[i] < 0.0) {
         T alpha = -tau * pt.zsl[i] / up.zsl[i];
-        if (alpha < local_alpha_z) {
-          local_alpha_z = alpha;
-          local_z_idx = idx;
-        }
-      }
-      if (up.ztl[i] < 0.0) {
-        T alpha = -tau * pt.ztl[i] / up.ztl[i];
         if (alpha < local_alpha_z) {
           local_alpha_z = alpha;
           local_z_idx = idx;
@@ -630,32 +562,16 @@ AMIGO_KERNEL void compute_max_step_slack_kernel(
     }
 
     if (!::isinf(info.ubc[i])) {
-      // Slack variables
-      if (up.su[i] < 0.0) {
-        T alpha = -tau * pt.su[i] / up.su[i];
+      if (up.s[i] > 0.0) {
+        T alpha = tau * (info.ubc[i] - pt.s[i]) / up.s[i];
         if (alpha < local_alpha_x) {
           local_alpha_x = alpha;
           local_x_idx = idx;
         }
       }
-      if (up.tu[i] < 0.0) {
-        T alpha = -tau * pt.tu[i] / up.tu[i];
-        if (alpha < local_alpha_x) {
-          local_alpha_x = alpha;
-          local_x_idx = idx;
-        }
-      }
-
-      // Dual variables
+      // Dual: zsu must stay positive
       if (up.zsu[i] < 0.0) {
         T alpha = -tau * pt.zsu[i] / up.zsu[i];
-        if (alpha < local_alpha_z) {
-          local_alpha_z = alpha;
-          local_z_idx = idx;
-        }
-      }
-      if (up.ztu[i] < 0.0) {
-        T alpha = -tau * pt.ztu[i] / up.ztu[i];
         if (alpha < local_alpha_z) {
           local_alpha_z = alpha;
           local_z_idx = idx;
@@ -779,16 +695,10 @@ AMIGO_KERNEL void apply_step_update_slack_kernel(
 
   tmp.s[i] = pt.s[i] + alpha_x * up.s[i];
   if (!::isinf(info.lbc[i])) {
-    tmp.sl[i] = pt.sl[i] + alpha_x * up.sl[i];
-    tmp.tl[i] = pt.tl[i] + alpha_x * up.tl[i];
     tmp.zsl[i] = pt.zsl[i] + alpha_z * up.zsl[i];
-    tmp.ztl[i] = pt.ztl[i] + alpha_z * up.ztl[i];
   }
   if (!::isinf(info.ubc[i])) {
-    tmp.su[i] = pt.su[i] + alpha_x * up.su[i];
-    tmp.tu[i] = pt.tu[i] + alpha_x * up.tu[i];
     tmp.zsu[i] = pt.zsu[i] + alpha_z * up.zsu[i];
-    tmp.ztu[i] = pt.ztu[i] + alpha_z * up.ztu[i];
   }
 }
 
@@ -828,17 +738,11 @@ AMIGO_KERNEL void compute_affine_start_point_ineq_kernel(
     return;
   }
   if (!::isinf(info.lbc[i])) {
-    tmp.sl[i] = A2D::max2(beta_min, A2D::fabs(pt.sl[i] + up.sl[i]));
-    tmp.tl[i] = A2D::max2(beta_min, A2D::fabs(pt.tl[i] + up.tl[i]));
     tmp.zsl[i] = A2D::max2(beta_min, A2D::fabs(pt.zsl[i] + up.zsl[i]));
-    tmp.ztl[i] = A2D::max2(beta_min, A2D::fabs(pt.ztl[i] + up.ztl[i]));
   }
 
   if (!::isinf(info.ubc[i])) {
-    tmp.su[i] = A2D::max2(beta_min, A2D::fabs(pt.su[i] + up.su[i]));
-    tmp.tu[i] = A2D::max2(beta_min, A2D::fabs(pt.tu[i] + up.tu[i]));
     tmp.zsu[i] = A2D::max2(beta_min, A2D::fabs(pt.zsu[i] + up.zsu[i]));
-    tmp.ztu[i] = A2D::max2(beta_min, A2D::fabs(pt.ztu[i] + up.ztu[i]));
   }
 }
 
@@ -938,19 +842,17 @@ AMIGO_KERNEL void compute_complementarity_pairs_kernel(
   // Loop over inequalities
   for (int i = gid; i < info.num_inequalities; i += stride) {
     if (!isinf(info.lbc[i])) {
-      T comp_sl = pt.sl[i] * pt.zsl[i];
-      T comp_tl = pt.tl[i] * pt.ztl[i];
-      sum0 += comp_sl + comp_tl;
-      sum1 += T(2);
-      lmin = A2D::min2(lmin, A2D::min2(comp_sl, comp_tl));
+      T comp = (pt.s[i] - info.lbc[i]) * pt.zsl[i];
+      sum0 += comp;
+      sum1 += T(1);
+      lmin = A2D::min2(lmin, comp);
     }
 
     if (!isinf(info.ubc[i])) {
-      T comp_su = pt.su[i] * pt.zsu[i];
-      T comp_tu = pt.tu[i] * pt.ztu[i];
-      sum0 += comp_su + comp_tu;
-      sum1 += T(2);
-      lmin = A2D::min2(lmin, A2D::min2(comp_su, comp_tu));
+      T comp = (info.ubc[i] - pt.s[i]) * pt.zsu[i];
+      sum0 += comp;
+      sum1 += T(1);
+      lmin = A2D::min2(lmin, comp);
     }
   }
 
@@ -1035,13 +937,13 @@ template void initialize_multipliers_and_slacks_cuda<double>(
     double barrier_param, const OptInfo<double>& info, const double* d_g,
     OptStateData<double>& pt, cudaStream_t stream);
 
-template void add_residual_cuda<double>(double barrier_param, double gamma,
+template void add_residual_cuda<double>(double barrier_param,
                                         const OptInfo<double>& info,
                                         OptStateData<const double>& pt,
                                         const double* g, double* r,
                                         cudaStream_t stream);
 
-template void compute_update_cuda<double>(double barrier_param, double gamma,
+template void compute_update_cuda<double>(double barrier_param,
                                           const OptInfo<double>& info,
                                           OptStateData<const double>& pt,
                                           OptStateData<double>& up,
@@ -1096,13 +998,13 @@ template void initialize_multipliers_and_slacks_cuda<float>(
     float barrier_param, const OptInfo<float>& info, const float* d_g,
     OptStateData<float>& pt, cudaStream_t stream);
 
-template void add_residual_cuda<float>(float barrier_param, float gamma,
+template void add_residual_cuda<float>(float barrier_param,
                                        const OptInfo<float>& info,
                                        OptStateData<const float>& pt,
                                        const float* g, float* r,
                                        cudaStream_t stream);
 
-template void compute_update_cuda<float>(float barrier_param, float gamma,
+template void compute_update_cuda<float>(float barrier_param,
                                          const OptInfo<float>& info,
                                          OptStateData<const float>& pt,
                                          OptStateData<float>& up,

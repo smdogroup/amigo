@@ -26,7 +26,7 @@ class OptVector {
         num_equalities(num_equalities),
         num_inequalities(num_inequalities),
         x(x) {
-    int size = 2 * num_variables + 9 * num_inequalities;
+    int size = 2 * num_variables + 3 * num_inequalities;
     duals = std::make_shared<Vector<T>>(size, 0, x->get_memory_location());
   }
   ~OptVector() {}
@@ -61,79 +61,41 @@ class OptVector {
     }
   }
   template <ExecPolicy policy>
-  void get_slacks(T** s, T** sl, T** tl, T** su, T** tu) {
+  void get_slacks(T** s) {
     T* array = duals->template get_array<policy>();
     const int offset = 2 * num_variables;
     if (s) {
       *s = &array[offset];
     }
-    if (sl) {
-      *sl = &array[offset + num_inequalities];
-    }
-    if (tl) {
-      *tl = &array[offset + 2 * num_inequalities];
-    }
-    if (su) {
-      *su = &array[offset + 3 * num_inequalities];
-    }
-    if (tu) {
-      *tu = &array[offset + 4 * num_inequalities];
-    }
   }
   template <ExecPolicy policy>
-  void get_slacks(const T** s, const T** sl, const T** tl, const T** su,
-                  const T** tu) const {
+  void get_slacks(const T** s) const {
     const T* array = duals->template get_array<policy>();
     const int offset = 2 * num_variables;
     if (s) {
       *s = &array[offset];
     }
-    if (sl) {
-      *sl = &array[offset + num_inequalities];
-    }
-    if (tl) {
-      *tl = &array[offset + 2 * num_inequalities];
-    }
-    if (su) {
-      *su = &array[offset + 3 * num_inequalities];
-    }
-    if (tu) {
-      *tu = &array[offset + 4 * num_inequalities];
-    }
   }
   template <ExecPolicy policy>
-  void get_slack_duals(T** zsl, T** ztl, T** zsu, T** ztu) {
+  void get_slack_duals(T** zsl, T** zsu) {
     T* array = duals->template get_array<policy>();
-    const int offset = 2 * num_variables + 5 * num_inequalities;
+    const int offset = 2 * num_variables + num_inequalities;
     if (zsl) {
       *zsl = &array[offset];
     }
-    if (ztl) {
-      *ztl = &array[offset + num_inequalities];
-    }
     if (zsu) {
-      *zsu = &array[offset + 2 * num_inequalities];
-    }
-    if (ztu) {
-      *ztu = &array[offset + 3 * num_inequalities];
+      *zsu = &array[offset + num_inequalities];
     }
   }
   template <ExecPolicy policy>
-  void get_slack_duals(const T** zsl, const T** ztl, const T** zsu,
-                       const T** ztu) const {
+  void get_slack_duals(const T** zsl, const T** zsu) const {
     const T* array = duals->template get_array<policy>();
-    const int offset = 2 * num_variables + 5 * num_inequalities;
+    const int offset = 2 * num_variables + num_inequalities;
     if (zsl) {
       *zsl = &array[offset];
     }
-    if (ztl) {
-      *ztl = &array[offset + num_inequalities];
-    }
     if (zsu) {
-      *zsu = &array[offset + 2 * num_inequalities];
-    }
-    if (ztu) {
-      *ztu = &array[offset + 3 * num_inequalities];
+      *zsu = &array[offset + num_inequalities];
     }
   }
 
@@ -429,7 +391,7 @@ class InteriorPointOptimizer {
    * @param grad The gradient computed from the problem
    * @param res The full KKT residual
    */
-  T compute_residual(T barrier_param, T gamma,
+  T compute_residual(T barrier_param,
                      const std::shared_ptr<OptVector<T>> vars,
                      const std::shared_ptr<Vector<T>> grad,
                      std::shared_ptr<Vector<T>> res) const {
@@ -446,11 +408,11 @@ class InteriorPointOptimizer {
 
     if constexpr (policy == ExecPolicy::SERIAL ||
                   policy == ExecPolicy::OPENMP) {
-      detail::add_residual(barrier_param, gamma, info, pt, g, r);
+      detail::add_residual(barrier_param, info, pt, g, r);
     }
 #ifdef AMIGO_USE_CUDA
     else {
-      detail::add_residual_cuda(barrier_param, gamma, info, pt, g, r);
+      detail::add_residual_cuda(barrier_param, info, pt, g, r);
     }
 #endif
 
@@ -466,12 +428,11 @@ class InteriorPointOptimizer {
    * @brief Compute the update for the full set of primal-dual variables
    *
    * @param barrier_param The barrier parameter for the residual
-   * @param gamma The penalty parameter
    * @param vars The values of the optimization variables
    * @param reduced_update The update to the reduced design variables
    * @param update The full update of the optimization variables
    */
-  void compute_update(T barrier_param, T gamma,
+  void compute_update(T barrier_param,
                       const std::shared_ptr<OptVector<T>> vars,
                       const std::shared_ptr<Vector<T>> reduced_update,
                       std::shared_ptr<OptVector<T>> update) const {
@@ -487,11 +448,11 @@ class InteriorPointOptimizer {
     // Perform the update
     if constexpr (policy == ExecPolicy::SERIAL ||
                   policy == ExecPolicy::OPENMP) {
-      detail::compute_update(barrier_param, gamma, info, pt, up);
+      detail::compute_update(barrier_param, info, pt, up);
     }
 #ifdef AMIGO_USE_CUDA
     else {
-      detail::compute_update_cuda(barrier_param, gamma, info, pt, up);
+      detail::compute_update_cuda(barrier_param, info, pt, up);
     }
 #endif
   }
@@ -597,10 +558,32 @@ class InteriorPointOptimizer {
     detail::OptStateData<T> tmp =
         detail::OptStateData<T>::template make<policy>(temp);
 
-    // nxlam = xlam + alpha * pxlam
+    // Split xlam update: design vars AND constraint multipliers use alpha_x,
+    // only bound multipliers z use alpha_z (handled in detail::apply_step_update).
+    // Per IPOPT (Wachter & Biegler 2006) eq 14a-14c:
+    //   x_{k+1}   = x_k   + alpha_k * d_x    (14a, backtracked)
+    //   lambda_{k+1} = lambda_k + alpha_k * d_lambda  (14b, SAME alpha as x)
+    //   z_{k+1}   = z_k   + alpha_z * d_z    (14c, NOT backtracked)
     temp->get_solution()->copy(*vars->get_solution());
-    temp->get_solution()->template axpy<policy>(alpha_x,
-                                                *update->get_solution());
+    {
+      T* tmp_xlam = temp->get_solution()->template get_array<policy>();
+      const T* var_xlam = vars->get_solution()->template get_array<policy>();
+      const T* upd_xlam = update->get_solution()->template get_array<policy>();
+      // Design variables: alpha_x
+      for (int i = 0; i < num_variables; i++) {
+        int idx = info.design_variable_indices[i];
+        tmp_xlam[idx] = var_xlam[idx] + alpha_x * upd_xlam[idx];
+      }
+      // Constraint multipliers (equalities + inequalities): alpha_x
+      for (int i = 0; i < num_equalities; i++) {
+        int idx = info.equality_indices[i];
+        tmp_xlam[idx] = var_xlam[idx] + alpha_x * upd_xlam[idx];
+      }
+      for (int i = 0; i < num_inequalities; i++) {
+        int idx = info.inequality_indices[i];
+        tmp_xlam[idx] = var_xlam[idx] + alpha_x * upd_xlam[idx];
+      }
+    }
 
     // Compute the max step lengths
     if constexpr (policy == ExecPolicy::SERIAL ||
@@ -700,6 +683,220 @@ class InteriorPointOptimizer {
   }
 
   /**
+   * @brief Compute ||ZXe||^2 (sum of squared complementarity products)
+   *
+   * Computes the complementarity term from paper eq (4.2) of
+   * Nocedal-Wachter-Waltz 2009. Does NOT require gradients.
+   */
+  void compute_complementarity_sq(const std::shared_ptr<OptVector<T>> vars,
+                                  T& comp_sq) const {
+    detail::OptStateData<const T> pt =
+        detail::OptStateData<const T>::template make<policy>(vars);
+
+    T local_comp_sq = detail::compute_complementarity_sq(info, pt);
+
+    MPI_Allreduce(&local_comp_sq, &comp_sq, 1, get_mpi_type<T>(), MPI_SUM,
+                  comm);
+  }
+
+  /**
+   * @brief Compute the barrier log-sum for the IPOPT barrier objective.
+   *
+   * Returns -mu * sum(ln(barrier_variables)) where barrier_variables
+   * are the slack quantities that define the log-barrier:
+   * (x-lb), (ub-x) for bounded design variables, and
+   * sl, tl, su, tu for inequality slack decomposition.
+   *
+   * The full IPOPT barrier objective is: phi_mu = f(x) + barrier_log_sum.
+   */
+  T compute_barrier_log_sum(T barrier_param,
+                            const std::shared_ptr<OptVector<T>> vars) const {
+    detail::OptStateData<const T> pt =
+        detail::OptStateData<const T>::template make<policy>(vars);
+
+    T local_sum = detail::compute_barrier_log_sum(barrier_param, info, pt);
+
+    T result;
+    MPI_Allreduce(&local_sum, &result, 1, get_mpi_type<T>(), MPI_SUM, comm);
+    return result;
+  }
+
+  /**
+   * @brief Compute analytical directional derivative of barrier objective.
+   *
+   * Returns dphi = nabla phi_mu(x)^T d, where d is the Newton direction.
+   * Used in IPOPT filter line search switching condition (Eq. 19) and
+   * Armijo check (Eq. 20).
+   *
+   * @param barrier_param Current barrier parameter mu
+   * @param vars Current optimization variables
+   * @param update Newton search direction (after compute_update)
+   * @param res Condensed Newton RHS (from compute_residual)
+   * @param px KKT solution vector (from solver.solve)
+   * @param diag Diagonal vector used in factorization (after inertia correction)
+   * @return T The directional derivative dphi
+   */
+  T compute_barrier_dphi(
+      T barrier_param,
+      const std::shared_ptr<OptVector<T>> vars,
+      const std::shared_ptr<OptVector<T>> update,
+      const std::shared_ptr<Vector<T>> res,
+      const std::shared_ptr<Vector<T>> px,
+      const std::shared_ptr<Vector<T>> diag) const {
+    detail::OptStateData<const T> pt =
+        detail::OptStateData<const T>::template make<policy>(vars);
+    detail::OptStateData<const T> up =
+        detail::OptStateData<const T>::template make<policy>(update);
+    const T* r = res->template get_array<policy>();
+    const T* p = px->template get_array<policy>();
+    const T* d = diag->template get_array<policy>();
+
+    T local_dphi = detail::compute_barrier_dphi(
+        barrier_param, info, pt, up, r, p, d);
+
+    T result;
+    MPI_Allreduce(&local_dphi, &result, 1, get_mpi_type<T>(), MPI_SUM, comm);
+    return result;
+  }
+
+  /**
+   * @brief IPOPT Eq. 16: Reset bound multipliers after step acceptance.
+   *
+   * Clamps each bound multiplier z_i to [mu/(kappa*gap), kappa*mu/gap]
+   * where gap is the distance to the bound. This prevents multiplier
+   * divergence and keeps sigma_i = z_i * gap bounded.
+   *
+   * @param barrier_param Current barrier parameter mu
+   * @param kappa_sigma Bound multiplier safeguard (IPOPT default: 1e10)
+   * @param vars Optimization variables (modified in-place)
+   */
+  void reset_bound_multipliers(
+      T barrier_param, T kappa_sigma,
+      std::shared_ptr<OptVector<T>> vars) const {
+    detail::OptStateData<T> pt =
+        detail::OptStateData<T>::template make<policy>(vars);
+
+    if constexpr (policy == ExecPolicy::SERIAL ||
+                  policy == ExecPolicy::OPENMP) {
+      detail::reset_bound_multipliers(barrier_param, kappa_sigma, info, pt);
+    }
+  }
+
+  /**
+   * @brief Compute the three unreduced NLP KKT error components
+   *
+   * Returns the squared norms of:
+   * 1. Dual infeasibility: ||grad_x L - zl + zu||^2
+   * 2. Primal infeasibility: ||h(x) - lbh||^2 + ||c(x) - s||^2
+   * 3. Complementarity: ||(x-lb)*zl||^2 + ||(ub-x)*zu||^2 + slack terms
+   */
+  void compute_kkt_error(const std::shared_ptr<OptVector<T>> vars,
+                         const std::shared_ptr<Vector<T>> grad,
+                         T& dual_infeas_sq, T& primal_infeas_sq,
+                         T& comp_sq) const {
+    detail::OptStateData<const T> pt =
+        detail::OptStateData<const T>::template make<policy>(vars);
+    const T* g = grad->template get_array<policy>();
+
+    T local_dual = 0.0, local_primal = 0.0, local_comp = 0.0;
+
+    if constexpr (policy == ExecPolicy::SERIAL ||
+                  policy == ExecPolicy::OPENMP) {
+      detail::compute_kkt_error_components(info, pt, g,
+                                           local_dual, local_primal,
+                                           local_comp);
+    }
+#ifdef AMIGO_USE_CUDA
+    else {
+      detail::compute_kkt_error_components(info, pt, g,
+                                           local_dual, local_primal,
+                                           local_comp);
+    }
+#endif
+
+    T local_vals[3] = {local_dual, local_primal, local_comp};
+    T global_vals[3];
+    MPI_Allreduce(local_vals, global_vals, 3, get_mpi_type<T>(), MPI_SUM, comm);
+
+    dual_infeas_sq = global_vals[0];
+    primal_infeas_sq = global_vals[1];
+    comp_sq = global_vals[2];
+  }
+
+  /**
+   * @brief Compute residual and separate infeasibility components in one pass
+   */
+  void compute_residual_and_infeasibility(
+      T barrier_param,
+      const std::shared_ptr<OptVector<T>> vars,
+      const std::shared_ptr<Vector<T>> grad,
+      std::shared_ptr<Vector<T>> res,
+      T& dual_infeas_sq, T& primal_infeas_sq) const {
+    detail::OptStateData<const T> pt =
+        detail::OptStateData<const T>::template make<policy>(vars);
+    const T* g = grad->template get_array<policy>();
+    T* r = res->template get_array<policy>();
+
+    T local_dual = 0.0, local_primal = 0.0;
+
+    if constexpr (policy == ExecPolicy::SERIAL ||
+                  policy == ExecPolicy::OPENMP) {
+      detail::compute_residual_and_infeasibility(
+          barrier_param, info, pt, g, r, local_dual, local_primal);
+    }
+
+    T local_vals[2] = {local_dual, local_primal};
+    T global_vals[2];
+    MPI_Allreduce(local_vals, global_vals, 2, get_mpi_type<T>(), MPI_SUM, comm);
+    dual_infeas_sq = global_vals[0];
+    primal_infeas_sq = global_vals[1];
+  }
+
+  /**
+   * @brief Compute the dual residual vector r_d = g - zl + zu for each primal
+   * variable. Constraint rows are set to zero.
+   *
+   * Used by the corrected quality function to compute the cross term
+   * r_d^T (E dx) where E is the BISC Hessian modification.
+   */
+  void compute_dual_residual_vector(
+      const std::shared_ptr<OptVector<T>> vars,
+      const std::shared_ptr<Vector<T>> grad,
+      std::shared_ptr<Vector<T>> output) const {
+    detail::OptStateData<const T> pt =
+        detail::OptStateData<const T>::template make<policy>(vars);
+    const T* g = grad->template get_array<policy>();
+    T* out = output->template get_array<policy>();
+
+    // Zero entire output
+    int size = output->get_size();
+    for (int i = 0; i < size; i++) out[i] = 0.0;
+
+    // Variable rows: r_d = g - zl + zu
+    for (int i = 0; i < info.num_variables; i++) {
+      int index = info.design_variable_indices[i];
+      out[index] = g[index] - pt.zl[i] + pt.zu[i];
+    }
+  }
+
+  /**
+   * @brief Get the element counts for KKT error scaling (NWW 2009, Section 6)
+   */
+  void get_kkt_element_counts(int& n_dual, int& n_primal, int& n_comp) const {
+    n_dual = info.num_variables;
+    n_primal = info.num_equalities + info.num_inequalities;
+    n_comp = 0;
+    for (int i = 0; i < info.num_variables; i++) {
+      if (!std::isinf(info.lbx[i])) n_comp++;
+      if (!std::isinf(info.ubx[i])) n_comp++;
+    }
+    for (int i = 0; i < info.num_inequalities; i++) {
+      if (!std::isinf(info.lbc[i])) n_comp += 1;
+      if (!std::isinf(info.ubc[i])) n_comp += 1;
+    }
+  }
+
+  /**
    * @brief Check whether the computed updates satisfy the linearization of the
    * optimality conditions
    *
@@ -708,7 +905,7 @@ class InteriorPointOptimizer {
    * @param update The update to the full system
    * @param hessian The Hessian matrix - must be recomputed
    */
-  void check_update(T barrier_param, T gamma,
+  void check_update(T barrier_param,
                     const std::shared_ptr<Vector<T>> grad,
                     const std::shared_ptr<OptVector<T>> vars,
                     const std::shared_ptr<OptVector<T>> update,
@@ -725,16 +922,16 @@ class InteriorPointOptimizer {
       update->template get_bound_duals<policy>(&pzl, &pzu);
 
       // Get the slack variable values
-      const T *s, *sl, *tl, *su, *tu;
-      const T *ps, *psl, *ptl, *psu, *ptu;
-      vars->template get_slacks<policy>(&s, &sl, &tl, &su, &tu);
-      update->template get_slacks<policy>(&ps, &psl, &ptl, &psu, &ptu);
+      const T *s;
+      const T *ps;
+      vars->template get_slacks<policy>(&s);
+      update->template get_slacks<policy>(&ps);
 
       // Get the dual values for the slacks
-      const T *zsl, *ztl, *zsu, *ztu;
-      const T *pzsl, *pztl, *pzsu, *pztu;
-      vars->template get_slack_duals<policy>(&zsl, &ztl, &zsu, &ztu);
-      update->template get_slack_duals<policy>(&pzsl, &pztl, &pzsu, &pztu);
+      const T *zsl, *zsu;
+      const T *pzsl, *pzsu;
+      vars->template get_slack_duals<policy>(&zsl, &zsu);
+      update->template get_slack_duals<policy>(&pzsl, &pzsu);
 
       // Get the solution update
       const T* xlam = vars->template get_solution_array<policy>();
@@ -762,7 +959,7 @@ class InteriorPointOptimizer {
       }
       for (int i = 0; i < num_equalities; i++) {
         int index = info.equality_indices[i];
-        T rh = g[index];
+        T rh = g[index] - info.lbh[i];
         t[index] = t[index] + rh;
       }
       for (int i = 0; i < num_inequalities; i++) {
@@ -770,10 +967,26 @@ class InteriorPointOptimizer {
         T rc = g[index] - s[i];
         t[index] = t[index] - ps[i] + rc;
       }
+      // Decomposed norms by row type
+      T var_sq = 0.0, eq_sq = 0.0, ineq_sq = 0.0;
+      for (int i = 0; i < num_variables; i++) {
+        int index = info.design_variable_indices[i];
+        var_sq += t[index] * t[index];
+      }
+      for (int i = 0; i < num_equalities; i++) {
+        int index = info.equality_indices[i];
+        eq_sq += t[index] * t[index];
+      }
+      for (int i = 0; i < num_inequalities; i++) {
+        int index = info.inequality_indices[i];
+        ineq_sq += t[index] * t[index];
+      }
       std::printf("%-40s %15.6e\n", "||H * px - pzl + pzu + rx|| ",
                   std::sqrt(tmp->template dot<policy>(*tmp)));
+      std::printf("  var: %10.3e  eq: %10.3e  ineq: %10.3e\n",
+                  std::sqrt(var_sq), std::sqrt(eq_sq), std::sqrt(ineq_sq));
 
-      // (xs - lb) * pzl + pxs * zl + rzl
+      // (x - lbx) * pzl + px * zl + rzl
       t.zero();
       for (int i = 0; i < num_variables; i++) {
         int index = info.design_variable_indices[i];
@@ -786,7 +999,7 @@ class InteriorPointOptimizer {
       std::printf("%-40s %15.6e\n", "||(x - lbx) * pzl + px * zl + rzl|| ",
                   std::sqrt(tmp->template dot<policy>(*tmp)));
 
-      // (ub - xs) * pzu - pxs * zu = bzu
+      // (ubx - x) * pzu - px * zu + rzu
       t.zero();
       for (int i = 0; i < num_variables; i++) {
         int index = info.design_variable_indices[i];
@@ -799,7 +1012,7 @@ class InteriorPointOptimizer {
       std::printf("%-40s %15.6e\n", "||(ubx - x) * pzu - px * zu + rzu|| ",
                   std::sqrt(tmp->template dot<policy>(*tmp)));
 
-      // -plam - pzlc + pzuc = blam
+      // Slack stationarity: -plam - pzsl + pzsu + rlam
       t.zero();
       for (int i = 0; i < num_inequalities; i++) {
         int index = info.inequality_indices[i];
@@ -809,108 +1022,44 @@ class InteriorPointOptimizer {
         T rlam = (-lam - zsl[i] + zsu[i]);
         t[index] = (-plam - pzsl[i] + pzsu[i]) + rlam;
       }
-      std::printf("%-40s %15.6e\n", "||-plam - pzlc + pzuc - blam|| ",
+      std::printf("%-40s %15.6e\n", "||-plam - pzsl + pzsu + rlam|| ",
                   std::sqrt(tmp->template dot<policy>(*tmp)));
 
-      // Test equations for the lower bounds
-      // rsl = s - lc - sl + tl
+      // Lower bound complementarity: (s-lbc)*pzsl + zsl*ps + rzsl
       t.zero();
       for (int i = 0; i < num_inequalities; i++) {
         int index = info.inequality_indices[i];
         if (!std::isinf(info.lbc[i])) {
-          T rsl = s[i] - info.lbc[i] - sl[i] + tl[i];
-          t[index] = ps[i] - psl[i] + ptl[i] + rsl;
+          T gap = s[i] - info.lbc[i];
+          T rzsl = gap * zsl[i] - barrier_param;
+          t[index] = gap * pzsl[i] + zsl[i] * ps[i] + rzsl;
         }
       }
-      std::printf("%-40s %15.6e\n", "||ps - psl + ptl + rsl|| ",
+      std::printf("%-40s %15.6e\n", "||(s-lbc)*pzsl + zsl*ps + rzsl|| ",
                   std::sqrt(tmp->template dot<policy>(*tmp)));
 
-      // rlaml = gamma - zsl - ztl
-      t.zero();
-      for (int i = 0; i < num_inequalities; i++) {
-        int index = info.inequality_indices[i];
-        if (!std::isinf(info.lbc[i])) {
-          T rlaml = gamma - zsl[i] - ztl[i];
-          t[index] = -pzsl[i] - pztl[i] + rlaml;
-        }
-      }
-      std::printf("%-40s %15.6e\n", "||-pzsl - pztl + rlaml|| ",
-                  std::sqrt(tmp->template dot<policy>(*tmp)));
-
-      // rzsl = Sl * zsl - barrier_param
-      t.zero();
-      for (int i = 0; i < num_inequalities; i++) {
-        int index = info.inequality_indices[i];
-        if (!std::isinf(info.lbc[i])) {
-          T rzsl = sl[i] * zsl[i] - barrier_param;
-          t[index] = sl[i] * pzsl[i] + zsl[i] * psl[i] + rzsl;
-        }
-      }
-      std::printf("%-40s %15.6e\n", "||sl * pzsl + zsl * psl + rzsl|| ",
-                  std::sqrt(tmp->template dot<policy>(*tmp)));
-
-      // rzsl = Tl * ztl - barrier_param
-      t.zero();
-      for (int i = 0; i < num_inequalities; i++) {
-        int index = info.inequality_indices[i];
-        if (!std::isinf(info.lbc[i])) {
-          T rztl = tl[i] * ztl[i] - barrier_param;
-          t[index] = tl[i] * pztl[i] + ztl[i] * ptl[i] + rztl;
-        }
-      }
-      std::printf("%-40s %15.6e\n", "||tl * pztl + ztl * ptl + rztl|| ",
-                  std::sqrt(tmp->template dot<policy>(*tmp)));
-
-      // Test equations for the upper bounds
-      // rsu = ubc - s - su + tu
+      // Upper bound complementarity: (ubc-s)*pzsu - zsu*ps + rzsu
       t.zero();
       for (int i = 0; i < num_inequalities; i++) {
         int index = info.inequality_indices[i];
         if (!std::isinf(info.ubc[i])) {
-          T rsu = info.ubc[i] - s[i] - su[i] + tu[i];
-          t[index] = -ps[i] - psu[i] + ptu[i] + rsu;
+          T gap = info.ubc[i] - s[i];
+          T rzsu = gap * zsu[i] - barrier_param;
+          t[index] = gap * pzsu[i] - zsu[i] * ps[i] + rzsu;
         }
       }
-      std::printf("%-40s %15.6e\n", "||-ps - psu + ptu + rsu|| ",
-                  std::sqrt(tmp->template dot<policy>(*tmp)));
-
-      // rlamu = gamma - zsu - ztu
-      t.zero();
-      for (int i = 0; i < num_inequalities; i++) {
-        int index = info.inequality_indices[i];
-        if (!std::isinf(info.ubc[i])) {
-          T rlamu = gamma - zsu[i] - ztu[i];
-          t[index] = -pzsu[i] - pztu[i] + rlamu;
-        }
-      }
-      std::printf("%-40s %15.6e\n", "||-pzsu - pztu + rlamu|| ",
-                  std::sqrt(tmp->template dot<policy>(*tmp)));
-
-      // rzsu = Su * zsu - barrier_param
-      t.zero();
-      for (int i = 0; i < num_inequalities; i++) {
-        int index = info.inequality_indices[i];
-        if (!std::isinf(info.ubc[i])) {
-          T rzsu = su[i] * zsu[i] - barrier_param;
-          t[index] = su[i] * pzsu[i] + zsu[i] * psu[i] + rzsu;
-        }
-      }
-      std::printf("%-40s %15.6e\n", "||su * pzsu + zsu * psu + rzsu|| ",
-                  std::sqrt(tmp->template dot<policy>(*tmp)));
-
-      // rzsu = Tu * ztu - barrier_param
-      t.zero();
-      for (int i = 0; i < num_inequalities; i++) {
-        int index = info.inequality_indices[i];
-        if (!std::isinf(info.ubc[i])) {
-          T rztu = tu[i] * ztu[i] - barrier_param;
-          t[index] = tu[i] * pztu[i] + ztu[i] * ptu[i] + rztu;
-        }
-      }
-      std::printf("%-40s %15.6e\n", "||tu * pztu + ztu * ptu + rztu|| ",
+      std::printf("%-40s %15.6e\n", "||(ubc-s)*pzsu - zsu*ps + rzsu|| ",
                   std::sqrt(tmp->template dot<policy>(*tmp)));
     }
   }
+
+  // Accessors for bounds
+  const std::shared_ptr<Vector<T>>& get_lbx() const { return lbx; }
+  const std::shared_ptr<Vector<T>>& get_ubx() const { return ubx; }
+  const std::shared_ptr<Vector<T>>& get_lbc() const { return lbc; }
+  const std::shared_ptr<Vector<T>>& get_ubc() const { return ubc; }
+  int get_num_inequalities() const { return num_inequalities; }
+  int get_num_design_variables() const { return num_variables; }
 
  private:
   // The optimization problem

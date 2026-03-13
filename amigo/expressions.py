@@ -1,6 +1,20 @@
-# Convert from/to strings to/from type
-_type_to_str = {float: "float", int: "int"}
-_str_to_type = {"float": float, "int": int}
+# SED mode flag: when True, ops in hprod mode emit A2D_SED:: namespace
+_sed_mode = False
+
+# Unary ops that have SED-filtered versions in a2d_sed.h
+_sed_unary_ops = {
+    "sin",
+    "cos",
+    "exp",
+    "sqrt",
+    "log",
+    "acos",
+    "asin",
+    "atan",
+    "tan",
+    "tanh",
+    "atanh",
+}
 
 
 def _normalize_shape(shape):
@@ -8,8 +22,6 @@ def _normalize_shape(shape):
         return None
     if isinstance(shape, int):
         shape = (shape,)
-    elif isinstance(shape, list):
-        return tuple(shape)
     elif not isinstance(shape, tuple):
         raise TypeError("Expecting None, int or tuple")
     if not (len(shape) == 1 or len(shape) == 2):
@@ -18,7 +30,7 @@ def _normalize_shape(shape):
 
 
 class ExprNode:
-    def serialize(self):
+    def to_key(self):
         raise NotImplementedError
 
     def to_cpp(self):
@@ -27,8 +39,11 @@ class ExprNode:
     def is_active(self):
         raise NotImplementedError
 
-    def compute_cost(self):
-        raise NotImplementedError
+    def is_sed_active(self):
+        """Whether this node should participate in binary SED filtering.
+        Returns False for multiplier variables and constants, True for
+        design variables and expressions depending on them."""
+        return self.is_active()
 
 
 class ConstNode(ExprNode):
@@ -38,8 +53,8 @@ class ConstNode(ExprNode):
         self.value = value
         self.type = type
 
-    def serialize(self):
-        return ("const", self.name, self.value, _type_to_str[self.type])
+    def to_key(self):
+        return ("const", self.name, self.value, self.type)
 
     def to_cpp(self):
         if self.name is not None:
@@ -49,20 +64,18 @@ class ConstNode(ExprNode):
     def is_active(self):
         return False
 
-    def compute_cost(self):
-        return 0
-
 
 class VarNode(ExprNode):
-    def __init__(self, name, shape=None, type=float, active=True):
+    def __init__(self, name, shape=None, type=float, active=True, sed_active=True):
         super().__init__()
         self.name = name
         self.shape = _normalize_shape(shape)
         self.type = type
         self.active = active
+        self._sed_active = sed_active
 
-    def serialize(self):
-        return ("var", self.name, self.shape, _type_to_str[self.type], self.active)
+    def to_key(self):
+        return ("var", self.name, self.shape, self.type, self.active)
 
     def to_cpp(self):
         return self.name
@@ -70,8 +83,8 @@ class VarNode(ExprNode):
     def is_active(self):
         return self.active
 
-    def compute_cost(self):
-        return 0
+    def is_sed_active(self):
+        return self.active and self._sed_active
 
 
 class IndexNode(ExprNode):
@@ -80,8 +93,8 @@ class IndexNode(ExprNode):
         self.expr = expr
         self.index = index
 
-    def serialize(self):
-        return ("index", self.expr.serialize(), self.index)
+    def to_key(self):
+        return ("index", self.expr.to_key(), self.index)
 
     def to_cpp(self):
         arr = self.expr.to_cpp()
@@ -93,16 +106,16 @@ class IndexNode(ExprNode):
     def is_active(self):
         return self.expr.is_active()
 
-    def compute_cost(self):
-        return 0
+    def is_sed_active(self):
+        return self.expr.is_sed_active()
 
 
 class PassiveNode(ExprNode):
     def __init__(self, expr):
         self.expr = expr
 
-    def serialize(self):
-        return ("passive", self.expr.serialize())
+    def to_key(self):
+        return ("passive", self.expr.to_key())
 
     def to_cpp(self):
         a = self.expr.to_cpp()
@@ -111,9 +124,6 @@ class PassiveNode(ExprNode):
     def is_active(self):
         return False
 
-    def compute_cost(self):
-        return 0
-
 
 class UnaryNode(ExprNode):
     def __init__(self, op, expr):
@@ -121,37 +131,22 @@ class UnaryNode(ExprNode):
         self.op = op
         self.expr = expr
 
-    def serialize(self):
-        return ("unary", self.op, self.expr.serialize())
+    def to_key(self):
+        return ("unary", self.op, self.expr.to_key())
 
     def to_cpp(self):
         a = self.expr.to_cpp()
         if self.op == "-":
             return f"-({a})"
+        if _sed_mode and self.op in _sed_unary_ops:
+            return f"A2D_SED::{self.op}({a})"
         return f"A2D::{self.op}({a})"
 
     def is_active(self):
         return self.expr.is_active()
 
-    def compute_cost(self):
-        cost = self.expr.compute_cost()
-
-        trig = ["sin", "cos", "tan", "asin", "acos", "atan"]
-        exp = ["exp", "sinh", "cosh", "tanh", "asinh", "acosh", "atanh"]
-        log = ["log", "log10"]
-
-        if self.op == "-" or self.op == "fabs":
-            cost += 1
-        elif self.op == "sqrt":
-            cost += 20
-        elif self.op in trig:
-            cost += 100
-        elif self.op in exp:
-            cost += 100
-        elif self.op in log:
-            cost += 200
-
-        return cost
+    def is_sed_active(self):
+        return self.expr.is_sed_active()
 
 
 class BinaryNode(ExprNode):
@@ -161,14 +156,16 @@ class BinaryNode(ExprNode):
         self.left = left
         self.right = right
 
-    def serialize(self):
-        return ("binary", self.op, self.left.serialize(), self.right.serialize())
+    def to_key(self):
+        return ("binary", self.op, self.left.to_key(), self.right.to_key())
 
     def to_cpp(self):
         a = self.left.to_cpp()
         b = self.right.to_cpp()
 
         if self.op == "**":
+            if _sed_mode:
+                return f"A2D_SED::pow({a}, {b})"
             return f"A2D::pow({a}, {b})"
         elif self.op == "atan2":
             return f"A2D::atan2({a}, {b})"
@@ -176,31 +173,14 @@ class BinaryNode(ExprNode):
             return f"A2D::min2({a}, {b})"
         elif self.op == "max2":
             return f"A2D::max2({a}, {b})"
+
         return f"({a} {self.op} {b})"
 
     def is_active(self):
         return self.left.is_active() or self.right.is_active()
 
-    def compute_cost(self):
-        cost = self.left.compute_cost() + self.right.compute_cost()
-
-        if self.op == "**":
-            rnode = self.right.node
-            if isinstance(rnode, ConstNode) and rnode.type == int:
-                if rnode.value >= 0:
-                    cost += rnode.value
-                elif rnode.value < 0:
-                    cost += 10 + rnode.value
-            else:
-                cost += 100
-        elif self.op == "atan2":
-            cost += 100
-        elif self.op == "/":
-            cost += 10
-        else:
-            cost += 1
-
-        return cost
+    def is_sed_active(self):
+        return self.left.is_sed_active() or self.right.is_sed_active()
 
 
 def _to_expr(val):
@@ -217,6 +197,7 @@ def _to_expr(val):
 
 class Expr:
     def __init__(self, node: ExprNode):
+        self.name = None
         self.node = node
 
     def __neg__(self):
@@ -288,29 +269,12 @@ class Expr:
         else:
             raise TypeError("You can only index variables, not general expressions")
 
-    def serialize(self):
-        return self.node.serialize()
+    def to_key(self):
+        return self.node.to_key()
 
-    @classmethod
-    def deserialize(cls, d):
-        if d[0] == "const":
-            return cls(ConstNode(name=d[1], value=d[2], type=_str_to_type[d[3]]))
-        elif d[0] == "var":
-            return cls(
-                VarNode(name=d[1], shape=d[2], type=_str_to_type[d[3]], active=d[4])
-            )
-        elif d[0] == "index":
-            return cls(IndexNode(cls.deserialize(d[1]), d[2]))
-        elif d[0] == "passive":
-            return cls(PassiveNode(cls.deserialize(d[1])))
-        elif d[0] == "unary":
-            return cls(UnaryNode(d[1], cls.deserialize(d[2])))
-        elif d[0] == "binary":
-            return cls(BinaryNode(d[1], cls.deserialize(d[2]), cls.deserialize(d[3])))
-        else:
-            return ValueError("Unrecognized operation type in deserialize")
-
-    def to_cpp(self):
+    def to_cpp(self, use_vars=True):
+        if use_vars and self.name is not None:
+            return self.name
         return self.node.to_cpp()
 
     def set_active_flag(self, flag):
@@ -322,8 +286,8 @@ class Expr:
     def is_active(self):
         return self.node.is_active()
 
-    def compute_cost(self):
-        return self.node.compute_cost()
+    def is_sed_active(self):
+        return self.node.is_sed_active()
 
 
 class ExprBuilder:
@@ -344,6 +308,10 @@ class ExprBuilder:
             self.lhs = [lhs]
         else:
             raise TypeError("Unrecognized lhs type")
+
+        # Convert from/to strings to/from type
+        self.type_to_str = {float: "float", int: "int"}
+        self.str_to_type = {"float": float, "int": int}
 
         # Initialize the internal data
         self.counter = 0
@@ -418,7 +386,7 @@ class ExprBuilder:
         return
 
     def _serialize_expr(self, e: Expr):
-        key = e.serialize()
+        key = e.to_key()
         if key in self.key_to_id:
             return self.key_to_id[key]
 
@@ -428,14 +396,14 @@ class ExprBuilder:
                 "type": "const",
                 "name": node.name,
                 "value": node.value,
-                "vartype": _type_to_str[node.type],
+                "vartype": self.type_to_str[node.type],
             }
         elif isinstance(node, VarNode):
             info = {
                 "type": "var",
                 "name": node.name,
                 "shape": node.shape,
-                "vartype": _type_to_str[node.type],
+                "vartype": self.type_to_str[node.type],
                 "active": node.active,
             }
         elif isinstance(node, IndexNode):
@@ -479,7 +447,7 @@ class ExprBuilder:
                 ConstNode(
                     name=node["name"],
                     value=node["value"],
-                    type=_str_to_type[node["vartype"]],
+                    type=self.str_to_type[node["vartype"]],
                 )
             )
         elif node["type"] == "var":
@@ -487,7 +455,7 @@ class ExprBuilder:
                 VarNode(
                     name=node["name"],
                     shape=node["shape"],
-                    type=_str_to_type[node["vartype"]],
+                    type=self.str_to_type[node["vartype"]],
                     active=node["active"],
                 )
             )

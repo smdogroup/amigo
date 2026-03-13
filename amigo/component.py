@@ -1,12 +1,23 @@
 import types
 from .expressions import *
-from .expressions import _normalize_shape, _type_to_str, _str_to_type
-
+from . import expressions as _expressions
 
 _cpp_type_map = {int: "int", float: "double", complex: "std::complex<double>"}
 
 
-def _get_shape_from_obj(obj):
+def _normalize_shape(shape):
+    if shape is None:
+        return None
+    if isinstance(shape, int):
+        shape = (shape,)
+    elif not isinstance(shape, tuple):
+        raise TypeError("Expecting None, int or tuple")
+    if not (len(shape) == 1 or len(shape) == 2):
+        raise ValueError("Amigo only accepts shapes with at most two dimensions")
+    return shape
+
+
+def _get_shape_from_list(obj):
     if not isinstance(obj, (list, tuple)):
         return ()
 
@@ -17,51 +28,19 @@ def _get_shape_from_obj(obj):
         return (length,)
 
     # Recurse into first element and check consistency
-    sub_shape = _get_shape_from_obj(obj[0])
+    sub_shape = _get_shape_from_list(obj[0])
     for sub in obj:
-        if _get_shape_from_obj(sub) != sub_shape:
+        if _get_shape_from_list(sub) != sub_shape:
             raise ValueError("Inconsistent list-of-list shapes")
 
     return (length,) + sub_shape
 
 
-def _serialize_expr_list(expr):
-    if isinstance(expr, Expr):
-        return {"expr": expr.serialize()}
-    elif isinstance(expr, (list, tuple)):
-        return [_serialize_expr_list(e) for e in expr]
-    else:
-        return None
-
-
-def _serialize_expr_dict(edict):
-    data = {}
-    for name in edict:
-        data[name] = _serialize_expr_list(edict[name])
-    return data
-
-
-def _deserialize_expr_list(data):
-    if isinstance(data, (list, tuple)):
-        return [_deserialize_expr_list(d) for d in data]
-    elif isinstance(data, dict):
-        return Expr.deserialize(data["expr"])
-    else:
-        return None
-
-
-def _deserialize_expr_dict(data):
-    expr = {}
-    for name in data:
-        expr[int(name)] = _deserialize_expr_list(data[name])
-    return expr
-
-
-def _generate_cpp_types(shapes, template_name="T__"):
+def _generate_cpp_types(inputs, template_name="T__"):
     lines = []
 
-    for shape_ in shapes:
-        shape = _normalize_shape(shape_)
+    for name in inputs:
+        shape = _normalize_shape(inputs[name].node.shape)
         if shape is None:
             lines.append(f"{template_name}")
         else:
@@ -98,8 +77,6 @@ class Meta:
         self._validate()
 
     def _validate(self):
-        if "__" in self.name:
-            raise ValueError(f"Name {self.name} cannot contain a double underscore")
         if not isinstance(self.value, self.type):
             raise TypeError(f"value must be of type {self.type.__name__}")
         if not isinstance(self.scale, (int, float)):
@@ -141,26 +118,18 @@ class Meta:
             f"     scale={self.scale}, label={self.label!r})"
         )
 
-    def serialize(self):
+    def todict(self):
         return {
             "name": self.name,
-            "var_type": self.var_type,
             "shape": self.shape,
             "value": self.value,
-            "type": _type_to_str[self.type],
+            "type": str(self.type),
             "lower": self.lower,
             "upper": self.upper,
             "units": self.units,
             "scale": self.scale,
             "label": self.label,
         }
-
-    @classmethod
-    def deserialize(cls, data):
-        name = data.pop("name")
-        var_type = data.pop("var_type")
-        data["type"] = _str_to_type[data["type"]]
-        return cls(name, var_type, **data)
 
 
 class InputSet:
@@ -195,26 +164,7 @@ class InputSet:
         return self.meta[name]
 
     def generate_cpp_types(self, template_name="T__"):
-        shapes = [self.inputs[name].node.shape for name in self.inputs]
-        return _generate_cpp_types(shapes, template_name=template_name)
-
-    def serialize(self):
-        data = {}
-        for name in self.inputs:
-            data[name] = {
-                "meta": self.meta[name].serialize(),
-                "expr": self.inputs[name].serialize(),
-            }
-        return data
-
-    @classmethod
-    def deserialize(cls, data):
-        obj = cls()
-        for name in data:
-            d = data[name]
-            obj.meta[name] = Meta.deserialize(d["meta"])
-            obj.inputs[name] = Expr.deserialize(d["expr"])
-        return obj
+        return _generate_cpp_types(self.inputs, template_name=template_name)
 
 
 class ConstantSet:
@@ -258,23 +208,66 @@ class ConstantSet:
             )
         return lines
 
-    def serialize(self):
-        data = {}
-        for name in self.consts:
-            data[name] = {
-                "meta": self.meta[name].serialize(),
-                "expr": self.consts[name].serialize(),
-            }
-        return data
 
-    @classmethod
-    def deserialize(cls, data):
-        obj = cls()
-        for name in data:
-            d = data[name]
-            obj.meta[name] = Meta.deserialize(d["meta"])
-            obj.consts[name] = Expr.deserialize(d["expr"])
-        return obj
+class VarSet:
+    class VarExpr:
+        def __init__(self, name, type=float, shape=None, active=True):
+            self.name = name
+            self.shape = _normalize_shape(shape)
+            self.type = type
+            self.var = Expr(VarNode(name, shape=shape, type=type, active=active))
+            self.active = active
+
+            if self.shape is None:
+                self.expr = None
+            else:
+                if len(self.shape) == 1:
+                    self.expr = [None for _ in range(self.shape[0])]
+                else:
+                    self.expr = [
+                        [None for _ in range(self.shape[1])]
+                        for _ in range(self.shape[0])
+                    ]
+
+    def __init__(self):
+        self.vars = {}
+
+    def __len__(self):
+        return len(self.vars)
+
+    def __iter__(self):
+        return iter(self.vars)
+
+    def __getitem__(self, name):
+        return self.vars[name].expr
+
+    def __setitem__(self, name, expr):
+        if isinstance(expr, Expr):
+            shape = None
+            self.vars[name] = self.VarExpr(name, shape=shape)
+            self.vars[name].expr = expr
+            expr.name = name
+        else:
+            shape = _get_shape_from_list(expr)
+            self.vars[name] = self.VarExpr(name, shape=shape)
+
+            if len(shape) == 1:
+                for i in range(shape[0]):
+                    self.vars[name].expr[i] = expr[i]
+                    expr[i].name = f"{name}[{i}]"
+            elif len(shape) == 2:
+                for i in range(shape[0]):
+                    for j in range(shape[1]):
+                        self.vars[name].expr[i][j] = expr[i][j]
+                        expr[i][j].name = f"{name}({i}, {j})"
+
+        return
+
+    def clear(self):
+        self.vars = {}
+
+    def generate_cpp_types(self, template_name="T__"):
+        return _generate_cpp_types(self.vars, template_name=template_name)
 
 
 class DataSet:
@@ -296,32 +289,13 @@ class DataSet:
         return iter(self.data)
 
     def generate_cpp_types(self, template_name="T__"):
-        shapes = [self.data[name].node.shape for name in self.data]
-        return _generate_cpp_types(shapes, template_name=template_name)
+        return _generate_cpp_types(self.data, template_name=template_name)
 
     def get_shape(self, name):
         return self.data[name].node.shape
 
     def get_meta(self, name):
         return self.meta[name]
-
-    def serialize(self):
-        data = {}
-        for name in self.data:
-            data[name] = {
-                "meta": self.meta[name].serialize(),
-                "expr": self.data[name].serialize(),
-            }
-        return data
-
-    @classmethod
-    def deserialize(cls, data):
-        obj = cls()
-        for name in data:
-            d = data[name]
-            obj.meta[name] = Meta.deserialize(d["meta"])
-            obj.data[name] = Expr.deserialize(d["expr"])
-        return obj
 
 
 class ConstraintSet:
@@ -330,31 +304,32 @@ class ConstraintSet:
             self.name = name
             self.shape = _normalize_shape(shape)
             self.type = type
-            self.expr = {}
+            self.clear_expr()
 
-        def serialize(self):
-            return {
-                "name": self.name,
-                "shape": self.shape,
-                "type": _type_to_str[self.type],
-                "expr": _serialize_expr_dict(self.expr),
-            }
-
-        @classmethod
-        def deserialize(cls, data):
-            typ = _str_to_type[data["type"]]
-            obj = cls(data["name"], type=typ, shape=data["shape"])
-            obj.expr = _deserialize_expr_dict(data["expr"])
-            return obj
+        def clear_expr(self):
+            if self.shape is None:
+                self.expr = None
+            else:
+                if len(self.shape) == 1:
+                    self.expr = [None for _ in range(self.shape[0])]
+                else:
+                    self.expr = [
+                        [None for _ in range(self.shape[1])]
+                        for _ in range(self.shape[0])
+                    ]
 
     def __init__(self):
         self.cons = {}
         self.meta = {}
-        self.arg_index = 0
 
     def add(self, name, shape=None, type=float, **kwargs):
         self.cons[name] = self.ConstrExpr(name, shape=shape, type=type)
         self.meta[name] = Meta(name, "constraint", shape=shape, type=type, **kwargs)
+        return
+
+    def clear(self):
+        for name in self.cons:
+            self.cons[name].clear_expr()
         return
 
     def __len__(self):
@@ -364,28 +339,38 @@ class ConstraintSet:
         return iter(self.cons.keys())
 
     def __getitem__(self, name):
-        return self.cons[name].expr[self.arg_index]
+        return self.cons[name].expr
 
     def __setitem__(self, name, expr):
         if name not in self.cons:
             raise KeyError(f"{name} not in declared constraints")
 
-        # Check the shape of the item
-        shape = self.cons[name].shape
-        if shape == None and not isinstance(expr, Expr):
-            raise ValueError(f"Expected expression object")
-        if shape != None and shape != _get_shape_from_obj(expr):
-            raise ValueError(f"Shapes do not match for {name}")
+        if isinstance(expr, Expr):
+            if self.cons[name].shape is None:
+                self.cons[name].expr = expr
+        else:
+            shape = self.cons[name].shape
+            if len(shape) == 1:
+                for i in range(shape[0]):
+                    self.cons[name].expr[i] = expr[i]
+            elif len(shape) == 2:
+                for i in range(shape[0]):
+                    for j in range(shape[1]):
+                        self.cons[name].expr[i][j] = expr[i][j]
 
-        # Set the expression
-        self.cons[name].expr[self.arg_index] = expr
         return
+
+    def get_num_constraints(self):
+        return len(self.cons)
 
     def get_shape(self, name):
         return self.cons[name].shape
 
     def get_meta(self, name):
         return self.meta[name]
+
+    def evaluate(self, name, env):
+        return self.cons[name].node.evaluate(env)
 
     def get_multiplier_name(self, name):
         if name in self.cons:
@@ -394,138 +379,81 @@ class ConstraintSet:
             raise KeyError(f"{name} not in declared constraints")
 
     def generate_cpp_types(self, template_name="T__"):
-        shapes = [self.cons[name].shape for name in self.cons]
-        return _generate_cpp_types(shapes, template_name=template_name)
-
-    def serialize(self):
-        data = {}
+        lines = []
         for name in self.cons:
-            data[name] = {
-                "meta": self.meta[name].serialize(),
-                "expr": self.cons[name].serialize(),
-            }
-        return data
+            shape = _normalize_shape(self.cons[name].shape)
+            if shape is None:
+                lines.append(f"{template_name}")
+            else:
+                if len(shape) == 1:
+                    lines.append(f"A2D::Vec<{template_name}, {shape[0]}>")
+                elif len(shape) == 2:
+                    lines.append(f"A2D::Mat<{template_name}, {shape[0]}, {shape[1]}>")
 
-    @classmethod
-    def deserialize(cls, data):
-        obj = cls()
-        for name in data:
-            d = data[name]
-            obj.meta[name] = Meta.deserialize(d["meta"])
-            obj.cons[name] = cls.ConstrExpr.deserialize(d["expr"])
-        return obj
+        return lines
 
 
 class ObjectiveSet:
-    class ObjExpr:
-        def __init__(self, name, type=float):
-            self.name = name
-            self.type = type
-            self.expr = {}
-
-        def serialize(self):
-            return {
-                "name": self.name,
-                "type": _type_to_str[self.type],
-                "expr": _serialize_expr_dict(self.expr),
-            }
-
-        @classmethod
-        def deserialize(cls, data):
-            obj = cls(data["name"], type=_str_to_type[data["type"]])
-            obj.expr = _deserialize_expr_dict(data["expr"])
-            return obj
-
     def __init__(self):
-        self.obj = {}
+        self.expr = {}
         self.meta = {}
-        self.arg_index = 0
 
     def add(self, name, shape=None, type=float, **kwargs):
         if shape != None:
             raise ValueError("Objective must be a scalar")
-        if len(self.obj) == 1:
+        if len(self.expr) == 1:
             raise ValueError("Cannot add more than one objective")
         if "scale" in kwargs:
             raise ValueError("Objective function cannot be scaled through kwargs")
-        self.obj[name] = self.ObjExpr(name, type=type)
+        self.expr[name] = None
         self.meta[name] = Meta(name, "objective", shape=shape, type=type, **kwargs)
         return
 
     def __len__(self):
-        return len(self.obj)
+        return len(self.expr)
 
     def __iter__(self):
-        return iter(self.obj)
+        return iter(self.expr)
 
     def __setitem__(self, name, expr):
-        if name not in self.obj:
+        if name not in self.expr:
             raise KeyError(f"{name} not the declared objective")
-        self.obj[name].expr[self.arg_index] = expr
+        self.expr[name] = expr
         return
 
     def __getitem__(self, name):
-        if name not in self.obj:
+        if name not in self.expr:
             raise KeyError(f"{name} not the declared objective")
-        return self.obj[name].expr[self.arg_index]
+        return self.expr[name]
+
+    def clear(self):
+        for name in self.expr:
+            self.expr[name] = None
 
     def get_meta(self, name):
         return self.meta[name]
 
-    def serialize(self):
-        data = {}
-        for name in self.obj:
-            data[name] = {
-                "meta": self.meta[name].serialize(),
-                "expr": self.obj[name].serialize(),
-            }
-        return data
-
-    @classmethod
-    def deserialize(cls, data):
-        obj = cls()
-        for name in data:
-            d = data[name]
-            obj.meta[name] = Meta.deserialize(d["meta"])
-            obj.obj[name] = cls.ObjExpr.deserialize(d["expr"])
-        return obj
-
 
 class OutputSet:
     class OutputExpr:
-        def __init__(self, name, type=float, shape=None):
+        def __init__(self, name, type=float, shape=None, active=True):
             self.name = name
             self.shape = _normalize_shape(shape)
             self.type = type
-            self.var = Expr(VarNode(name, shape=shape, type=type, active=True))
-            self.expr = {}
-
-        def serialize(self):
-            return {
-                "name": self.name,
-                "shape": self.shape,
-                "type": _type_to_str[self.type],
-                "expr": _serialize_expr_dict(self.expr),
-            }
-
-        @classmethod
-        def deserialize(cls, data):
-            typ = _str_to_type[data["type"]]
-            obj = cls(data["name"], type=typ, shape=data["shape"])
-            obj.expr = _deserialize_expr_dict(data["expr"])
-            return obj
+            self.var = Expr(VarNode(name, shape=shape, type=type, active=active))
+            self.active = active
+            self.expr = None
 
     def __init__(self):
         self.outputs = {}
         self.meta = {}
-        self.arg_index = 0
 
     def add(self, name, shape=None, type=float, **kwargs):
         if shape != None:
             raise ValueError("Output values must be scalar")
         if "scale" in kwargs:
             raise ValueError("Output values cannot be scaled through kwargs")
-        self.outputs[name] = self.OutputExpr(name, type=type, shape=shape)
+        self.outputs[name] = self.OutputExpr(name, type=type, active=True)
         self.meta[name] = Meta(name, "output", shape=shape, type=type, **kwargs)
 
     def __len__(self):
@@ -537,116 +465,62 @@ class OutputSet:
     def __setitem__(self, name, expr):
         if name not in self.outputs:
             raise KeyError(f"{name} not the declared outputs")
-        self.outputs[name].expr[self.arg_index] = expr
+        self.outputs[name].expr = expr
         return
 
     def __getitem__(self, name):
         if name not in self.outputs:
             raise KeyError(f"{name} not the declared outputs")
-        return self.outputs[name].expr[self.arg_index]
+        return self.outputs[name].expr
 
     def get_shape(self, name):
         return self.outputs[name].shape
 
-    def generate_cpp_types(self, template_name="T__"):
-        shapes = [self.outputs[name].shape for name in self.outputs]
-        return _generate_cpp_types(shapes, template_name=template_name)
+    def clear(self):
+        for name in self.outputs:
+            self.outputs[name].expr = None
 
-    def get_output(self, name):
+    def generate_cpp_types(self, template_name="T__"):
+        lines = []
+        for name in self.outputs:
+            shape = _normalize_shape(self.outputs[name].shape)
+            if shape is None:
+                lines.append(f"{template_name}")
+            else:
+                if len(shape) == 1:
+                    lines.append(f"A2D::Vec<{template_name}, {shape[0]}>")
+                elif len(shape) == 2:
+                    lines.append(f"A2D::Mat<{template_name}, {shape[0]}, {shape[1]}>")
+
+        return lines
+
+    def get_var(self, name):
         return self.outputs[name].var
 
     def get_meta(self, name):
         return self.meta[name]
 
-    def serialize(self):
-        data = {}
-        for name in self.outputs:
-            data[name] = {
-                "meta": self.meta[name].serialize(),
-                "expr": self.outputs[name].serialize(),
-            }
-        return data
-
-    @classmethod
-    def deserialize(cls, data):
-        obj = cls()
-        for name in data:
-            d = data[name]
-            obj.meta[name] = Meta.deserialize(d["meta"])
-            obj.outputs[name] = cls.OutputExpr.deserialize(d["expr"])
-        return obj
-
 
 class Component:
-    def __init__(self, name: str | None = None):
+    def __init__(self):
         # Set the name - this will be the ComponentGroup name in C++
-        if name is None:
-            self.name = self.__class__.__name__
-        else:
-            self.name = name
+        self.name = self.__class__.__name__
 
         # Set the input values
         self.constants = ConstantSet()
         self.inputs = InputSet()
-        self.data = DataSet()
-
-        # The values produced by calls to compute() or compute_output()
+        self.vars = VarSet()
         self.constraints = ConstraintSet()
         self.objective = ObjectiveSet()
+        self.data = DataSet()
         self.outputs = OutputSet()
-
-        # Variables associated with the constraints
         self.multipliers = {}
 
         # Set the compute function arguments
         self.args = [{}]
 
-        # Set default flags
-        self.compute_empty = False
-        self.compute_output_empty = False
+        # Set whether this is a continuation component or not
         self.continuation_component = False
-
-        # Flag to keep track if the expressions are initialized
-        self.initialized = False
-
-    def serialize(self):
-        if not self.initialized:
-            self._initialize_expressions()
-            self.initialized = True
-
-        data = {}
-        data["name"] = self.name
-        data["args"] = self.args
-        data["compute_empty"] = self.compute_empty
-        data["compute_output_empty"] = self.compute_output_empty
-        data["continuation_component"] = self.continuation_component
-        data["constants"] = self.constants.serialize()
-        data["inputs"] = self.inputs.serialize()
-        data["data"] = self.data.serialize()
-        data["constraints"] = self.constraints.serialize()
-        data["objective"] = self.objective.serialize()
-        data["outputs"] = self.outputs.serialize()
-
-        return data
-
-    @classmethod
-    def deserialize(cls, data):
-        obj = cls(name=data["name"])
-        obj.args = data["args"]
-        obj.compute_empty = data["compute_empty"]
-        obj.compute_output_empty = data["compute_output_empty"]
-        obj.continuation_component = data["continuation_component"]
-        obj.constants = ConstantSet.deserialize(data["constants"])
-        obj.inputs = InputSet.deserialize(data["inputs"])
-        obj.data = DataSet.deserialize(data["data"])
-        obj.constraints = ConstraintSet.deserialize(data["constraints"])
-        obj.objective = ObjectiveSet.deserialize(data["objective"])
-        obj.outputs = OutputSet.deserialize(data["outputs"])
-
-        # The expressions in this object have been initialized
-        obj.initialized = True
-
-        return obj
 
     def set_args(self, args):
         """
@@ -673,18 +547,6 @@ class Component:
 
     def is_continuation_component(self):
         return self.continuation_component
-
-    def is_compute_empty(self):
-        if self.initialized:
-            return self.compute_empty
-        else:
-            return not self._is_overridden("compute")
-
-    def is_compute_output_empty(self):
-        if self.initialized:
-            return self.compute_output_empty
-        else:
-            return not self._is_overridden("compute_output")
 
     def add_constant(self, name, value, **kwargs):
         """
@@ -735,6 +597,39 @@ class Component:
 
     def compute_output(self, **kwargs):
         pass
+
+    def _is_overridden(self, method_name):
+        instance_method = getattr(self, method_name)
+        base_method = getattr(type(self).__bases__[0], method_name, None)
+
+        # Unbind methods so we compare function objects directly
+        if isinstance(instance_method, types.MethodType):
+            instance_method = instance_method.__func__
+        if isinstance(base_method, types.MethodType):
+            base_method = base_method.__func__
+
+        return instance_method is not base_method
+
+    def is_empty(self):
+        if self.is_compute_empty() and self.is_output_empty():
+            return True
+        return False
+
+    def is_compute_empty(self):
+        if not self._is_overridden("compute"):
+            return True
+        return False
+
+    def is_output_empty(self):
+        if not self._is_overridden("compute_output"):
+            return True
+        return False
+
+    def clear(self):
+        self.constraints.clear()
+        self.vars.clear()
+        self.objective.clear()
+        return
 
     def get_input_names(self):
         inputs = []
@@ -792,42 +687,12 @@ class Component:
             mult_name = self.constraints.get_multiplier_name(name)
             if mult_name not in self.inputs:
                 shape = self.constraints.get_shape(name)
-                self.multipliers[mult_name] = Expr(VarNode(mult_name, shape=shape))
-
-        return
-
-    def _is_overridden(self, method_name):
-        instance_method = getattr(self, method_name)
-        base_method = getattr(type(self).__bases__[0], method_name, None)
-
-        # Unbind methods so we compare function objects directly
-        if isinstance(instance_method, types.MethodType):
-            instance_method = instance_method.__func__
-        if isinstance(base_method, types.MethodType):
-            base_method = base_method.__func__
-
-        return instance_method is not base_method
-
-    def _initialize_expressions(self):
-        # Check if the functions are defined or not
-        self.compute_empty = not self._is_overridden("compute")
-        self.compute_output_empty = not self._is_overridden("compute_output")
-
-        for index, args in enumerate(self.args):
-            # Perform the computation to get the constraints and outputs
-            # as a function of the inputs
-            self.constraints.arg_index = index
-            self.objective.arg_index = index
-            self.outputs.arg_index = index
-
-            if len(args) > 0:
-                self.compute(**args)
-                self.compute_output(**args)
-            else:
-                self.compute()
-                self.compute_output()
-
-        self.initialized = True
+                # sed_active=False: multipliers should not trigger binary SED
+                # filtering. The lambda*residual multiplication contributes
+                # the Jacobian (cross-derivative), which must be kept exact.
+                self.multipliers[mult_name] = Expr(
+                    VarNode(mult_name, shape=shape, sed_active=False)
+                )
 
         return
 
@@ -964,7 +829,7 @@ class Component:
 
         # Is compute_output actually empty?
         truth = "false"
-        if self.is_compute_output_empty():
+        if self.is_output_empty():
             truth = "true"
         cpp += "  " + f"static constexpr bool is_output_empty = {truth};\n"
 
@@ -1004,9 +869,6 @@ class Component:
         Generate the code for a c++ implementation
         """
 
-        if not self.initialized:
-            self._initialize_expressions()
-
         cpp = ""
 
         # Initialize the multipliers that are added to the inputs
@@ -1018,10 +880,15 @@ class Component:
         inputs = [self.inputs[name] for name in self.inputs]
         inputs += [self.multipliers[name] for name in self.multipliers]
 
-        for index in range(len(self.args)):
-            self.constraints.arg_index = index
-            self.objective.arg_index = index
-            self.outputs.arg_index = index
+        for index, args in enumerate(self.args):
+            # Re-initialize any variables or other arguments
+            self.clear()
+
+            # Perform the computation to get the constraints as a function of the inputs
+            if len(args) > 0:
+                self.compute(**args)
+            else:
+                self.compute()
 
             if len(self.args) == 1:
                 class_name = self.name + "__"
@@ -1041,12 +908,13 @@ class Component:
                 lhs = []
 
             # Get any variables that might have been set
-            vars = []
+            vars = [self.vars[name] for name in self.vars]
 
             # Create the expression builder
             builder = ExprBuilder(consts, data, inputs, vars, rhs=rhs, lhs=lhs)
 
             for mode in ["eval", "grad", "hprod"]:
+                _expressions._sed_mode = mode == "hprod"
                 cpp += self._generate_compute_cpp(
                     builder,
                     lhs,
@@ -1059,14 +927,24 @@ class Component:
                     hprod_name=hprod_name,
                     stack_name=stack_name,
                 )
+            _expressions._sed_mode = False
+
+            # Clear the variables for the compute_output function
+            self.clear()
+
+            # Perform the computation to get the constraints as a function of the inputs
+            if len(args) > 0:
+                self.compute_output(**args)
+            else:
+                self.compute_output()
 
             # Get any variables that might have been set
-            vars = []
+            vars = [self.vars[name] for name in self.vars]
 
             outputs, lhs = [], []
             for name in self.outputs:
                 outputs.append(self.outputs[name])
-                lhs.append(self.outputs.get_output(name))
+                lhs.append(self.outputs.get_var(name))
 
             # Create the expression builder
             builder = ExprBuilder(consts, data, inputs, vars, rhs=outputs, lhs=lhs)
@@ -1128,7 +1006,9 @@ class Component:
                 + " {\n"
             )
 
-        if not self.is_compute_empty():
+        is_empty = self.is_compute_empty()
+
+        if not is_empty:
             decl, passive, active = builder.get_cpp_lines(
                 mode=mode,
                 template_name=template_name,
@@ -1147,7 +1027,7 @@ class Component:
                 for line in decl + passive + active:
                     cpp += "    " + line + ";\n"
                 cpp += "    " + f"return {lhs.to_cpp()};\n"
-            else:
+            elif len(active) > 0:
                 for line in decl + passive:
                     cpp += "    " + line + ";\n"
 
@@ -1165,7 +1045,7 @@ class Component:
                     cpp += "    " + f"{stack_name}.hforward();\n"
                     cpp += "    " + f"{stack_name}.hreverse();\n"
 
-        if mode == "eval" and self.is_compute_empty():
+        if mode == "eval" and is_empty:
             cpp += "    " + f"return {template_name}(0.0);\n"
 
         cpp += "  }\n"
@@ -1191,12 +1071,10 @@ class Component:
             + " {\n"
         )
 
-        if not self.is_compute_output_empty():
+        if not self.is_output_empty():
             decl, passive, active = builder.get_cpp_lines(
                 mode="eval", template_name=template_name, data_name=data_name
             )
-
-            # Add the declarations for the output - this uses the input declarations code
             decl += builder.get_input_declarations(
                 lhs, mode="eval", template_name=template_name, input_name=output_name
             )
