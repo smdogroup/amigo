@@ -188,9 +188,20 @@ class LagrangeBasis1D(Basis):
             grad = orig[name]["grad"]
             soln[name] = {
                 "value": value,
-                "grad": mat_vec_transpose(Jinv, grad, n=2, m=2),
+                "grad": [Jinv * grad[0]],
             }
         return soln
+
+    def compute_transform(self, geo):
+        if "x" not in geo or "y" not in geo:
+            raise ValueError("Coordinates not defined")
+
+        x_xi = geo["x"]["grad"][0]
+        y_xi = geo["y"]["grad"][0]
+
+        detJ = am.sqrt(x_xi**2 + y_xi**2)
+        Jinv = 1.0 / detJ
+        return detJ, Jinv
 
     def eval(self, comp, pt):
         xi = pt[0]
