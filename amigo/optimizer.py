@@ -190,14 +190,21 @@ class MumpsSolver(_HessianDiagMixin):
 
     def __init__(self, problem):
         import ctypes
+        import sys
 
         self._ct = ctypes
         try:
-            self._libmumps = ctypes.CDLL("libdmumps.dll")
+            if sys.platform == "win32":
+                self._libmumps = ctypes.CDLL("libdmumps.dll")
+            else:
+                lib_dir = os.environ.get("MUMPS_LIB_DIR", "")
+                lib_path = os.path.join(lib_dir, "libdmumps.so") if lib_dir else "libdmumps.so"
+                self._libmumps = ctypes.CDLL(lib_path)
         except OSError:
             raise ImportError(
-                "libdmumps.dll not found. Set MUMPS_DLL_DIR env var or "
-                "ensure mumps-build/build is on the DLL search path."
+                "MUMPS library not found. On Windows, ensure libdmumps.dll "
+                "is on the DLL search path. On Linux, install libmumps-dev "
+                "or set MUMPS_LIB_DIR."
             )
         self._dmumps_c = self._libmumps.dmumps_c
         self._dmumps_c.restype = None
