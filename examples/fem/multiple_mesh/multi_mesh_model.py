@@ -40,51 +40,45 @@ meshes = {
     "Mesh1": Mesh("multidomain.inp"),
 }
 
-# Define Dirichlet BCs for each mesh
-dirichlet_bc_meshes = {
-    "Mesh0": {
-        "DirichletLine3": {
-            "type": "dirichlet",
-            "target": "LINE3",
-            "input": ["u"],
-            "start": True,
-            "end": True,
-        },
+bc_map_mesh0 = {
+    "DirichletLine3": {
+        "type": "dirichlet",
+        "target": ["LINE3"],
+        "input": ["u"],
+        "start": True,
+        "end": True,
     },
-    "Mesh1": {
-        "DirichletLine1": {
-            "type": "dirichlet",
-            "target": "LINE1",
-            "input": ["u"],
-            "start": True,
-            "end": True,
-        },
+    "SymmMesh0": {
+        "type": "symmetric",
+        "input": ["u"],
+        "start": False,
+        "end": False,
+        "target": [["LINE2"], ["LINE4"]],
+        "flip": [False, False],
+        "scale": [1.0, 1.0],
     },
 }
 
-# Symmetric BCs mapping for each mesh
-symm_bc_meshes = {
-    "Mesh0": {
-        "SymmMesh0": {
-            "input": ["u"],
-            "start": False,
-            "end": False,
-            "target": ["LINE2", "LINE4"],
-            "flip": [False, False],
-            "scale": [1.0, -1.0],
-        },
+bc_map_mesh1 = {
+    "DirichletLine3": {
+        "type": "dirichlet",
+        "target": ["LINE1"],
+        "input": ["u"],
+        "start": True,
+        "end": True,
     },
-    "Mesh1": {
-        "SymmMesh1": {
-            "input": ["u"],
-            "start": False,
-            "end": False,
-            "target": ["LINE2", "LINE4"],
-            "flip": [False, False],
-            "scale": [1.0, -1.0],
-        },
+    "SymmMesh0": {
+        "type": "symmetric",
+        "input": ["u"],
+        "start": False,
+        "end": False,
+        "target": [["LINE2"], ["LINE4"]],
+        "flip": [False, False],
+        "scale": [1.0, 1.0],
     },
 }
+
+bc_map = {"Mesh0": bc_map_mesh0, "Mesh1": bc_map_mesh1}
 
 # Weak form mapping for each mesh
 weakform_map = {
@@ -114,7 +108,7 @@ for mesh_name, mesh in meshes.items():
         data_space,
         geo_space,
         weakform_map=weakform_map[mesh_name],
-        dirichlet_bc_map=dirichlet_bc_meshes[mesh_name],
+        bc_map=bc_map[mesh_name],
     )
     model = problem.create_model(mesh_name)
     main.add_model(mesh_name, model)

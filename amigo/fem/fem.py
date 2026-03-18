@@ -53,61 +53,62 @@ class SymmBCSource(am.Component):
 
 
 class SymmetryDegreesOfFreedom:
-    def __init__(self, mesh, bc={}):
+    def __init__(self, bc_name, mesh, bc={}):
+        self.bc_name = bc_name
         self.mesh = mesh
         self.bc = bc
         return
 
-    def add_bc_source(self, model):
-        names = self.bc.keys()
-        for name in names:
-            # Loop through each bc_type name
-            bc_src = SymmBCSource(
-                input_name=self.bc[name]["input"],
-                scale=self.bc[name]["scale"],
-            )
+    def _get_bc_nodes(self, targets, start=True, end=True):
+        all_nodes = []
+        for target in targets:
+            nodes = self.mesh.get_bc_nodes(target, "T3D2")
 
-            line_tag = self.bc[name]["target"][0]
-            nnodes = self.mesh.get_num_nodes_on_bc(line_tag, "T3D2")
+            if not start:
+                nodes = nodes[1:]
+            if not end:
+                nodes = nodes[:-1]
 
-            # Update the number of components based on whether to include start and end
-            if self.bc[name]["start"] == False:
-                nnodes -= 1
-            if self.bc[name]["end"] == False:
-                nnodes -= 1
+            all_nodes.extend(nodes)
 
-            model.add_component(
-                f"src_{name}",
-                nnodes,
-                bc_src,
-            )
-        return
+        return list(dict.fromkeys(all_nodes))  # preserve order
 
-    def link_bc_dof(self, model):
-        names = self.bc.keys()
-        for name in names:
-            # Loop through each bc_type name
-            input_name = self.bc[name]["input"][0]  # Extract "u"
+    def add_and_link_source(self, model):
+        targets = self.bc["target"]
+        start = self.bc["start"]
+        end = self.bc["end"]
+        input_names = self.bc["input"]
+        scale = self.bc["scale"]
 
-            for i, line_tag in enumerate(self.bc[name]["target"]):
-                conn = self.mesh.get_bc_nodes(line_tag, "T3D2")
+        left_target_lines = targets[0]
+        right_target_lines = targets[1]
+        nodes_left = self._get_bc_nodes(left_target_lines, start=start, end=end)
+        nodes_right = self._get_bc_nodes(right_target_lines, start=start, end=end)
 
-                # Slice the nodes based on start and end requirement
-                if self.bc[name]["start"] == False and self.bc[name]["end"] == True:
-                    conn = conn[1:]
-                elif self.bc[name]["start"] == False and self.bc[name]["end"] == False:
-                    conn = conn[1:-1]
-                elif self.bc[name]["start"] == True and self.bc[name]["end"] == False:
-                    conn = conn[0:-1]
+        if len(nodes_left) != len(nodes_right):
+            raise Exception(f"nnodes left != nnodes right")
 
-                if self.bc[name]["flip"][i] == True:
-                    conn = np.flip(conn)
+        bc_src = SymmBCSource(input_names, scale=scale)
 
-                model.link(
-                    f"src_soln.{input_name}",
-                    f"src_{name}.{input_name}{i}",
-                    src_indices=conn,
-                )
+        if len(nodes_left) > 0:
+            for name in input_names:
+                for name in input_names:
+                    model.add_component(
+                        f"src_{name}",
+                        len(nodes_left),
+                        bc_src,
+                    )
+
+                    model.link(
+                        f"src_soln.{name}",
+                        f"src_{self.bc_name}.{name}0",
+                        src_indices=nodes_left,
+                    )
+                    model.link(
+                        f"src_soln.{name}",
+                        f"src_{self.bc_name}.{name}1",
+                        src_indices=nodes_right,
+                    )
         return
 
 
