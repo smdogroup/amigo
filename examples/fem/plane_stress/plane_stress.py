@@ -6,7 +6,7 @@ import numpy as np
 import argparse
 
 
-def weakform_plane_stress(soln, data=None, geo=None):
+def potential_plane_stress(soln, data=None, geo=None):
     """Strain energy density (integrand of TPE equation)"""
     # Displacement gradients in physical space
     ux_grad = soln["ux"]["grad"]
@@ -31,7 +31,7 @@ def weakform_plane_stress(soln, data=None, geo=None):
     return W
 
 
-def weakform_traction(soln, data=None, geo=None):
+def potential_traction(soln, data=None, geo=None):
     """External Work Line integral integrand"""
     ux = soln["ux"]["value"]
     uy = soln["uy"]["value"]
@@ -41,7 +41,7 @@ def weakform_traction(soln, data=None, geo=None):
     ty = -1
 
     W = ux * tx + uy * ty
-    return W
+    return -W
 
 
 # Two displacement DOFs per node
@@ -52,11 +52,11 @@ data_space = SolutionSpace({})  # empty for now
 weakform_map = {
     "plane_stress": {
         "target": ["SURFACE1"],
-        "weakform": weakform_plane_stress,
+        "weakform": potential_plane_stress,
     },
     "traction": {
         "target": ["LINE2"],
-        "weakform": weakform_traction,
+        "weakform": potential_traction,
     },
 }
 

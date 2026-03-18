@@ -435,19 +435,19 @@ class TriangleQuadrature(Quadrature):
             # 1-point (exact for degree 1)
             self.xi = np.array([1 / 3])
             self.eta = np.array([1 / 3])
-            self.weights = np.array([1.0])
+            self.weights = np.array([1.0 / 2.0])
 
         elif order == 2:
             # 3-point (exact for degree 2)
             self.xi = np.array([1 / 6, 2 / 3, 1 / 6])
             self.eta = np.array([1 / 6, 1 / 6, 2 / 3])
-            self.weights = np.array([1 / 3, 1 / 3, 1 / 3])
+            self.weights = np.array([1 / 6, 1 / 6, 1 / 6])
 
         elif order == 3:
             # 4-point (exact for degree 3)
-            self.xi = np.array([1 / 3, 0.2, 0.2, 0.6])
-            self.eta = np.array([1 / 3, 0.2, 0.6, 0.2])
-            self.weights = np.array([-27 / 48, 25 / 48, 25 / 48, 25 / 48])
+            self.xi = np.array([1 / 3, 3 / 5, 1 / 5, 1 / 5])
+            self.eta = np.array([1 / 3, 1 / 5, 3 / 5, 1 / 5])
+            self.weights = np.array([-9 / 32, 25 / 96, 25 / 96, 25 / 96])
 
         elif order == 4:
             a = 0.445948490915965
@@ -493,6 +493,19 @@ class QuadQuadrature(Quadrature):
         wt = self.weights[n] * self.weights[m]
         pt = [self.points[n], self.points[m]]
         return wt, pt
+
+
+class ReducedQuadQuadrature(Quadrature):
+    def __init__(self):
+        self.args = [{"n": 0, "m": 0}]
+        self.points = np.array([0.0])
+        self.weights = np.array([4.0])  # full area of biunit square
+
+    def get_args(self):
+        return self.args
+
+    def get_point(self, n=0, m=0):
+        return self.weights[0], [0.0, 0.0]
 
 
 class LineQuadrature(Quadrature):

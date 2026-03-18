@@ -28,7 +28,7 @@ class DofSource(am.Component):
 
 
 class SymmBCSource(am.Component):
-    def __init__(self, input_name=[], scale=[1.0, 1.0]):
+    def __init__(self, input_name=[], scale=[]):
         super().__init__()
 
         self.input_name = input_name
@@ -53,131 +53,145 @@ class SymmBCSource(am.Component):
 
 
 class SymmetryDegreesOfFreedom:
-    def __init__(self, mesh, bc={}):
+    def __init__(self, bc_name, mesh, bc={}):
+        self.bc_name = bc_name
         self.mesh = mesh
         self.bc = bc
         return
 
-    def add_bc_source(self, model):
-        names = self.bc.keys()
-        for name in names:
-            # Loop through each bc_type name
-            bc_src = SymmBCSource(
-                input_name=self.bc[name]["input"],
-                scale=self.bc[name]["scale"],
-            )
+    def _get_bc_nodes(self, targets, start, end):
+        all_nodes = []
+        for target in targets:
+            nodes = self.mesh.get_bc_nodes(target, "T3D2")
+            all_nodes.extend(nodes)
 
-            line_tag = self.bc[name]["target"][0]
-            nnodes = self.mesh.get_num_nodes_on_bc(line_tag, "T3D2")
+        unique = list(dict.fromkeys(all_nodes))  # preserve order
 
-            # Update the number of components based on whether to include start and end
-            if self.bc[name]["start"] == False:
-                nnodes -= 1
-            if self.bc[name]["end"] == False:
-                nnodes -= 1
+        if not start:
+            unique = unique[1:]
+        if not end:
+            unique = unique[:-1]
 
-            model.add_component(
-                f"src_{name}",
-                nnodes,
-                bc_src,
-            )
-        return
+        return unique
 
-    def link_bc_dof(self, model):
-        names = self.bc.keys()
-        for name in names:
-            # Loop through each bc_type name
-            input_name = self.bc[name]["input"][0]  # Extract "u"
+    def _reorder_nodes(self, nodes_left, nodes_right):
+        nodes_left = np.array(nodes_left)
+        nodes_right = np.array(nodes_right)
 
-            for i, line_tag in enumerate(self.bc[name]["target"]):
-                conn = self.mesh.get_bc_nodes(line_tag, "T3D2")
+        y_left = self.mesh.X[nodes_left, 1]
+        y_right = self.mesh.X[nodes_right, 1]
 
-                # Slice the nodes based on start and end requirement
-                if self.bc[name]["start"] == False and self.bc[name]["end"] == True:
-                    conn = conn[1:]
-                elif self.bc[name]["start"] == False and self.bc[name]["end"] == False:
-                    conn = conn[1:-1]
-                elif self.bc[name]["start"] == True and self.bc[name]["end"] == False:
-                    conn = conn[0:-1]
+        idx_left = np.argsort(y_left)
+        idx_right = np.argsort(y_right)
 
-                if self.bc[name]["flip"][i] == True:
-                    conn = np.flip(conn)
+        return nodes_left[idx_left], nodes_right[idx_right]
+
+    def add_and_link_source(self, model):
+        targets = self.bc["target"]
+        start = self.bc["start"]
+        end = self.bc["end"]
+        input_names = self.bc["input"]
+        scale = self.bc["scale"]
+
+        left_target_lines = targets[0]
+        right_target_lines = targets[1]
+        nodes_left = self._get_bc_nodes(left_target_lines, start, end)
+        nodes_right = self._get_bc_nodes(right_target_lines, start, end)
+
+        if len(nodes_left) != len(nodes_right):
+            raise Exception(f"nnodes left != nnodes right")
+
+        # Reorder the nodes to match
+        nodes_a, nodes_b = self._reorder_nodes(nodes_left, nodes_right)
+
+        bc_src = SymmBCSource(input_names, scale=scale)
+
+        if len(nodes_left) > 0:
+            for name in input_names:
+                model.add_component(
+                    f"src_{self.bc_name}",
+                    len(nodes_left),
+                    bc_src,
+                )
 
                 model.link(
-                    f"src_soln.{input_name}",
-                    f"src_{name}.{input_name}{i}",
-                    src_indices=conn,
+                    f"src_soln.{name}",
+                    f"src_{self.bc_name}.{name}0",
+                    src_indices=nodes_a,
+                )
+                model.link(
+                    f"src_soln.{name}",
+                    f"src_{self.bc_name}.{name}1",
+                    src_indices=nodes_b,
                 )
         return
 
 
 class DirichletBCSource(am.Component):
-    def __init__(self, input_name=[]):
-        super().__init__()
+    def __init__(self, name, input_names=[]):
+        super().__init__(name=name)
 
-        self.input_name = input_name
+        self.input_names = input_names
 
-        for name in self.input_name:
-            self.add_input(f"{name}0", value=1.0)
-        self.add_input("lam", value=1.0)
+        for name in self.input_names:
+            self.add_input(f"{name}")
+            self.add_input(f"lam_{name}")
+
         self.add_objective("obj")
         return
 
     def compute(self):
-        for name in self.input_name:
-            self.objective["obj"] = self.inputs[f"{name}0"] * self.inputs["lam"]
+        obj = 0.0
+        for name in self.input_names:
+            obj += self.inputs[f"{name}"] * self.inputs[f"lam_{name}"]
+        self.objective["obj"] = obj
         return
 
 
 class DirichletDegreesOfFreedom:
-    def __init__(self, mesh, bc={}):
+    def __init__(self, bc_name, mesh, bc={}):
+        self.bc_name = bc_name
         self.mesh = mesh
         self.bc = bc
         return
 
-    def add_bc_source(self, model):
-        names = self.bc.keys()
-        for name in names:
-            # Loop through each bc_type name
-            input_name = self.bc[name]["input"]
-            target_name = self.bc[name]["target"]
-            bc_src = DirichletBCSource(input_name=input_name)
-            nnodes = self.mesh.get_num_nodes_on_bc(target_name, "T3D2")
+    def _get_bc_nodes(self, targets, start, end):
+        all_nodes = []
+        for target in targets:
+            nodes = self.mesh.get_bc_nodes(target, "T3D2")
 
-            # Update the number of components based on whether to include start and end
-            if self.bc[name]["start"] == False:
-                nnodes -= 1
-            if self.bc[name]["end"] == False:
-                nnodes -= 1
+            if not start:
+                nodes = nodes[1:]
+            if not end:
+                nodes = nodes[:-1]
 
+            all_nodes.append(nodes)
+
+        return np.unique(all_nodes)
+
+    def add_and_link_source(self, model):
+        targets = self.bc["target"]
+        start = self.bc["start"]
+        end = self.bc["end"]
+        nodes = self._get_bc_nodes(targets, start, end)
+
+        input_names = self.bc["input"]
+        bc_src = DirichletBCSource(self.bc_name, input_names=input_names)
+
+        if len(nodes) > 0:
             model.add_component(
-                f"src_{name}",
-                nnodes,
+                f"src_{self.bc_name}",
+                len(nodes),
                 bc_src,
             )
-        return
 
-    def link_bc_dof(self, model):
-        names = self.bc.keys()
-        for name in names:
-            # Loop through each bc target
-            target = self.bc[name]["target"]
-            input_name = self.bc[name]["input"][0]  # Extract "u"
-            conn = self.mesh.get_bc_nodes(target, "T3D2")
+            for name in input_names:
+                model.link(
+                    f"src_soln.{name}",
+                    f"src_{self.bc_name}.{name}",
+                    src_indices=nodes,
+                )
 
-            # Slice the nodes based on start and end requirement
-            if self.bc[name]["start"] == False and self.bc[name]["end"] == True:
-                conn = conn[1:]
-            elif self.bc[name]["start"] == False and self.bc[name]["end"] == False:
-                conn = conn[1:-1]
-            elif self.bc[name]["start"] == True and self.bc[name]["end"] == False:
-                conn = conn[0:-1]
-
-            model.link(
-                f"src_soln.{input_name}",
-                f"src_{name}.{input_name}0",
-                src_indices=conn,
-            )
         return
 
 
@@ -336,10 +350,8 @@ class Mesh:
     def get_num_surfaces(self):
         return self.parser.get_num_surfaces()
 
-    def get_bc_nodes(self, name, etype, flip=False):
+    def get_bc_nodes(self, name, etype):
         conn = self.parser.get_edge_node(name, etype)
-        if flip == True:
-            np.flip(conn)
         return conn
 
     def get_num_nodes_on_bc(self, name, etype):
@@ -406,6 +418,99 @@ class Mesh:
                 # fig.colorbar(cntr, ax=ax)
         return ax
 
+    def plot_3d(
+        self,
+        w,
+        fig=None,
+        ax=None,
+        scale=1.0,
+        cmap="coolwarm",
+        title=None,
+        x_offset=0.0,
+        y_offset=0.0,
+        alpha=0.85,
+        show_edges=True,
+        min_level=None,
+        max_level=None,
+    ):
+        """
+        Plot the 2D mesh lifted into 3D by the out-of-plane displacement field w.
+
+        Parameters
+        ----------
+        w         : (nnodes,) array — perpendicular displacement at each node
+        fig/ax    : existing Figure / Axes3D to draw into (created if None)
+        scale     : multiply w before plotting (useful for visual exaggeration)
+        cmap      : matplotlib colormap name
+        title     : axes title string
+        x_offset  : shift all x coordinates before plotting
+        y_offset  : shift all y coordinates before plotting
+        alpha     : surface transparency
+        show_edges: overlay mesh wire-frame on the surface
+        min_level / max_level : clamp the colormap range
+        """
+        from mpl_toolkits.mplot3d import Axes3D  # noqa: F401 — registers 3d projection
+        from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+        import matplotlib.cm as cm
+        import matplotlib.colors as mcolors
+
+        if fig is None or ax is None:
+            fig = plt.figure(figsize=(10, 7))
+            ax = fig.add_subplot(111, projection="3d")
+
+        x = self.X[:, 0] + x_offset
+        y = self.X[:, 1] + y_offset
+        z = np.asarray(w) * scale
+
+        # Colormap normalisation
+        vmin = np.min(z) if min_level is None else min_level * scale
+        vmax = np.max(z) if max_level is None else max_level * scale
+        norm = mcolors.Normalize(vmin=vmin, vmax=vmax)
+        scalar_map = cm.ScalarMappable(norm=norm, cmap=cmap)
+
+        volumes = self.get_domains()
+
+        for name in volumes:
+            for etype in volumes[name]:
+                if etype == "T3D2":
+                    continue
+
+                # Triangulate so we can colour per-triangle face
+                tri_conn = self.convert_conn(etype, self.get_conn(name, etype))
+
+                verts = []
+                face_colors = []
+                for tri in tri_conn:
+                    pts = np.column_stack([x[tri], y[tri], z[tri]])  # (3, 3)
+                    verts.append(pts)
+                    # colour by mean displacement of the triangle
+                    face_colors.append(scalar_map.to_rgba(np.mean(z[tri])))
+
+                poly = Poly3DCollection(
+                    verts,
+                    facecolors=face_colors,
+                    edgecolors="k" if show_edges else "none",
+                    linewidths=0.3 if show_edges else 0.0,
+                    alpha=alpha,
+                )
+                ax.add_collection3d(poly)
+
+        # Axis limits derived from data
+        ax.set_xlim(x.min(), x.max())
+        ax.set_ylim(y.min(), y.max())
+        ax.set_zlim(vmin, vmax)
+
+        ax.set_xlabel("X")
+        ax.set_ylabel("Y")
+        ax.set_zlabel("w")
+
+        if title is not None:
+            ax.set_title(title)
+
+        fig.colorbar(scalar_map, ax=ax, shrink=0.5, label="w")
+
+        return ax
+
     def convert_conn(self, etype, conn):
         if etype == "CPS3":
             return conn
@@ -441,6 +546,22 @@ class Mesh:
 
         return np.vstack(cs)
 
+    def plot_tri_mesh_region(self, name, etype, ax, color, label):
+        X2d = self.X[:, 0:2]  # Reduce to 2d (x,y coords only)
+        gmsh_conn = self.get_conn(name, etype)
+        polygons = [X2d[row] for row in gmsh_conn]
+
+        coll = PolyCollection(
+            polygons,
+            facecolors=color,
+            edgecolors="k",
+            linewidths=0.01,
+            label=label,
+            antialiaseds=False,
+        )
+        ax.add_collection(coll)
+        return
+
 
 # Needs to take in bcs here
 class Problem:
@@ -453,8 +574,7 @@ class Problem:
         geo_space: basis.SolutionSpace,
         weakform_map={},
         output_map={},
-        dirichlet_bc_map={},
-        sym_bc_map={},
+        bc_map={},
     ):
         self.mesh = mesh
         self.soln_space = soln_space
@@ -462,8 +582,7 @@ class Problem:
         self.geo_space = geo_space
 
         self.weakform_map = weakform_map
-        self.dirichlet_bc_map = dirichlet_bc_map
-        self.sym_bc_map = sym_bc_map
+        self.bc_map = bc_map
         self.output_map = output_map
 
         # Initialize Dof's
@@ -486,14 +605,20 @@ class Problem:
             kind="data",
             name="data",
         )
-        self.dirichlet_bc_dof = DirichletDegreesOfFreedom(
-            self.mesh,
-            self.dirichlet_bc_map,
-        )
-        self.sym_bc_dof = SymmetryDegreesOfFreedom(
-            self.mesh,
-            self.sym_bc_map,
-        )
+
+        self.dirichlet_dof = []
+        self.symm_dof = []
+
+        for name in bc_map:
+            bc = bc_map[name]
+            if bc["type"] == "dirichlet":
+                self.dirichlet_dof.append(
+                    DirichletDegreesOfFreedom(name, self.mesh, bc)
+                )
+            elif bc["type"] == "symmetry":
+                self.symm_dof.append(SymmetryDegreesOfFreedom(name, self.mesh, bc))
+            else:
+                raise Exception(f"{bc["type"]} not recognized")
 
         return
 
@@ -531,8 +656,12 @@ class Problem:
                 data_basis = self.data_dof.get_basis(etype)
                 geo_basis = self.geo_dof.get_basis(etype)
 
-                # Create the quadrature instance
-                quadrature = self.soln_dof.get_quadrature(etype)
+                # quadrature = self.soln_dof.get_quadrature(etype)
+                # # Create the quadrature instance
+                if weakform_name == "shear_potential":
+                    quadrature = basis.ReducedQuadQuadrature()
+                else:
+                    quadrature = self.soln_dof.get_quadrature(etype)
 
                 # Create the element object
                 obj = FiniteElement(
@@ -561,12 +690,11 @@ class Problem:
                     self.geo_dof.link_dof(model, target, etype, comp_name)
 
         # Add BC components and links
-        self.dirichlet_bc_dof.add_bc_source(model)
-        self.dirichlet_bc_dof.link_bc_dof(model)
+        for dof in self.dirichlet_dof:
+            dof.add_and_link_source(model)
 
-        # Add symmetric bcs
-        self.sym_bc_dof.add_bc_source(model)
-        self.sym_bc_dof.link_bc_dof(model)
+        for dof in self.symm_dof:
+            dof.add_and_link_source(model)
 
         # Make a list of all of the outputs
         all_outputs = []
