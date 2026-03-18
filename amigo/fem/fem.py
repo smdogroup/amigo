@@ -622,7 +622,7 @@ class Problem:
                 geo_basis = self.geo_dof.get_basis(etype)
 
                 # quadrature = self.soln_dof.get_quadrature(etype)
-                # # Create the quadrature instance
+                # Create the quadrature instance
                 if weakform_name == "bending_potential":
                     quadrature = basis.ReducedQuadQuadrature()
                 else:

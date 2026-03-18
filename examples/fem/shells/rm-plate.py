@@ -7,7 +7,7 @@ import argparse
 
 E = 1.0  # Young's modulus
 nu = 0.3  # Poisson's ratio
-t = 0.1  # Plate thickness
+t = 0.0001  # Plate thickness
 k_s = 5.0 / 6.0  # Shear correction factor
 D = E * t**3 / (12.0 * (1.0 - nu**2))  # Bending stiffness
 G = E / (2.0 * (1.0 + nu))  # Shear stiffness  (= k_s * G * t)
@@ -171,11 +171,20 @@ ty = xm["src_soln.ty"]
 # mesh.plot(w, ax=ax[0])
 # mesh.plot(tx, ax=ax[1])
 # np.save('w_shearlocked.npy', w)
-np.save("w_reducedshear.npy", w)
+# exit()
+np.save("w_1e-4.npy", w)
 w_shearlocked = np.load("w_shearlocked.npy")
 mesh.plot_3d(w)
 # mesh.plot_3d(w_shearlocked)
+print(w)
+print(w_shearlocked)
 
-print(np.max(np.abs(((w - w_shearlocked)))))
+
+# print(np.max(2*(w - w_shearlocked)/((np.abs(w)+np.abs(w_shearlocked)))))
+def max_relative_error(list1, list2, eps=1e-12):
+    return max(abs(a - b) / max(abs(a), abs(b), eps) for a, b in zip(list1, list2))
+
+
+# print(max_relative_error(w,w_shearlocked))
 
 plt.show()
