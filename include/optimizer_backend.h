@@ -589,11 +589,310 @@ void compute_complementarity_pairs(const OptInfo<T>& info,
     }
 
     if (!std::isinf(info.ubc[i])) {
-      T comp_su = pt.su[i] * pt.zsu[i];
-      T comp_tu = pt.tu[i] * pt.ztu[i];
-      partial_sum[0] += comp_su + comp_tu;
-      partial_sum[1] += 2.0;
-      local_min = A2D::min2(local_min, A2D::min2(comp_su, comp_tu));
+      T comp = (info.ubc[i] - pt.s[i]) * pt.zsu[i];
+      partial_sum[0] += comp;
+      partial_sum[1] += 1.0;
+      local_min = A2D::min2(local_min, comp);
+    }
+  }
+}
+
+// Compute max_i |s_i * z_i - mu| over all complementarity pairs.
+// This is the infinity-norm central path deviation used by IPOPT's
+// barrier subproblem convergence check (E_mu).
+template <typename T>
+void compute_max_comp_deviation(const OptInfo<T>& info,
+                                OptStateData<const T>& pt, T mu,
+                                T& max_dev) {
+  max_dev = 0.0;
+
+  for (int i = 0; i < info.num_variables; i++) {
+    int index = info.design_variable_indices[i];
+    T x = pt.xlam[index];
+
+    if (!std::isinf(info.lbx[i])) {
+      T comp = (x - info.lbx[i]) * pt.zl[i];
+      T dev = std::abs(comp - mu);
+      max_dev = A2D::max2(max_dev, dev);
+    }
+    if (!std::isinf(info.ubx[i])) {
+      T comp = (info.ubx[i] - x) * pt.zu[i];
+      T dev = std::abs(comp - mu);
+      max_dev = A2D::max2(max_dev, dev);
+    }
+  }
+
+  for (int i = 0; i < info.num_inequalities; i++) {
+    if (!std::isinf(info.lbc[i])) {
+      T comp = (pt.s[i] - info.lbc[i]) * pt.zsl[i];
+      T dev = std::abs(comp - mu);
+      max_dev = A2D::max2(max_dev, dev);
+    }
+    if (!std::isinf(info.ubc[i])) {
+      T comp = (info.ubc[i] - pt.s[i]) * pt.zsu[i];
+      T dev = std::abs(comp - mu);
+      max_dev = A2D::max2(max_dev, dev);
+    }
+  }
+}
+
+template <typename T>
+void compute_kkt_error_components(const OptInfo<T>& info,
+                                   OptStateData<const T>& pt, const T* g,
+                                   T& dual_infeas_sq, T& primal_infeas_sq,
+                                   T& comp_sq) {
+  dual_infeas_sq = 0.0;
+  primal_infeas_sq = 0.0;
+  comp_sq = 0.0;
+
+  // Design variables: dual feasibility and complementarity
+  for (int i = 0; i < info.num_variables; i++) {
+    int index = info.design_variable_indices[i];
+    T x = pt.xlam[index];
+
+    // Dual feasibility: stationarity of Lagrangian wrt x
+    // g[index] = grad_f + J_h^T lam_h + J_c^T lam_c (computed by problem)
+    // KKT: g[index] - zl + zu = 0
+    T rd = g[index] - pt.zl[i] + pt.zu[i];
+    dual_infeas_sq += rd * rd;
+
+    // Complementarity: (x - lb) * zl, (ub - x) * zu
+    if (!std::isinf(info.lbx[i])) {
+      T c = (x - info.lbx[i]) * pt.zl[i];
+      comp_sq += c * c;
+    }
+    if (!std::isinf(info.ubx[i])) {
+      T c = (info.ubx[i] - x) * pt.zu[i];
+      comp_sq += c * c;
+    }
+  }
+
+  // Equality constraints: primal feasibility h(x) - lbh = 0
+  for (int i = 0; i < info.num_equalities; i++) {
+    int index = info.equality_indices[i];
+    T rp = g[index] - info.lbh[i];
+    primal_infeas_sq += rp * rp;
+  }
+
+  // Inequality constraints: primal feasibility c(x) = s
+  // Plus complementarity from slack decomposition
+  for (int i = 0; i < info.num_inequalities; i++) {
+    int index = info.inequality_indices[i];
+
+    // Primal feasibility: c(x) - s = 0
+    T rp = g[index] - pt.s[i];
+    primal_infeas_sq += rp * rp;
+
+    // Complementarity from slack bounds
+    if (!std::isinf(info.lbc[i])) {
+      T c = (pt.s[i] - info.lbc[i]) * pt.zsl[i];
+      comp_sq += c * c;
+    }
+    if (!std::isinf(info.ubc[i])) {
+      T c = (info.ubc[i] - pt.s[i]) * pt.zsu[i];
+      comp_sq += c * c;
+    }
+  }
+}
+
+// Compute ||ZXe||^2 = sum of squared complementarity products at point pt.
+// Equivalent to the comp_sq term in compute_kkt_error_components but requires
+// no gradient vector. Used by the linear quality function (NWW 2009 eq 4.2).
+template <typename T>
+T compute_complementarity_sq(const OptInfo<T>& info,
+                             OptStateData<const T>& pt) {
+  T comp_sq = 0.0;
+
+  for (int i = 0; i < info.num_variables; i++) {
+    int index = info.design_variable_indices[i];
+    T x = pt.xlam[index];
+    if (!std::isinf(info.lbx[i])) {
+      T c = (x - info.lbx[i]) * pt.zl[i];
+      comp_sq += c * c;
+    }
+    if (!std::isinf(info.ubx[i])) {
+      T c = (info.ubx[i] - x) * pt.zu[i];
+      comp_sq += c * c;
+    }
+  }
+
+  for (int i = 0; i < info.num_inequalities; i++) {
+    if (!std::isinf(info.lbc[i])) {
+      T c = (pt.s[i] - info.lbc[i]) * pt.zsl[i];
+      comp_sq += c * c;
+    }
+    if (!std::isinf(info.ubc[i])) {
+      T c = (info.ubc[i] - pt.s[i]) * pt.zsu[i];
+      comp_sq += c * c;
+    }
+  }
+
+  return comp_sq;
+}
+
+// Compute the barrier log-sum: -mu * sum(ln(barrier_variables)).
+// This is the barrier contribution to the IPOPT barrier objective:
+//   phi_mu(x) = f(x) + barrier_log_sum
+// Barrier variables are: (x-lb), (ub-x) for bounded design variables,
+// and (s-lbc), (ubc-s) for bounded inequality slacks.
+template <typename T>
+T compute_barrier_log_sum(T barrier_param, const OptInfo<T>& info,
+                          OptStateData<const T>& pt) {
+  T log_sum = 0.0;
+
+  for (int i = 0; i < info.num_variables; i++) {
+    int index = info.design_variable_indices[i];
+    T x = pt.xlam[index];
+    if (!std::isinf(info.lbx[i])) {
+      T slack = x - info.lbx[i];
+      if (slack > 0) {
+        log_sum += std::log(slack);
+      } else {
+        return 1e20;  // infeasible point
+      }
+    }
+    if (!std::isinf(info.ubx[i])) {
+      T slack = info.ubx[i] - x;
+      if (slack > 0) {
+        log_sum += std::log(slack);
+      } else {
+        return 1e20;
+      }
+    }
+  }
+
+  for (int i = 0; i < info.num_inequalities; i++) {
+    if (!std::isinf(info.lbc[i])) {
+      T gap = pt.s[i] - info.lbc[i];
+      if (gap > 0) {
+        log_sum += std::log(gap);
+      } else {
+        return 1e20;
+      }
+    }
+    if (!std::isinf(info.ubc[i])) {
+      T gap = info.ubc[i] - pt.s[i];
+      if (gap > 0) {
+        log_sum += std::log(gap);
+      } else {
+        return 1e20;
+      }
+    }
+  }
+
+  return -barrier_param * log_sum;
+}
+
+// Compute the analytical directional derivative of the barrier objective
+// along the Newton search direction:
+//   dphi = nabla_x phi_mu^T dx + nabla_s phi_mu^T ds
+//
+// where phi_mu = f(x) - mu * sum(ln(barrier_vars)).
+//
+// Uses the identity: for design variable i,
+//   g[i] + (-mu/(x-l) + mu/(u-x)) = -r[i]   (condensed residual)
+// so the design contribution is -r_design^T dx - lambda^T J dx.
+// The lambda^T J dx term is extracted from the KKT constraint rows:
+//   J dx = r_constr - D_eff * d_lambda
+// where D_eff = diag[constr] (the constraint diagonal used in factorization).
+//
+// The slack contribution uses the barrier gradient w.r.t. inequality slacks:
+//   nabla_s phi_mu = -mu/(s-lbc) + mu/(ubc-s)
+template <typename T>
+T compute_barrier_dphi(T barrier_param, const OptInfo<T>& info,
+                       OptStateData<const T>& pt,
+                       OptStateData<const T>& up,
+                       const T* r, const T* p, const T* diag) {
+  T dphi = 0.0;
+
+  // Term 1: -res_design^T dx
+  // This equals (g + barrier_x_grad)^T dx = (nabla_x L + barrier_x)^T dx
+  for (int i = 0; i < info.num_variables; i++) {
+    int index = info.design_variable_indices[i];
+    dphi -= r[index] * p[index];
+  }
+
+  // Term 2: -lambda^T J dx
+  // From KKT constraint rows: J dx = r_constr - diag_constr * d_lambda
+  // so lambda^T J dx = sum_j lambda_j * (r_j - diag_j * p_j)
+  for (int i = 0; i < info.num_equalities; i++) {
+    int index = info.equality_indices[i];
+    T lam = pt.xlam[index];
+    T jdx_j = r[index] - diag[index] * p[index];
+    dphi -= lam * jdx_j;
+  }
+  for (int i = 0; i < info.num_inequalities; i++) {
+    int index = info.inequality_indices[i];
+    T lam = pt.xlam[index];
+    T jdx_j = r[index] - diag[index] * p[index];
+    dphi -= lam * jdx_j;
+  }
+
+  // Term 3: barrier_s_grad^T ds (slack barrier contribution)
+  // nabla_s phi_mu = -mu/(s-lbc) + mu/(ubc-s)
+  for (int i = 0; i < info.num_inequalities; i++) {
+    T ds = up.s[i];
+    T barrier_s = 0.0;
+    if (!std::isinf(info.lbc[i])) {
+      T gap = pt.s[i] - info.lbc[i];
+      if (gap > 0) barrier_s -= barrier_param / gap;
+    }
+    if (!std::isinf(info.ubc[i])) {
+      T gap = info.ubc[i] - pt.s[i];
+      if (gap > 0) barrier_s += barrier_param / gap;
+    }
+    dphi += barrier_s * ds;
+  }
+
+  return dphi;
+}
+
+// IPOPT Eq. 16: Reset bound multipliers to keep them within
+// [mu / (kappa_sigma * gap), kappa_sigma * mu / gap].
+// This prevents bound multipliers from diverging and keeps
+// sigma_i = z_i * gap_i bounded in [mu/kappa_sigma, kappa_sigma * mu].
+template <typename T>
+void reset_bound_multipliers(T barrier_param, T kappa_sigma,
+                             const OptInfo<T>& info,
+                             OptStateData<T>& pt) {
+  for (int i = 0; i < info.num_variables; i++) {
+    int index = info.design_variable_indices[i];
+    T x = pt.xlam[index];
+
+    if (!std::isinf(info.lbx[i])) {
+      T gap = x - info.lbx[i];
+      if (gap > 0) {
+        T z_max = kappa_sigma * barrier_param / gap;
+        T z_min = barrier_param / (kappa_sigma * gap);
+        pt.zl[i] = std::max(std::min(pt.zl[i], z_max), z_min);
+      }
+    }
+    if (!std::isinf(info.ubx[i])) {
+      T gap = info.ubx[i] - x;
+      if (gap > 0) {
+        T z_max = kappa_sigma * barrier_param / gap;
+        T z_min = barrier_param / (kappa_sigma * gap);
+        pt.zu[i] = std::max(std::min(pt.zu[i], z_max), z_min);
+      }
+    }
+  }
+
+  for (int i = 0; i < info.num_inequalities; i++) {
+    if (!std::isinf(info.lbc[i])) {
+      T gap = pt.s[i] - info.lbc[i];
+      if (gap > 0) {
+        T z_max = kappa_sigma * barrier_param / gap;
+        T z_min = barrier_param / (kappa_sigma * gap);
+        pt.zsl[i] = std::max(std::min(pt.zsl[i], z_max), z_min);
+      }
+    }
+    if (!std::isinf(info.ubc[i])) {
+      T gap = info.ubc[i] - pt.s[i];
+      if (gap > 0) {
+        T z_max = kappa_sigma * barrier_param / gap;
+        T z_min = barrier_param / (kappa_sigma * gap);
+        pt.zsu[i] = std::max(std::min(pt.zsu[i], z_max), z_min);
+      }
     }
   }
 }

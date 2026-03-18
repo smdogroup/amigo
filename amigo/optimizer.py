@@ -1518,7 +1518,7 @@ class Optimizer:
         dpx = px1 - px0
 
         tol_qf = options["convergence_tolerance"]
-        mu_floor = 1e-14
+        mu_floor = tol_qf * 0.1  # don't drive mu far below convergence tolerance
 
         tau_qf = options["fraction_to_boundary"]
 
@@ -1537,34 +1537,17 @@ class Optimizer:
             )
             avg_comp_aff, _ = self.optimizer.compute_complementarity(self.temp)
 
-            # Mehrotra sigma with NLP safeguards.
-            # Classical component: how much complementarity the affine step reduces.
-            sigma_aff = min(1.0, (avg_comp_aff / mu_nat) ** 3)
-            # Primal-constraint component: when alpha_aff_x is small the affine
-            # direction is primal-infeasible, so more centering is needed.
-            # (1-alpha_aff_x)^2 -> 0 when full affine step is feasible (LP case),
-            # -> large when primal boundary is tight (NLP case).
-            sigma_step = (1.0 - alpha_aff_x) ** 2
-            # Decay safeguard (IPOPT kappa_mu): prevents mu from crashing
-            # when alpha_aff_x jumps between iterations.  mu_new >= kappa*mu_old.
-            kappa_decay = options["pc_kappa_mu_decay"]
-            sigma_decay = (
-                kappa_decay * self.barrier_param / mu_nat
-                if mu_nat > 0 and self.barrier_param > mu_floor
-                else 0.0
-            )
-            # Floor component: keeps mu_pc >= mu_floor.
-            sigma_floor = mu_floor / mu_nat if mu_nat > mu_floor else 1.0
-            sigma_pc = min(1.0, max(sigma_aff, sigma_step, sigma_decay, sigma_floor))
+            # Mehrotra centering parameter (Nocedal-Wachter-Waltz, eq 3.5).
+            # Pure data-driven: sigma small when affine step reduces comp well,
+            # large when it doesn't.  Free/fixed mode toggle provides robustness.
+            sigma_pc = min(1.0, max(0.0, avg_comp_aff / mu_nat) ** 3)
             mu_pc = max(sigma_pc * mu_nat, mu_floor)
 
             if comm_rank == 0:
                 print(
-                    f"  PC: sigma={sigma_pc:.4f} "
-                    f"(aff={sigma_aff:.4f}, step={sigma_step:.4f}, "
-                    f"decay={sigma_decay:.4f}), "
+                    f"  PC: sigma={sigma_pc:.4f}, "
                     f"mu={mu_pc:.4e} "
-                    f"(comp={avg_comp:.4e}, comp_aff={avg_comp_aff:.4e}, "
+                    f"(comp={avg_comp:.4e}, "
                     f"a_aff={alpha_aff_x:.3f})"
                 )
 
@@ -2852,7 +2835,7 @@ class Optimizer:
         qf_kappa = options["quality_function_kappa_free"]
         qf_l_max = options["quality_function_l_max"]
         qf_kkt_history = deque(maxlen=qf_l_max + 1)
-        qf_mu_floor = 1e-14
+        qf_mu_floor = tol * 0.1  # mu should not go far below convergence tolerance
         qf_monotone_mu = None
         qf_M_k_at_entry = None
         qf_sd = qf_sp = qf_sc = 1.0
@@ -3042,56 +3025,24 @@ class Optimizer:
 
             prev_res_norm = res_norm
 
-            # Step D: Barrier parameter update
-            # IPOPT Algorithm A, Step A-3: reduce mu when the barrier
-            # subproblem is solved to sufficient accuracy.
-            # E_mu = max(dual_err, primal_err, comp_err) <= kappa_eps * mu.
-            if filter_ls and i > 0 and self.barrier_param > tol:
-                kappa_eps_ipopt = 10.0
-                kappa_mu_ipopt = 0.2
-                theta_mu_ipopt = 1.5
-                comp_val, _ = self.optimizer.compute_complementarity(self.vars)
-                d_sq_a3, p_sq_a3, _ = self.optimizer.compute_kkt_error(
-                    self.vars, self.grad
-                )
-                e_mu = max(np.sqrt(d_sq_a3), np.sqrt(p_sq_a3), comp_val)
-                if e_mu <= kappa_eps_ipopt * self.barrier_param:
-                    old_mu = self.barrier_param
-                    new_mu = max(
-                        tol / 10.0,
-                        min(kappa_mu_ipopt * old_mu, old_mu**theta_mu_ipopt),
-                    )
-                    if new_mu < old_mu:
-                        self.barrier_param = new_mu
-                        if inertia_corrector:
-                            inertia_corrector.update_barrier(self.barrier_param)
-                        inner_filter.entries.clear()
-                        self._filter_theta_0 = self._compute_filter_theta()
-                        if comm_rank == 0:
-                            print(
-                                f"  IPOPT A-3: mu {old_mu:.2e} -> "
-                                f"{new_mu:.2e} "
-                                f"(E_mu={e_mu:.2e}, filter reset)"
-                            )
-
-            # Step E: Compute search direction
+            # Step D+E: Barrier update + search direction
             step_rejected = False
-            if inertia_corrector:
-                inertia_corrector.update_barrier(self.barrier_param)
-            else:
-                # Legacy zero-step recovery (no inertia corrector)
-                if i > 0 and max(alpha_x_prev, alpha_z_prev) < 1e-10:
-                    zero_step_count += 1
-                    if zero_step_count >= 3:
-                        old_barrier = self.barrier_param
-                        self.barrier_param = min(self.barrier_param * 10.0, 1.0)
-                        if comm_rank == 0 and self.barrier_param != old_barrier:
-                            print(
-                                f"  Zero step recovery: barrier {old_barrier:.2e} -> {self.barrier_param:.2e}"
-                            )
-                        zero_step_count = 0
+            if not filter_ls:
+                if inertia_corrector:
+                    inertia_corrector.update_barrier(self.barrier_param)
                 else:
-                    zero_step_count = 0
+                    if i > 0 and max(alpha_x_prev, alpha_z_prev) < 1e-10:
+                        zero_step_count += 1
+                        if zero_step_count >= 3:
+                            old_barrier = self.barrier_param
+                            self.barrier_param = min(self.barrier_param * 10.0, 1.0)
+                            if comm_rank == 0 and self.barrier_param != old_barrier:
+                                print(
+                                    f"  Zero step recovery: barrier {old_barrier:.2e} -> {self.barrier_param:.2e}"
+                                )
+                            zero_step_count = 0
+                    else:
+                        zero_step_count = 0
 
             # Compute and cache the base diagonal (barrier Sigma)
             self.optimizer.compute_diagonal(self.vars, self.diag)
@@ -3100,8 +3051,42 @@ class Optimizer:
             self.solver.factor(1.0, x, self.diag)
             self.solver.solve(self.res, self.px)
 
-            # Filter LS path: monotone A-3 handles mu, compute direction.
+            # Filter LS path: IPOPT-style monotone A-3.
+            # E_mu = max(||dual||, ||primal||, max_i|s_i*z_i - mu|)
+            # Using max deviation (not avg comp) prevents premature reduction
+            # when individual pairs are far from the central path.
             if filter_ls:
+                if i > 0 and self.barrier_param > tol:
+                    kappa_eps_ipopt = 10.0
+                    kappa_mu_ipopt = 0.2
+                    theta_mu_ipopt = 1.5
+                    comp_dev = self.optimizer.compute_max_comp_deviation(
+                        self.vars, self.barrier_param
+                    )
+                    d_sq_a3, p_sq_a3, _ = self.optimizer.compute_kkt_error(
+                        self.vars, self.grad
+                    )
+                    comp_val, _ = self.optimizer.compute_complementarity(self.vars)
+                    e_mu = max(np.sqrt(d_sq_a3), np.sqrt(p_sq_a3), comp_dev, comp_val)
+                    if e_mu <= kappa_eps_ipopt * self.barrier_param:
+                        old_mu = self.barrier_param
+                        new_mu = max(
+                            1e-14,  # numerical floor only
+                            min(kappa_mu_ipopt * old_mu, old_mu**theta_mu_ipopt),
+                            0.1 * comp_val,  # mu within 10x of comp
+                        )
+                        if new_mu < old_mu:
+                            self.barrier_param = new_mu
+                            if inertia_corrector:
+                                inertia_corrector.update_barrier(self.barrier_param)
+                            inner_filter.entries.clear()
+                            self._filter_theta_0 = self._compute_filter_theta()
+                            if comm_rank == 0:
+                                print(
+                                    f"  A-3: mu {old_mu:.2e} -> "
+                                    f"{new_mu:.2e} "
+                                    f"(E_mu={e_mu:.2e}, dev={comp_dev:.2e})"
+                                )
                 self._find_direction(
                     x,
                     diag_base,

@@ -667,6 +667,30 @@ class InteriorPointOptimizer {
     }
   }
 
+  // Compute max_i |s_i * z_i - mu| (IPOPT-style central path deviation).
+  void compute_max_comp_deviation(
+      const std::shared_ptr<OptVector<T>> vars, T mu,
+      T& max_deviation) const {
+    detail::OptStateData<const T> pt =
+        detail::OptStateData<const T>::template make<policy>(vars);
+
+    T local_max_dev = 0.0;
+
+    if constexpr (policy == ExecPolicy::SERIAL ||
+                  policy == ExecPolicy::OPENMP) {
+      detail::compute_max_comp_deviation(info, pt, mu, local_max_dev);
+    }
+#ifdef AMIGO_USE_CUDA
+    else {
+      // Fallback to CPU for now (CUDA kernel can be added later)
+      detail::compute_max_comp_deviation(info, pt, mu, local_max_dev);
+    }
+#endif
+
+    MPI_Allreduce(&local_max_dev, &max_deviation, 1, get_mpi_type<T>(),
+                  MPI_MAX, comm);
+  }
+
   /**
    * @brief Compute the variable values for the new starting point
    *
