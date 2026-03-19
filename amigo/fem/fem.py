@@ -570,7 +570,7 @@ class Problem:
                 raise Exception(f"{bc["type"]} not recognized")
 
         return
-    
+
     def _create_element_objs(self):
         # Get the domain names from the mesh
         domains = self.mesh.get_domains()
@@ -611,11 +611,11 @@ class Problem:
                 self.element_objs[(potential_name, etype)] = obj
 
         return
-    
+
     def _create_output_objs(self):
         # Get the domain names from the mesh
         domains = self.mesh.get_domains()
-        
+
         # Create the output objects
         for out_name in self.output_map:
             targets = self.output_map[out_name]["target"]
