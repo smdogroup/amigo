@@ -33,9 +33,9 @@ class RBFKernel(am.Component):
         for input, theta, base in zip(
             self.input_names, self.theta_names, self.base_names
         ):
-            self.add_input(input)  # linked
-            self.add_data(theta)  # linked
-            self.add_data(base)  # linked
+            self.add_input(input)
+            self.add_data(theta)
+            self.add_data(base)
 
         self.add_data(self.weight_name)
         self.add_constraint(self.con_name)
@@ -117,7 +117,7 @@ class RBF:
         self.weight_name = "weight"
 
         # Set the name of the constraint
-        self.con_name = "rbf_constraint"
+        self.con_name = "constraint"
 
         return
 
@@ -168,16 +168,18 @@ class RBF:
             model.link(f"src.{name}", f"kernel.{name}", src_indices=idx)
 
         # Link the base points
-        idx = np.tile(np.arange(self.num_basis), self.num_points)
+        idx = np.tile(np.arange(self.num_basis), self.num_points - 1)
         for name in self.base_names:
             model.link(
-                f"kernel.{name}[:{self.num_basis}]", f"kernel.{name}", src_indices=idx
+                f"kernel.{name}[:{self.num_basis}]",
+                f"kernel.{name}[{self.num_basis}:]",
+                src_indices=idx,
             )
 
         # Link the weights
         model.link(
             f"kernel.{self.weight_name}[:{self.num_basis}]",
-            f"kernel.{self.weight_name}",
+            f"kernel.{self.weight_name}[{self.num_basis}:]",
             src_indices=idx,
         )
 
