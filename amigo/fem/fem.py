@@ -266,56 +266,10 @@ class DegreesOfFreedom:
         return
 
     def get_basis(self, etype):
-        basis_list = []
-
-        for sp in ["H1", "const"]:
-            names = self.space.get_names(sp)
-
-            if len(names) == 0:
-                continue
-
-            basis_list.append(self._get_basis(etype, sp, names, self.kind))
-
-        return basis.BasisCollection(basis_list)
-
-    def _get_basis(self, etype, space, names=[], kind="input"):
-        if etype == "CPS3":
-            if space == "H1":
-                return basis.TriangleLagrangeBasis(1, names, kind=kind)
-            elif space == "const":
-                return basis.ConstantBasis(names=names, kind=kind)
-        elif etype == "CPS4":
-            if space == "H1":
-                return basis.QuadLagrangeBasis(1, names, kind=kind)
-            elif space == "const":
-                return basis.ConstantBasis(names=names, kind=kind)
-        elif etype == "CPS6":
-            if space == "H1":
-                return basis.TriangleLagrangeBasis(2, names, kind=kind)
-        elif etype == "M3D9":
-            if space == "H1":
-                return basis.QuadLagrangeBasis(2, names, kind=kind)
-        elif etype == "T3D2":
-            if space == "H1":
-                return basis.LagrangeBasis1D(1, names, kind=kind)
-
-        raise NotImplementedError(
-            f"Basis for element {etype} with space {space} not implemented"
-        )
+        return self.mesh.get_basis(self.space, etype, kind=self.kind)
 
     def get_quadrature(self, etype):
-        if etype == "CPS3":
-            return basis.TriangleQuadrature(2)
-        elif etype == "CPS4":
-            return basis.QuadQuadrature(2)
-        elif etype == "CPS6":
-            return basis.TriangleQuadrature(4)
-        elif etype == "M3D9":
-            return basis.QuadQuadrature(3)
-        elif etype == "T3D2":
-            return basis.LineQuadrature(2)
-
-        raise NotImplementedError(f"Quadrature for element {etype} not implemented")
+        return self.mesh.get_quadrature(etype)
 
 
 class Mesh:
@@ -357,6 +311,12 @@ class Mesh:
 
     def get_num_nodes_on_bc(self, name, etype):
         return self.parser.get_edge_node(name, etype).shape[0]
+
+    def get_basis(self, space, etype, kind):
+        return self.parser.get_basis(space, etype, kind=kind)
+
+    def get_quadrature(self, etype):
+        return self.parser.get_quadrature(etype)
 
     def plot(
         self,
@@ -548,7 +508,6 @@ class Mesh:
         return np.vstack(cs)
 
 
-# Needs to take in bcs here
 class Problem:
     # soln_space = object
     def __init__(
@@ -560,6 +519,8 @@ class Problem:
         potential_map={},
         output_map={},
         bc_map={},
+        element_objs={},
+        output_objs={},
     ):
         self.mesh = mesh
         self.soln_space = soln_space
@@ -570,8 +531,11 @@ class Problem:
         self.bc_map = bc_map
         self.output_map = output_map
 
+        # Set the element objects and output objects
+        self.element_objs = element_objs
+        self.output_objs = output_objs
+
         # Initialize Dof's
-        # Take in the soln space -> removes "H1" input
         self.soln_dof = DegreesOfFreedom(
             self.mesh,
             self.soln_space,
@@ -606,20 +570,11 @@ class Problem:
                 raise Exception(f"{bc["type"]} not recognized")
 
         return
-
-    def create_model(self, module_name: str):
-        """Create and link the Amigo model"""
-        model = am.Model(module_name)
-
-        self.soln_dof.add_source(model)
-        self.data_dof.add_source(model)
-        self.geo_dof.add_source(model)
-
+    
+    def _create_element_objs(self):
         # Get the domain names from the mesh
         domains = self.mesh.get_domains()
 
-        # Figure out which elements need to be created to go with this weak form
-        element_objs = {}
         for potential_name in self.potential_map:
             targets = self.potential_map[potential_name]["target"]
             potential = self.potential_map[potential_name]["potential"]
@@ -633,6 +588,9 @@ class Problem:
 
             # Loop over the element types for this potential
             for etype in etypes:
+                if (potential_name, etype) in self.element_objs:
+                    continue
+
                 # Set the element name
                 elem_name = f"Element{potential_name}{etype}"
 
@@ -641,12 +599,8 @@ class Problem:
                 data_basis = self.data_dof.get_basis(etype)
                 geo_basis = self.geo_dof.get_basis(etype)
 
-                # quadrature = self.soln_dof.get_quadrature(etype)
-                # # Create the quadrature instance
-                if weakform_name == "shear_potential":
-                    quadrature = basis.ReducedQuadQuadrature()
-                else:
-                    quadrature = self.soln_dof.get_quadrature(etype)
+                # Create the quadrature instance
+                quadrature = self.soln_dof.get_quadrature(etype)
 
                 # Create the element object
                 obj = FiniteElement(
@@ -654,7 +608,71 @@ class Problem:
                 )
 
                 # Set this into the element dictionary
-                element_objs[(potential_name, etype)] = obj
+                self.element_objs[(potential_name, etype)] = obj
+
+        return
+    
+    def _create_output_objs(self):
+        # Get the domain names from the mesh
+        domains = self.mesh.get_domains()
+        
+        # Create the output objects
+        for out_name in self.output_map:
+            targets = self.output_map[out_name]["target"]
+            output_names = self.output_map[out_name]["names"]
+            output_func = self.output_map[out_name]["function"]
+
+            # Figure out the element types we need
+            etypes = []
+            for target in targets:
+                for etype in domains[target]:
+                    if not etype in etypes:
+                        etypes.append(etype)
+
+            # Loop over the element types for generating the output function
+            for etype in etypes:
+                if (out_name, etype) in self.element_objs:
+                    continue
+
+                elem_name = f"ElementOutput{out_name}{etype}"
+
+                # Get the basis objects for the element type
+                soln_basis = self.soln_dof.get_basis(etype)
+                data_basis = self.data_dof.get_basis(etype)
+                geo_basis = self.geo_dof.get_basis(etype)
+
+                # Create the quadrature instance
+                quadrature = self.soln_dof.get_quadrature(etype)
+
+                # Create the output object
+                obj = FiniteElementOutput(
+                    elem_name,
+                    soln_basis,
+                    data_basis,
+                    geo_basis,
+                    quadrature,
+                    output_names,
+                    output_func,
+                )
+
+                # Set this into the output dictionary
+                self.output_objs[(out_name, etype)] = obj
+
+        return
+
+    def create_model(self, module_name: str):
+        """Create and link the Amigo model"""
+        model = am.Model(module_name)
+
+        self.soln_dof.add_source(model)
+        self.data_dof.add_source(model)
+        self.geo_dof.add_source(model)
+
+        # Get the domain names from the mesh
+        domains = self.mesh.get_domains()
+
+        # Figure out which elements need to be created
+        self._create_element_objs()
 
         # Add the element component objects
         for potential_name in self.potential_map:
@@ -662,7 +680,7 @@ class Problem:
 
             for target in targets:
                 for etype in domains[target]:
-                    elem = element_objs[(potential_name, etype)]
+                    elem = self.element_objs[(potential_name, etype)]
                     comp_name = f"Element{potential_name}{etype}{target}"
 
                     # Add the element/component
@@ -691,52 +709,15 @@ class Problem:
         # Add the outputs component
         model.add_component("outputs", 1, DofSource(output_names=all_outputs))
 
-        # Create the output objects
-        output_objs = {}
+        self._create_output_objs()
+
         for out_name in self.output_map:
             targets = self.output_map[out_name]["target"]
             output_names = self.output_map[out_name]["names"]
-            output_func = self.output_map[out_name]["function"]
-
-            # Figure out the element types we need
-            etypes = []
-            for target in targets:
-                for etype in domains[target]:
-                    if not etype in etypes:
-                        etypes.append(etype)
-
-            # Loop over the element types for generating the output function
-            for etype in etypes:
-                elem_name = f"ElementOutput{out_name}{etype}"
-
-                # Get the basis objects for the element type
-                soln_basis = self.soln_dof.get_basis(etype)
-                data_basis = self.data_dof.get_basis(etype)
-                geo_basis = self.geo_dof.get_basis(etype)
-
-                # Create the quadrature instance
-                quadrature = self.soln_dof.get_quadrature(etype)
-
-                # Create the output object
-                obj = FiniteElementOutput(
-                    elem_name,
-                    soln_basis,
-                    data_basis,
-                    geo_basis,
-                    quadrature,
-                    output_names,
-                    output_func,
-                )
-
-                # Set this into the output dictionary
-                output_objs[(out_name, etype)] = obj
-
-        for out_name in self.output_map:
-            targets = self.output_map[out_name]["target"]
 
             for target in targets:
                 for etype in domains[target]:
-                    obj = output_objs[(out_name, etype)]
+                    obj = self.output_objs[(out_name, etype)]
                     comp_name = f"ElementOutput{out_name}{etype}{target}"
 
                     # Add the element/component

@@ -1,4 +1,4 @@
-from amigo.fem import Mesh, Problem, SolutionSpace
+from amigo.fem import Mesh, Problem, SolutionSpace, FiniteElement, QuadQuadrature
 import amigo as am
 from scipy.sparse.linalg import spsolve
 import matplotlib.pyplot as plt
@@ -55,23 +55,27 @@ def potential_shear(soln, data=None, geo=None):
     return U_s
 
 
+parser = argparse.ArgumentParser()
+parser.add_argument(
+    "--build", dest="build", action="store_true", default=False, help="Enable building"
+)
+args = parser.parse_args()
+
 # Two displacement DOFs per node
 soln_space = SolutionSpace({"w": "H1", "tx": "H1", "ty": "H1"})
 geo_space = SolutionSpace({"x": "H1", "y": "H1"})
 data_space = SolutionSpace({})  # empty for now
 
-weakform_map = {
+potential_map = {
     "bending_potential": {
         "target": ["SURFACE1"],
-        "weakform": potential_bending,
+        "potential": potential_bending,
     },
     "shear_potential": {
         "target": ["SURFACE1"],
-        "weakform": potential_shear,
+        "potential": potential_shear,
     },
 }
-
-
 bc_map = {
     "clamp_w": {
         "type": "dirichlet",
@@ -82,25 +86,35 @@ bc_map = {
     },
 }
 
-
+# Load the plate
 mesh = Mesh("plate.inp")
 
-parser = argparse.ArgumentParser()
-parser.add_argument(
-    "--build", dest="build", action="store_true", default=False, help="Enable building"
-)
+element_objs = {}
+for etype in ["CPS4"]:
+    # Get the basis and quadrature objects needed for the element
+    soln_basis = mesh.get_basis(soln_space, etype, kind="input")
+    geo_basis = mesh.get_basis(geo_space, etype, kind="data")
+    data_basis = mesh.get_basis(data_space, etype, kind="data")
+    quadrature = QuadQuadrature(1)
 
-args = parser.parse_args()
+    # Create the shear element
+    elem_name = f"PlateShear{etype}"
+    elem = FiniteElement(
+        elem_name, soln_basis, data_basis, geo_basis, quadrature, potential_shear
+    )
+
+    # Set the element objects
+    element_objs[("plate", etype)] = elem
 
 problem = Problem(
     mesh,
     soln_space,
     data_space,
     geo_space,
-    weakform_map=weakform_map,
+    potential_map=potential_map,
     bc_map=bc_map,
+    element_objs=element_objs,
 )
-
 model = problem.create_model("plate")
 
 if args.build:
@@ -135,8 +149,8 @@ w = xm["src_soln.w"]
 tx = xm["src_soln.tx"]
 ty = xm["src_soln.ty"]
 
-np.save("w_reducedshear.npy", w)
-w_shearlocked = np.load("w_shearlocked.npy")
+# np.save("w_reducedshear.npy", w)
+# w_shearlocked = np.load("w_shearlocked.npy")
 mesh.plot_3d(w)
-print(np.max(np.abs(((w - w_shearlocked)))))
+# print(np.max(np.abs(((w - w_shearlocked)))))
 plt.show()

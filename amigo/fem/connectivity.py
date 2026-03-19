@@ -1,3 +1,5 @@
+from . import basis
+
 import numpy as np
 import re
 import matplotlib.pyplot as plt
@@ -139,6 +141,58 @@ class InpParser:
         node_tags_list = np.array(list(dict.fromkeys(conn.flatten())))
 
         return node_tags_list
+
+    def get_basis(self, space, etype, kind="input"):
+        basis_list = []
+
+        for sp in ["H1", "const"]:
+            names = space.get_names(sp)
+
+            if len(names) == 0:
+                continue
+
+            basis_list.append(self._get_basis(etype, sp, names, kind))
+
+        return basis.BasisCollection(basis_list)
+
+    def _get_basis(self, etype, space, names=[], kind="input"):
+        if etype == "CPS3":
+            if space == "H1":
+                return basis.TriangleLagrangeBasis(1, names, kind=kind)
+            elif space == "const":
+                return basis.ConstantBasis(names=names, kind=kind)
+        elif etype == "CPS4":
+            if space == "H1":
+                return basis.QuadLagrangeBasis(1, names, kind=kind)
+            elif space == "const":
+                return basis.ConstantBasis(names=names, kind=kind)
+        elif etype == "CPS6":
+            if space == "H1":
+                return basis.TriangleLagrangeBasis(2, names, kind=kind)
+        elif etype == "M3D9":
+            if space == "H1":
+                return basis.QuadLagrangeBasis(2, names, kind=kind)
+        elif etype == "T3D2":
+            if space == "H1":
+                return basis.LagrangeBasis1D(1, names, kind=kind)
+
+        raise NotImplementedError(
+            f"Basis for element {etype} with space {space} not implemented"
+        )
+
+    def get_quadrature(self, etype):
+        if etype == "CPS3":
+            return basis.TriangleQuadrature(2)
+        elif etype == "CPS4":
+            return basis.QuadQuadrature(2)
+        elif etype == "CPS6":
+            return basis.TriangleQuadrature(4)
+        elif etype == "M3D9":
+            return basis.QuadQuadrature(3)
+        elif etype == "T3D2":
+            return basis.LineQuadrature(2)
+
+        raise NotImplementedError(f"Quadrature for element {etype} not implemented")
 
     def get_conn_edges(self, elset, elem_type):
         """

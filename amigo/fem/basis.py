@@ -495,19 +495,6 @@ class QuadQuadrature(Quadrature):
         return wt, pt
 
 
-class ReducedQuadQuadrature(Quadrature):
-    def __init__(self):
-        self.args = [{"n": 0, "m": 0}]
-        self.points = np.array([0.0])
-        self.weights = np.array([4.0])  # full area of biunit square
-
-    def get_args(self):
-        return self.args
-
-    def get_point(self, n=0, m=0):
-        return self.weights[0], [0.0, 0.0]
-
-
 class LineQuadrature(Quadrature):
     def __init__(self, npts):
         pts, wts = np.polynomial.legendre.leggauss(npts)

@@ -129,7 +129,7 @@ class MITCTyingStrain(ABC):
         return {}
 
 
-class MITCElement(am.FiniteElement):
+class MITCElement(FiniteElement):
     def __init__(
         self, name, soln_basis, data_basis, geo_basis, quadrature, mitc, potential
     ):
@@ -138,28 +138,12 @@ class MITCElement(am.FiniteElement):
 
         super().__init__(name, soln_basis, data_basis, geo_basis, quadrature, potential)
 
-        self.soln_basis = soln_basis
-        self.data_basis = data_basis
-        self.geo_basis = geo_basis
-        self.quadrature = quadrature
         self.mitc = mitc
-        self.potential = potential
-
-        # From BasisCollection
-        self.soln_basis.add_declarations(self)
-        self.geo_basis.add_declarations(self)
-        self.data_basis.add_declarations(self)
-
-        # Set the arguments to the compute function for each quadrature point
-        self.set_args(self.quadrature.get_args())
-
-        # Add the objective to minimize
-        self.add_objective("obj")
 
     def compute(self, **args):
         # Compute the tensorial strain components at tying points
         tensorial_strains = []
-        for index, pt in range(self.mitc.get_tying_points()):
+        for index, pt in enumerate(self.mitc.get_tying_points()):
             soln_xi = self.soln_basis.eval(self, pt)
             geo = self.geo_basis.eval(self, pt)
 
@@ -179,14 +163,79 @@ class MITCElement(am.FiniteElement):
         soln_phys = self.soln_basis.transform(detJ, Jinv, soln_xi)
         data_phys = self.data_basis.transform(detJ, Jinv, data_xi)
 
-        # AAdd to the physics
+        # Add to the physics
         soln_phys.update(
             self.mitc.interp_and_transform(quad_point, Jinv, tensorial_strains)
         )
-
-        self.objective["obj"] = quad_weight * detJ * self.potential()
 
         # Add the contributions directly to the Lagrangian
         self.objective["obj"] = (
             quad_weight * detJ * self.potential(soln_phys, data=data_phys, geo=geo)
         )
+
+
+class MITCElementOutput(am.Component):
+    def __init__(
+        self,
+        name,
+        soln_basis,
+        data_basis,
+        geo_basis,
+        quadrature,
+        mitc,
+        output_names,
+        output_function,
+    ):
+        if not isinstance(mitc, MITCTyingStrain):
+            raise ValueError("MITCElement requires instance of MITCTyingStrain")
+
+        super().__init__(
+            name,
+            soln_basis,
+            data_basis,
+            geo_basis,
+            quadrature,
+            output_names,
+            output_function,
+        )
+        self.mitc = mitc
+
+        return
+
+    def compute_output(self, **args):
+        # Compute the tensorial strain components at tying points
+        tensorial_strains = []
+        for index, pt in enumerate(self.mitc.get_tying_points()):
+            soln_xi = self.soln_basis.eval(self, pt)
+            geo = self.geo_basis.eval(self, pt)
+
+            # Append the tying strain
+            tensorial_strains.append(self.mitc.eval_tying_strain(index, geo, soln_xi))
+
+        # Now get the quadrature point
+        quad_weight, quad_point = self.quadrature.get_point(**args)
+
+        # Evaluate the solution fields/data fields (u)
+        soln_xi = self.soln_basis.eval(self, quad_point)
+        data_xi = self.data_basis.eval(self, quad_point)
+        geo = self.geo_basis.eval(self, quad_point)
+
+        # Perform the mapping from computational to physical coordinates (u)
+        detJ, Jinv = self.geo_basis.compute_transform(geo)
+        soln_phys = self.soln_basis.transform(detJ, Jinv, soln_xi)
+        data_phys = self.data_basis.transform(detJ, Jinv, data_xi)
+
+        # Add to the physics
+        soln_phys.update(
+            self.mitc.interp_and_transform(quad_point, Jinv, tensorial_strains)
+        )
+
+        # Add the contributions directly to the Lagrangian
+        outputs = self.output_function(soln_phys, data=data_phys, geo=geo)
+
+        for name in self.output_names:
+            if name in outputs:
+                self.outputs[name] = quad_weight * detJ * outputs[name]
+            else:
+                self.outputs[name] = 0.0
+        return
