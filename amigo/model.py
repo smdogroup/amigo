@@ -418,6 +418,7 @@ class Model:
         self.output_index_pool = GlobalIndexPool()
         self.links = []
         self._initialized = False
+        self._staged_data = {}
 
     def _get_group_shapes(self, size: int, var_shapes: dict):
         for var_name in var_shapes:
@@ -536,6 +537,10 @@ class Model:
         ) in model.links:
             self.link(name + "." + src_expr, name + "." + tgt_expr, src_idx, tgt_idx)
 
+        # Add any staged data
+        for data_name in model._staged_data:
+            self._staged_data[name + "." + data_name] = model._staged_data[data_name]
+
         return
 
     def _get_slice_indices(self, all, slice, idx):
@@ -652,6 +657,20 @@ class Model:
 
         return counter
 
+    def set_data(self, name, data):
+        """
+        Set data into the model.
+
+        If this is called prior to initialization, the data is staged and later applied to the model.
+        If this is called after initialization, the data is written directly into the data vector.
+        """
+        if self._initialized:
+            d = self.problem.get_data_vector()
+            d.get_array()[self.get_indices(name)] = data
+        else:
+            self._staged_data[name] = data
+        return
+
     def link_by_name(self, src_comp=None, tgt_comp=None, vtype="input"):
         """
         Link inputs, constraints, outputs or data with the same name between different components.
@@ -754,6 +773,17 @@ class Model:
 
         self._initialized = True
         self.problem = self._create_opt_problem(comm=comm)
+
+        # Now apply any staged data
+        self._apply_staged_data()
+
+        return
+
+    def _apply_staged_data(self):
+        d_array = self.problem.get_data_vector().get_array()
+
+        for name in self._staged_data:
+            d_array[self.get_indices(name)] = self._staged_data[name]
 
         return
 

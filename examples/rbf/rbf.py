@@ -1,6 +1,6 @@
 import numpy as np
 import amigo as am
-from amigo.rbf import RBF
+from amigo.interp import RBF
 from scipy.sparse.linalg import spsolve
 import matplotlib.pylab as plt
 
@@ -22,9 +22,6 @@ model = rbf.create_model("rbf")
 
 model.build_module()
 model.initialize()
-
-# Set the RBF data in the model
-rbf.set_data(model)
 
 # Create the problem
 p = model.get_problem()
