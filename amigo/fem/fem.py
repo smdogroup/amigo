@@ -499,6 +499,47 @@ class Mesh:
 
         return np.vstack(cs)
 
+    def plot_tri_mesh_region(self, name, etype, ax, color, label):
+        X2d = self.X[:, 0:2]  # Reduce to 2d (x,y coords only)
+        gmsh_conn = self.get_conn(name, etype)
+        polygons = [X2d[row] for row in gmsh_conn]
+
+        coll = PolyCollection(
+            polygons,
+            facecolors=color,
+            edgecolors="k",
+            linewidths=0.01,
+            label=label,
+            antialiaseds=False,
+        )
+        ax.add_collection(coll)
+        return
+
+    def plot_edge(
+        self,
+        name,
+        etype,
+        ax,
+        color,
+        label,
+        flip=False,
+        start=True,
+        end=True,
+    ):
+        X2d = self.X[:, 0:2]  # Reduce to 2d (x,y coords only)
+
+        nodes = self.get_bc_nodes(name, etype, flip)
+        # if start == False and end == False:
+        #     nodes = nodes[1:-1]
+        # elif start == True and end == False:
+        #     nodes = nodes[:-1]
+        # elif start == False and end == True:
+        #     nodes = nodes[1:]
+
+        ax.plot(X2d[nodes, 0], X2d[nodes, 1], color=color, label=label, linewidth=2.0)
+
+        return
+
 
 class Problem:
     # soln_space = object

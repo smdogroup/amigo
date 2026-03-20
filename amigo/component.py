@@ -372,7 +372,9 @@ class ConstraintSet:
 
         # Check the shape of the item
         shape = self.cons[name].shape
-        if shape == None and not isinstance(expr, Expr):
+        if shape == None and isinstance(expr, float):
+            expr = Expr(ConstNode(value=expr))
+        elif shape == None and not isinstance(expr, Expr):
             raise ValueError(f"Expected expression object")
         if shape != None and shape != _get_shape_from_obj(expr):
             raise ValueError(f"Shapes do not match for {name}")
