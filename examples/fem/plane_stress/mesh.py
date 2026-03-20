@@ -10,16 +10,17 @@ gmsh.initialize()
 gmsh.model.add("plate")
 
 # Mesh refinement
-lc = 0.1
+lc = 0.025
 
 # Geometry definition
-L = 1.0  # plate size
+Lx = 5.0  # plate size
+Ly = 1.0
 
 # Geometry points rectangle
-gmsh.model.geo.addPoint(-0.5 * L, -0.5 * L, 0, lc, 1)
-gmsh.model.geo.addPoint(0.5 * L, -0.5 * L, 0, lc, 2)
-gmsh.model.geo.addPoint(0.5 * L, 0.5 * L, 0, lc, 3)
-gmsh.model.geo.addPoint(-0.5 * L, 0.5 * L, 0, lc, 4)
+gmsh.model.geo.addPoint(-0.5 * Lx, -0.5 * Ly, 0, lc, 1)
+gmsh.model.geo.addPoint(0.5 * Lx, -0.5 * Ly, 0, lc, 2)
+gmsh.model.geo.addPoint(0.5 * Lx, 0.5 * Ly, 0, lc, 3)
+gmsh.model.geo.addPoint(-0.5 * Lx, 0.5 * Ly, 0, lc, 4)
 
 # Define lines for the rectangle
 gmsh.model.geo.addLine(1, 2, 1)

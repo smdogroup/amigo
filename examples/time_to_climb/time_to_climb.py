@@ -136,11 +136,10 @@ class AircraftDynamics(am.Component):
         gamma_rad = conv * gamma
 
         # Set intermediate varaibles
-        sin_alpha = self.vars["sin_alpha"] = am.sin(alpha_rad)
-        cos_alpha = self.vars["cos_alpha"] = am.cos(alpha_rad)
-
-        sin_gamma = self.vars["sin_gamma"] = am.sin(gamma_rad)
-        cos_gamma = self.vars["cos_gamma"] = am.cos(gamma_rad)
+        sin_alpha = am.sin(alpha_rad)
+        cos_alpha = am.cos(alpha_rad)
+        sin_gamma = am.sin(gamma_rad)
+        cos_gamma = am.cos(gamma_rad)
 
         # Aircraft dynamics equations (matching original computeSystemResidual)
         res = [
