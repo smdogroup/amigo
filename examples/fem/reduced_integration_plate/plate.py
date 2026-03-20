@@ -18,13 +18,10 @@ q0 = 1  # N/m^2, load intensity
 
 def potential_bending(soln, data=None, geo=None):
     """Strain energy density (integrand of TPE equation)"""
-    w_grad = soln["w"]["grad"]
     tx_grad = soln["tx"]["grad"]
     ty_grad = soln["ty"]["grad"]
 
     w_val = soln["w"]["value"]
-    tx_val = soln["tx"]["value"]
-    ty_val = soln["ty"]["value"]
 
     # components of kappa vector
     k1 = tx_grad[0]
@@ -42,10 +39,6 @@ def potential_bending(soln, data=None, geo=None):
 
 def potential_shear(soln, data=None, geo=None):
     w_grad = soln["w"]["grad"]
-    tx_grad = soln["tx"]["grad"]
-    ty_grad = soln["ty"]["grad"]
-
-    w_val = soln["w"]["value"]
     tx_val = soln["tx"]["value"]
     ty_val = soln["ty"]["value"]
 
@@ -80,9 +73,7 @@ bc_map = {
     "clamp_w": {
         "type": "dirichlet",
         "input": ["w", "tx", "ty"],
-        "target": ["LINE1", "LINE2", "LINE3", "LINE4"],  # left edge — fix ux
-        "start": True,
-        "end": True,
+        "target": ["LINE1", "LINE2", "LINE3", "LINE4"],
     },
 }
 
@@ -149,8 +140,7 @@ w = xm["src_soln.w"]
 tx = xm["src_soln.tx"]
 ty = xm["src_soln.ty"]
 
-# np.save("w_reducedshear.npy", w)
-# w_shearlocked = np.load("w_shearlocked.npy")
-mesh.plot_3d(w)
-# print(np.max(np.abs(((w - w_shearlocked)))))
+fig, ax = plt.subplots(1, 3, figsize=(8, 3))
+for index, soln in enumerate([w, tx, ty]):
+    mesh.plot(soln, ax=ax[index])
 plt.show()

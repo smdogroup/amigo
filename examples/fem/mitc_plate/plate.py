@@ -106,8 +106,6 @@ bc_map = {
         "type": "dirichlet",
         "input": ["w", "tx", "ty"],
         "target": ["LINE1", "LINE2", "LINE3", "LINE4"],
-        "start": True,
-        "end": True,
     },
 }
 
