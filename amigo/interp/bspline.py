@@ -153,7 +153,7 @@ class BSpline:
         return N
 
     def _compute_basis_derivative(self, deriv=1):
-        t = self.compute_knots()
+        t = self._compute_knots()
 
         # Special case for right endpoint
         interp_points_clamped = np.clip(self.interp_points, t[0], t[-1])

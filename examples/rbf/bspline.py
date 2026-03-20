@@ -15,7 +15,7 @@ xi = np.linspace(0, 1, num_interp_points)
 input_name = "Mach"
 output_name = "CD"
 bspline = BSpline(
-    input_name, output_name, interp_points=xi, num_ctrl_points=num_ctrl_points
+    input_name, output_name, interp_points=xi, num_ctrl_points=num_ctrl_points, deriv=1
 )
 
 model = bspline.create_model("bspline")
@@ -62,7 +62,7 @@ spline = scipyBSpline(t, c, k)
 
 # Evaluation points
 x = np.linspace(t[0], t[-1], 200)
-y = spline(x)
+y = spline(x, nu=1)
 
-plt.plot(x, y)
+plt.plot(x, y, "-.")
 plt.show()
