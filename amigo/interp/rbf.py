@@ -5,7 +5,6 @@ from typing import List
 
 class RBFSource(am.Component):
     def __init__(self, input_names, output_name):
-        """Create a source model"""
         super().__init__()
 
         for name in input_names:
@@ -77,12 +76,17 @@ class RBF:
     """
     Perform RBF interpolation.
 
+    The RBF class computes constraints to enforce the following:
+
     for i in range(num_points):
-        output_name[i] = weights[j] * exp(- theta[k] * (input[i, k] - base[j, k])**2)
+        output_name[i] = weights[j] * exp(- theta[k]**2 * (input[i, k] - base[j, k])**2)
+
+    where weights are computed by interpolating the training data pair (xt, yt) with the
+    given values of theta.
     """
 
     def __init__(
-        self, num_points, output_name: str, input_names: List[str], xt, yt, theta
+        self, num_points, input_names: List[str], output_name: str, xt, yt, theta
     ):
         num_basis = len(yt)
         if xt.shape[0] != num_basis:

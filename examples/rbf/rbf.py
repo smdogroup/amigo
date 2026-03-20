@@ -17,7 +17,7 @@ theta = np.array([2.0, 2.0])
 xt = np.random.uniform(size=(50, 2))
 yt = func(xt[:, 0], xt[:, 1])
 
-rbf = RBF(num_points, output_name, input_names, xt, yt, theta)
+rbf = RBF(num_points, input_names, output_name, xt, yt, theta)
 model = rbf.create_model("rbf")
 
 model.build_module()

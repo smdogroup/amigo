@@ -403,7 +403,7 @@ class ModelVector:
 
 
 class Model:
-    def __init__(self, module_name: str):
+    def __init__(self, module_name: str | None = None):
         """
         Initialize the model class.
 
@@ -657,7 +657,7 @@ class Model:
 
         return counter
 
-    def set_data(self, name, data):
+    def set_data(self, name: str, data):
         """
         Set data into the model.
 
@@ -1095,6 +1095,9 @@ class Model:
 
         The wrapper must be compiled before the optimization will run.
         """
+
+        if self.module_name is None:
+            raise ValueError("module_name cannot be None when compiling a model")
 
         # C++ file contents
         cpp = '#include "amigo.h"\n'
