@@ -305,7 +305,7 @@ class MumpsSolver(_HessianDiagMixin):
         self._mumps.icntl[2] = -1  # suppress global info output
         self._mumps.icntl[3] = 0  # no output
         self._mumps.icntl[6] = 5  # ordering: METIS if available
-        self._mumps.icntl[7] = 77  # automatic scaling (IPOPT default)
+        self._mumps.icntl[7] = 0  # no scaling (77 causes OOM on some builds)
         self._mumps.icntl[12] = 1  # ScaLAPACK (no effect in sequential)
         self._mumps.icntl[13] = 1000  # percent increase in workspace (IPOPT default)
         self._mumps.icntl[23] = 0  # no null pivot detection
@@ -1566,10 +1566,9 @@ class Optimizer:
         mu_nat = avg_comp  # x^T z / n
 
         # Affine-scaling RHS (mu=0) and dual/primal infeasibility norms
-        dual_infeas_sq, primal_infeas_sq = (
-            self.optimizer.compute_residual_and_infeasibility(
-                0.0, self.vars, self.grad, self.res
-            )
+        self.optimizer.compute_residual(0.0, self.vars, self.grad, self.res)
+        dual_infeas_sq, primal_infeas_sq, _ = self.optimizer.compute_kkt_error(
+            self.vars, self.grad
         )
 
         # Delta(0): affine scaling direction (mu=0)
