@@ -377,15 +377,6 @@ for opt_iter in range(4):
         upper["cart.qdot"] = float("inf")
         upper["cart.x"] = 50
 
-        # Serialize the model
-        with open("cart_pole_model.json", "w") as fp:
-            json.dump(model.serialize(), fp, indent=2)
-
-        # Serialize the vectors
-        vecs = {"data": data, "x": x, "lower": lower, "upper": upper}
-        with open("cart_pole_vectors.json", "w") as fp:
-            json.dump(model.serialize_vectors(vecs), fp, indent=2)
-
     # Set up the optimizer
     opt = am.Optimizer(
         model,
