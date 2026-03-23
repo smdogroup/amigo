@@ -159,9 +159,9 @@ K = am.tocsr(mat)
 x[:] = spsolve(K, g[:])
 
 print("Plotting...")
-w = x["src_soln.w"]
-tx = x["src_soln.tx"]
-ty = x["src_soln.ty"]
+w = x["soln.w"]
+tx = x["soln.tx"]
+ty = x["soln.ty"]
 
 fig, ax = plt.subplots(1, 3, figsize=(8, 3))
 for index, soln in enumerate([w, tx, ty]):

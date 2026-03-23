@@ -93,22 +93,22 @@ class DirichletDegreesOfFreedom:
 
         if len(nodes) > 0:
             model.add_component(
-                f"src_{self.bc_name}",
+                f"{self.bc_name}",
                 len(nodes),
                 bc_src,
             )
 
             for name in input_names:
                 model.link(
-                    f"src_soln.{name}",
-                    f"src_{self.bc_name}.{name}",
+                    f"soln.{name}",
+                    f"{self.bc_name}.{name}",
                     src_indices=nodes,
                 )
 
                 if self.integrand_formulation == "weak":
                     model.link(
-                        f"src_multiplier.res_{name}",
-                        f"src_{self.bc_name}.res_disp_{name}",
+                        f"multiplier.res_{name}",
+                        f"{self.bc_name}.res_disp_{name}",
                         src_indices=nodes,
                 )
 
@@ -197,19 +197,19 @@ class SymmetryDegreesOfFreedom:
         if len(nodes_left) > 0:
             for name in input_names:
                 model.add_component(
-                    f"src_{self.bc_name}",
+                    f"{self.bc_name}",
                     len(nodes_left),
                     bc_src,
                 )
 
                 model.link(
-                    f"src_soln.{name}",
-                    f"src_{self.bc_name}.{name}0",
+                    f"soln.{name}",
+                    f"{self.bc_name}.{name}0",
                     src_indices=nodes_a,
                 )
                 model.link(
-                    f"src_soln.{name}",
-                    f"src_{self.bc_name}.{name}1",
+                    f"soln.{name}",
+                    f"{self.bc_name}.{name}1",
                     src_indices=nodes_b,
                 )
         return
@@ -255,11 +255,11 @@ class DegreesOfFreedom:
             # Add global mesh source component
             if sp == "H1":
                 nnodes = self.mesh.get_num_nodes()
-                model.add_component(f"src_{self.name}", nnodes, dof_src)
+                model.add_component(f"{self.name}", nnodes, dof_src)
 
             elif sp == "const":
                 nsurfaces = self.mesh.get_num_surfaces()
-                model.add_component(f"src_{self.name}", nsurfaces, dof_src)
+                model.add_component(f"{self.name}", nsurfaces, dof_src)
 
     def link_dof(self, model, domain, etype, elem_name):
         for sp in ["H1", "const"]:
@@ -276,7 +276,7 @@ class DegreesOfFreedom:
                 conn = self.mesh.get_conn(domain, etype)
                 for name in names:
                     model.link(
-                        f"src_{self.name}.{name}",
+                        f"{self.name}.{name}",
                         f"{elem_name}.{name}",
                         src_indices=conn,
                     )
@@ -287,7 +287,7 @@ class DegreesOfFreedom:
 
                 for name in names:
                     model.link(
-                        f"src_{self.name}.{name}[{surf_index}]",
+                        f"{self.name}.{name}[{surf_index}]",
                         f"{elem_name}.{name}[:]",
                     )
 
@@ -830,7 +830,7 @@ class Problem:
 
         # Set the node locations directly
         for k, name in enumerate(self.geo_space.get_names("H1")):
-            model.set_data(f"src_geo.{name}", self.mesh.X[:, k])
+            model.set_data(f"geo.{name}", self.mesh.X[:, k])
 
         # Link the output to the finite element class
         return model
