@@ -146,11 +146,7 @@ if args.build:
 model.initialize(order_type=am.OrderingType.NESTED_DISSECTION)
 p = model.get_problem()
 
-# Set geometry data
-data = model.get_data_vector()
-data["src_geo.x"] = mesh.X[:, 0]
-data["src_geo.y"] = mesh.X[:, 1]
-
+# Create the model vector
 xm = model.create_vector()
 
 # Solve

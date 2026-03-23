@@ -542,7 +542,6 @@ class Mesh:
 
 
 class Problem:
-    # soln_space = object
     def __init__(
         self,
         mesh,
@@ -568,7 +567,16 @@ class Problem:
         self.element_objs = element_objs
         self.output_objs = output_objs
 
-        # Initialize Dof's
+        # Create the degrees of freedom
+        # if self.use_weakform:
+        #     self.test_dof = DegreesOfFreedom(
+        #         self.mesh,
+        #         self.soln_space,
+        #         kind="multipliers",
+        #         name=None,
+        #     )
+
+        # Initialize Dofs
         self.soln_dof = DegreesOfFreedom(
             self.mesh,
             self.soln_space,
@@ -765,6 +773,10 @@ class Problem:
                     # Link the outputs
                     for name in output_names:
                         model.link(f"{comp_name}.{name}", f"outputs.{name}[0]")
+
+        # Set the node locations directly
+        for k, name in enumerate(self.geo_space.get_names("H1")):
+            model.set_data(f"src_geo.{name}", self.mesh.X[:, k])
 
         # Link the output to the finite element class
         return model
