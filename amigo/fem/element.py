@@ -10,7 +10,8 @@ class FiniteElement(am.Component):
         data_basis,
         geo_basis,
         quadrature,
-        potential,
+        integrand,
+        test_basis=None,
     ):
         super().__init__(name=name)
 
@@ -18,18 +19,20 @@ class FiniteElement(am.Component):
         self.data_basis = data_basis
         self.geo_basis = geo_basis
         self.quadrature = quadrature
-        self.potential = potential
+        self.integrand = integrand
+        self.test_basis = test_basis
 
         # From BasisCollection
         self.soln_basis.add_declarations(self)
         self.geo_basis.add_declarations(self)
         self.data_basis.add_declarations(self)
 
+        # Add constraint declarations
+        if self.test_basis is not None:
+            self.test_basis.add_declarations(self)
+
         # Set the arguments to the compute function for each quadrature point
         self.set_args(self.quadrature.get_args())
-
-        # Add the objective to minimize
-        self.add_objective("obj")
 
         return
 
@@ -38,6 +41,8 @@ class FiniteElement(am.Component):
         quad_weight, quad_point = self.quadrature.get_point(**args)
 
         # Evaluate the solution fields/data fields (u)
+        if self.test_basis is not None:
+            test_xi = self.test_basis.eval(self, quad_point)
         soln_xi = self.soln_basis.eval(self, quad_point)
         data_xi = self.data_basis.eval(self, quad_point)
         geo = self.geo_basis.eval(self, quad_point)
@@ -47,11 +52,20 @@ class FiniteElement(am.Component):
         soln_phys = self.soln_basis.transform(detJ, Jinv, soln_xi)
         data_phys = self.data_basis.transform(detJ, Jinv, data_xi)
 
-        # Add the contributions directly to the Lagrangian
-        self.objective["obj"] = (
-            quad_weight * detJ * self.potential(soln_phys, data=data_phys, geo=geo)
-        )
-        return
+        if self.test_basis is not None:
+            # Transform the test space derivatives into the physical space
+            test_phys = self.test_basis.transform(detJ, Jinv, test_xi)
+
+            # Don't add the alpha coefficient - this will all be proportaional to the
+            # multipliers through the test function
+            weight = quad_weight * detJ
+            return weight * self.integrand(
+                test_phys, soln_phys, data=data_phys, geo=geo
+            )
+        else:
+            # Include the alpha coefficient since we're adding terms to the objective
+            weight = self.alpha * quad_weight * detJ
+            return weight * self.integrand(soln_phys, data=data_phys, geo=geo)
 
 
 class FiniteElementOutput(am.Component):
@@ -131,12 +145,20 @@ class MITCTyingStrain(ABC):
 
 class MITCElement(FiniteElement):
     def __init__(
-        self, name, soln_basis, data_basis, geo_basis, quadrature, mitc, potential
+        self, name, soln_basis, data_basis, geo_basis, quadrature, mitc, integrand
     ):
         if not isinstance(mitc, MITCTyingStrain):
             raise ValueError("MITCElement requires instance of MITCTyingStrain")
 
-        super().__init__(name, soln_basis, data_basis, geo_basis, quadrature, potential)
+        super().__init__(
+            name,
+            soln_basis,
+            data_basis,
+            geo_basis,
+            quadrature,
+            integrand,
+            test_basis=None,
+        )
 
         self.mitc = mitc
 
@@ -169,9 +191,8 @@ class MITCElement(FiniteElement):
         )
 
         # Add the contributions directly to the Lagrangian
-        self.objective["obj"] = (
-            quad_weight * detJ * self.potential(soln_phys, data=data_phys, geo=geo)
-        )
+        weight = self.alpha * quad_weight * detJ
+        return weight * self.integrand(soln_phys, data=data_phys, geo=geo)
 
 
 class MITCElementOutput(am.Component):

@@ -131,7 +131,9 @@ class Basis:
         self.nnodes = nnodes
         self.kind = kind
 
-        if not (self.kind == "input" or self.kind == "data"):
+        if not (
+            self.kind == "input" or self.kind == "data" or self.kind == "multiplier"
+        ):
             raise ValueError(f"{self.kind} not recognized")
 
     def add_declarations(self, comp):
@@ -143,6 +145,9 @@ class Basis:
         elif self.kind == "data":
             for name in self.names:
                 comp.add_data(name, shape=(self.nnodes,))
+        elif self.kind == "multiplier":
+            for name in self.names:
+                comp.add_constraint(f"res_{name}", shape=(self.nnodes,))
 
 
 class ConstantBasis(Basis):
@@ -165,6 +170,8 @@ class ConstantBasis(Basis):
                 u = comp.inputs[name]
             elif self.kind == "data":
                 u = comp.data[name]
+            elif self.kind == "multiplier":
+                u = comp.constraints.get_multipliers()[f"res_{name}"]
 
             soln[name] = {
                 "value": u[0],
@@ -218,6 +225,8 @@ class LagrangeBasis1D(Basis):
                 u = comp.inputs[name]
             elif self.kind == "data":
                 u = comp.data[name]
+            elif self.kind == "multiplier":
+                u = comp.constraints.get_multipliers()[f"res_{name}"]
 
             soln[name] = {
                 "value": dot_product(u, N, n=self.nnodes),
@@ -327,6 +336,8 @@ class TriangleLagrangeBasis(LagrangeBasis2D):
                 u = comp.inputs[name]
             elif self.kind == "data":
                 u = comp.data[name]
+            elif self.kind == "multiplier":
+                u = comp.constraints.get_multipliers()[f"res_{name}"]
 
             soln[name] = {
                 "value": dot_product(u, N, n=self.nnodes),
@@ -408,6 +419,8 @@ class QuadLagrangeBasis(LagrangeBasis2D):
                 u = comp.inputs[name]
             elif self.kind == "data":
                 u = comp.data[name]
+            elif self.kind == "multiplier":
+                u = comp.constraints.get_multipliers()[f"res_{name}"]
 
             soln[name] = {
                 "value": dot_product(u, N, n=self.nnodes),

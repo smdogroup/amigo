@@ -969,6 +969,15 @@ class Model:
     def create_data_vector(self):
         return ModelVector(self, self.problem.create_data_vector(), kind="data")
 
+    def create_matrix(self):
+        return self.problem.create_matrix()
+
+    def eval_gradient(self, x: ModelVector, g: ModelVector, alpha: float = 1.0):
+        self.problem.gradient(alpha, x.get_vector(), g.get_vector())
+
+    def eval_hessian(self, x: ModelVector, mat: CSRMat, alpha: float = 1.0):
+        self.problem.hessian(alpha, x.get_vector(), mat)
+
     def get_problem(self):
         """Retrieve the optimization problem"""
         return self.problem

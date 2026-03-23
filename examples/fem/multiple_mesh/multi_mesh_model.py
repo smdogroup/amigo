@@ -156,12 +156,6 @@ p = main.get_problem()
 
 # Set the problem data
 data = main.get_data_vector()
-data["Mesh0.src_geo.x"] = mesh0.X[:, 0]
-data["Mesh0.src_geo.y"] = mesh0.X[:, 1]
-
-data["Mesh1.src_geo.x"] = mesh1.X[:, 0]
-data["Mesh1.src_geo.y"] = mesh1.X[:, 1]
-
 data["Mesh0.src_data.Jz[0]"] = 0.0  # SURFACE1
 data["Mesh0.src_data.Jz[1]"] = 10.0  # SURFACE2
 data["Mesh0.src_data.Jz[2]"] = 10.0  # SURFACE3

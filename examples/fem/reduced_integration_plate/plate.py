@@ -59,14 +59,14 @@ soln_space = SolutionSpace({"w": "H1", "tx": "H1", "ty": "H1"})
 geo_space = SolutionSpace({"x": "H1", "y": "H1"})
 data_space = SolutionSpace({})
 
-potential_map = {
+integrand_map = {
     "bending_potential": {
         "target": ["SURFACE1"],
-        "potential": potential_bending,
+        "integrand": potential_bending,
     },
     "shear_potential": {
         "target": ["SURFACE1"],
-        "potential": potential_shear,
+        "integrand": potential_shear,
     },
 }
 bc_map = {
@@ -102,7 +102,7 @@ problem = Problem(
     soln_space,
     data_space,
     geo_space,
-    potential_map=potential_map,
+    integrand_map=integrand_map,
     bc_map=bc_map,
     element_objs=element_objs,
 )
@@ -113,11 +113,6 @@ if args.build:
 
 model.initialize(order_type=am.OrderingType.NESTED_DISSECTION)
 p = model.get_problem()
-
-# Set geometry data
-data = model.get_data_vector()
-data["src_geo.x"] = mesh.X[:, 0]
-data["src_geo.y"] = mesh.X[:, 1]
 
 xm = model.create_vector()
 

@@ -28,7 +28,95 @@ class DofSource(am.Component):
         return
 
 
-class SymmBCSource(am.Component):
+class DirichletBC_potential(am.Component):
+    def __init__(self, name, input_names=[]):
+        super().__init__(name=name)
+
+        self.input_names = input_names
+        for name in self.input_names:
+            self.add_input(f"{name}")
+            self.add_constraint(f"res_{name}")
+
+        return
+
+    def compute(self):
+        for name in self.input_names:
+            self.constraints[f"res_{name}"] = self.inputs[f"{name}"]
+        return
+
+
+class DirichletBC_weakform(am.Component):
+    def __init__(self, name, input_names=[]):
+        super().__init__(name=name)
+
+        self.input_names = input_names
+        for name in self.input_names:
+            self.add_input(name)
+            self.add_input(f"lam_{name}")
+
+            self.add_constraint(f"res_bc_{name}")
+            self.add_constraint(f"res_disp_{name}")
+
+        return
+
+    def compute(self):
+        for name in self.input_names:
+            self.constraints[f"res_bc_{name}"] = self.inputs[f"{name}"]
+            self.constraints[f"res_disp_{name}"] = self.inputs[f"lam_{name}"]
+        return
+
+
+class DirichletDegreesOfFreedom:
+    def __init__(self, bc_name, mesh, bc={}, integrand_formulation="potential"):
+        self.bc_name = bc_name
+        self.mesh = mesh
+        self.bc = bc
+        self.integrand_formulation = integrand_formulation
+        return
+
+    def _get_bc_nodes(self, targets):
+        all_nodes = []
+        for target in targets:
+            nodes = self.mesh.get_bc_nodes(target, "T3D2")
+            all_nodes.append(nodes)
+
+        return np.unique(all_nodes)
+
+    def add_and_link_source(self, model):
+        targets = self.bc["target"]
+        nodes = self._get_bc_nodes(targets)
+
+        input_names = self.bc["input"]
+        if self.integrand_formulation == "weak":
+            bc_src = DirichletBC_weakform(self.bc_name, input_names=input_names)
+        else:
+            bc_src = DirichletBC_potential(self.bc_name, input_names=input_names)
+
+        if len(nodes) > 0:
+            model.add_component(
+                f"{self.bc_name}",
+                len(nodes),
+                bc_src,
+            )
+
+            for name in input_names:
+                model.link(
+                    f"soln.{name}",
+                    f"{self.bc_name}.{name}",
+                    src_indices=nodes,
+                )
+
+                if self.integrand_formulation == "weak":
+                    model.link(
+                        f"multiplier.res_{name}",
+                        f"{self.bc_name}.res_disp_{name}",
+                        src_indices=nodes,
+                    )
+
+        return
+
+
+class SymmBC(am.Component):
     def __init__(self, input_name=[], scale=[]):
         super().__init__()
 
@@ -38,18 +126,18 @@ class SymmBCSource(am.Component):
         for name in self.input_name:
             self.add_input(f"{name}0", value=1.0)
             self.add_input(f"{name}1", value=1.0)
-        self.add_input("lam", value=1.0)
-        self.add_objective("obj")
+            self.add_constraint(f"res_{name}")
+
         return
 
     def compute(self):
         scale_node_0 = self.scale[0]
         scale_node_1 = self.scale[1]
         for name in self.input_name:
-            self.objective["obj"] = (
+            self.constraints[f"res_{name}"] = (
                 scale_node_0 * self.inputs[f"{name}0"]
                 + scale_node_1 * self.inputs[f"{name}1"]
-            ) * self.inputs["lam"]
+            )
         return
 
 
@@ -105,86 +193,26 @@ class SymmetryDegreesOfFreedom:
         # Reorder the nodes to match
         nodes_a, nodes_b = self._reorder_nodes(nodes_left, nodes_right)
 
-        bc_src = SymmBCSource(input_names, scale=scale)
+        bc_src = SymmBC(input_names, scale=scale)
 
         if len(nodes_left) > 0:
             for name in input_names:
                 model.add_component(
-                    f"src_{self.bc_name}",
+                    f"{self.bc_name}",
                     len(nodes_left),
                     bc_src,
                 )
 
                 model.link(
-                    f"src_soln.{name}",
-                    f"src_{self.bc_name}.{name}0",
+                    f"soln.{name}",
+                    f"{self.bc_name}.{name}0",
                     src_indices=nodes_a,
                 )
                 model.link(
-                    f"src_soln.{name}",
-                    f"src_{self.bc_name}.{name}1",
+                    f"soln.{name}",
+                    f"{self.bc_name}.{name}1",
                     src_indices=nodes_b,
                 )
-        return
-
-
-class DirichletBCSource(am.Component):
-    def __init__(self, name, input_names=[]):
-        super().__init__(name=name)
-
-        self.input_names = input_names
-
-        for name in self.input_names:
-            self.add_input(f"{name}")
-            self.add_input(f"lam_{name}")
-
-        self.add_objective("obj")
-        return
-
-    def compute(self):
-        obj = 0.0
-        for name in self.input_names:
-            obj += self.inputs[f"{name}"] * self.inputs[f"lam_{name}"]
-        self.objective["obj"] = obj
-        return
-
-
-class DirichletDegreesOfFreedom:
-    def __init__(self, bc_name, mesh, bc={}):
-        self.bc_name = bc_name
-        self.mesh = mesh
-        self.bc = bc
-        return
-
-    def _get_bc_nodes(self, targets):
-        all_nodes = []
-        for target in targets:
-            nodes = self.mesh.get_bc_nodes(target, "T3D2")
-            all_nodes.append(nodes)
-
-        return np.unique(all_nodes)
-
-    def add_and_link_source(self, model):
-        targets = self.bc["target"]
-        nodes = self._get_bc_nodes(targets)
-
-        input_names = self.bc["input"]
-        bc_src = DirichletBCSource(self.bc_name, input_names=input_names)
-
-        if len(nodes) > 0:
-            model.add_component(
-                f"src_{self.bc_name}",
-                len(nodes),
-                bc_src,
-            )
-
-            for name in input_names:
-                model.link(
-                    f"src_soln.{name}",
-                    f"src_{self.bc_name}.{name}",
-                    src_indices=nodes,
-                )
-
         return
 
 
@@ -213,25 +241,34 @@ class DegreesOfFreedom:
             # Create amigo source component with input names and geo names
             input_names = []
             data_names = []
+            con_names = []
             if self.kind == "input":
                 input_names = names
             elif self.kind == "data":
                 data_names = names
+            elif self.kind == "multiplier":
+                con_names = [f"res_{name}" for name in names]
 
-            dof_src = DofSource(input_names=input_names, data_names=data_names)
+            dof_src = DofSource(
+                input_names=input_names, con_names=con_names, data_names=data_names
+            )
 
             # Add global mesh source component
             if sp == "H1":
                 nnodes = self.mesh.get_num_nodes()
-                model.add_component(f"src_{self.name}", nnodes, dof_src)
+                model.add_component(f"{self.name}", nnodes, dof_src)
 
             elif sp == "const":
                 nsurfaces = self.mesh.get_num_surfaces()
-                model.add_component(f"src_{self.name}", nsurfaces, dof_src)
+                model.add_component(f"{self.name}", nsurfaces, dof_src)
 
     def link_dof(self, model, domain, etype, elem_name):
         for sp in ["H1", "const"]:
             names = self.space.get_names(sp)
+
+            if self.kind == "multiplier":
+                con_names = [f"res_{name}" for name in names]
+                names = con_names
 
             if len(names) == 0:
                 continue
@@ -240,7 +277,7 @@ class DegreesOfFreedom:
                 conn = self.mesh.get_conn(domain, etype)
                 for name in names:
                     model.link(
-                        f"src_{self.name}.{name}",
+                        f"{self.name}.{name}",
                         f"{elem_name}.{name}",
                         src_indices=conn,
                     )
@@ -251,7 +288,7 @@ class DegreesOfFreedom:
 
                 for name in names:
                     model.link(
-                        f"src_{self.name}.{name}[{surf_index}]",
+                        f"{self.name}.{name}[{surf_index}]",
                         f"{elem_name}.{name}[:]",
                     )
 
@@ -542,14 +579,14 @@ class Mesh:
 
 
 class Problem:
-    # soln_space = object
     def __init__(
         self,
         mesh,
         soln_space: basis.SolutionSpace,
         data_space: basis.SolutionSpace,
         geo_space: basis.SolutionSpace,
-        potential_map={},
+        integrand_map={},
+        integrand_formulation="potential",
         output_map={},
         bc_map={},
         element_objs={},
@@ -560,7 +597,8 @@ class Problem:
         self.data_space = data_space
         self.geo_space = geo_space
 
-        self.potential_map = potential_map
+        self.integrand_map = integrand_map
+        self.integrand_formulation = integrand_formulation
         self.bc_map = bc_map
         self.output_map = output_map
 
@@ -568,7 +606,17 @@ class Problem:
         self.element_objs = element_objs
         self.output_objs = output_objs
 
-        # Initialize Dof's
+        # Allocate constraints for the weak formulation
+        self.test_dof = None
+        if self.integrand_formulation == "weak":
+            self.test_dof = DegreesOfFreedom(
+                self.mesh,
+                self.soln_space,
+                kind="multiplier",
+                name="multiplier",
+            )
+
+        # Initialize Dofs
         self.soln_dof = DegreesOfFreedom(
             self.mesh,
             self.soln_space,
@@ -595,7 +643,9 @@ class Problem:
             bc = bc_map[name]
             if bc["type"] == "dirichlet":
                 self.dirichlet_dof.append(
-                    DirichletDegreesOfFreedom(name, self.mesh, bc)
+                    DirichletDegreesOfFreedom(
+                        name, self.mesh, bc, self.integrand_formulation
+                    )
                 )
             elif bc["type"] == "symmetry":
                 self.symm_dof.append(SymmetryDegreesOfFreedom(name, self.mesh, bc))
@@ -608,9 +658,9 @@ class Problem:
         # Get the domain names from the mesh
         domains = self.mesh.get_domains()
 
-        for potential_name in self.potential_map:
-            targets = self.potential_map[potential_name]["target"]
-            potential = self.potential_map[potential_name]["potential"]
+        for integrand_name in self.integrand_map:
+            targets = self.integrand_map[integrand_name]["target"]
+            integrand = self.integrand_map[integrand_name]["integrand"]
 
             # Figure out the element types that we need
             etypes = []
@@ -619,15 +669,18 @@ class Problem:
                     if not etype in etypes:
                         etypes.append(etype)
 
-            # Loop over the element types for this potential
+            # Loop over the element types for this integrand
             for etype in etypes:
-                if (potential_name, etype) in self.element_objs:
+                if (integrand_name, etype) in self.element_objs:
                     continue
 
                 # Set the element name
-                elem_name = f"Element{potential_name}{etype}"
+                elem_name = f"Element{integrand_name}{etype}"
 
                 # Get the basis objects for the element type
+                test_basis = None
+                if self.test_dof is not None:
+                    test_basis = self.test_dof.get_basis(etype)
                 soln_basis = self.soln_dof.get_basis(etype)
                 data_basis = self.data_dof.get_basis(etype)
                 geo_basis = self.geo_dof.get_basis(etype)
@@ -637,11 +690,17 @@ class Problem:
 
                 # Create the element object
                 obj = FiniteElement(
-                    elem_name, soln_basis, data_basis, geo_basis, quadrature, potential
+                    elem_name,
+                    soln_basis,
+                    data_basis,
+                    geo_basis,
+                    quadrature,
+                    integrand,
+                    test_basis=test_basis,
                 )
 
                 # Set this into the element dictionary
-                self.element_objs[(potential_name, etype)] = obj
+                self.element_objs[(integrand_name, etype)] = obj
 
         return
 
@@ -697,6 +756,8 @@ class Problem:
         """Create and link the Amigo model"""
         model = am.Model(module_name)
 
+        if self.test_dof is not None:
+            self.test_dof.add_source(model)
         self.soln_dof.add_source(model)
         self.data_dof.add_source(model)
         self.geo_dof.add_source(model)
@@ -708,13 +769,13 @@ class Problem:
         self._create_element_objs()
 
         # Add the element component objects
-        for potential_name in self.potential_map:
-            targets = self.potential_map[potential_name]["target"]
+        for integrand_name in self.integrand_map:
+            targets = self.integrand_map[integrand_name]["target"]
 
             for target in targets:
                 for etype in domains[target]:
-                    elem = self.element_objs[(potential_name, etype)]
-                    comp_name = f"Element{potential_name}{etype}{target}"
+                    elem = self.element_objs[(integrand_name, etype)]
+                    comp_name = f"Element{integrand_name}{etype}{target}"
 
                     # Add the element/component
                     nelems = self.mesh.get_num_elements(target, etype)
@@ -724,6 +785,10 @@ class Problem:
                     self.soln_dof.link_dof(model, target, etype, comp_name)
                     self.data_dof.link_dof(model, target, etype, comp_name)
                     self.geo_dof.link_dof(model, target, etype, comp_name)
+
+                    # Link the constraints (if using the weak formulation)
+                    if self.test_dof is not None:
+                        self.test_dof.link_dof(model, target, etype, comp_name)
 
         # Add BC components and links
         for dof in self.dirichlet_dof:
@@ -765,6 +830,10 @@ class Problem:
                     # Link the outputs
                     for name in output_names:
                         model.link(f"{comp_name}.{name}", f"outputs.{name}[0]")
+
+        # Set the node locations directly
+        for k, name in enumerate(self.geo_space.get_names("H1")):
+            model.set_data(f"geo.{name}", self.mesh.X[:, k])
 
         # Link the output to the finite element class
         return model

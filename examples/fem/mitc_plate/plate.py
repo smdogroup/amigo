@@ -52,7 +52,7 @@ class MITC4PlateTying(MITCTyingStrain):
         return out
 
 
-def potential(soln, data=None, geo=None):
+def integrand(soln, data=None, geo=None):
     """Strain energy density (integrand of TPE equation)"""
 
     E = 1.0  # Young's modulus
@@ -95,10 +95,10 @@ soln_space = SolutionSpace({"w": "H1", "tx": "H1", "ty": "H1"})
 geo_space = SolutionSpace({"x": "H1", "y": "H1"})
 data_space = SolutionSpace({})
 
-potential_map = {
+integrand_map = {
     "plate": {
         "target": ["SURFACE1"],
-        "potential": potential,
+        "integrand": integrand,
     },
 }
 bc_map = {
@@ -122,7 +122,7 @@ mitc = MITC4PlateTying()
 
 # Create the MITC4 element
 quad_elem = MITCElement(
-    "MITC4", soln_basis, data_basis, geo_basis, quadrature, mitc, potential
+    "MITC4", soln_basis, data_basis, geo_basis, quadrature, mitc, integrand
 )
 
 # Set the element objects
@@ -134,7 +134,7 @@ problem = Problem(
     soln_space,
     data_space,
     geo_space,
-    potential_map=potential_map,
+    integrand_map=integrand_map,
     bc_map=bc_map,
     element_objs=element_objs,
 )
@@ -144,32 +144,24 @@ if args.build:
     model.build_module()
 
 model.initialize(order_type=am.OrderingType.NESTED_DISSECTION)
-p = model.get_problem()
 
-# Set geometry data
-data = model.get_data_vector()
-data["src_geo.x"] = mesh.X[:, 0]
-data["src_geo.y"] = mesh.X[:, 1]
-
-xm = model.create_vector()
-
-# Solve
-x = xm.get_vector()
-mat = p.create_matrix()
-g = p.create_vector()
+x = model.create_vector()
+g = model.create_vector()
+mat = model.create_matrix()
 
 print("Evaluating the Hessian...")
-p.hessian(1.0, x, mat)  # assembles K
-p.gradient(1.0, x, g)  # assembles f (body force / BC terms)
+model.eval_gradient(x, g)
+model.eval_hessian(x, mat)
 
+# Solve the equations
 print("Solving...")
 K = am.tocsr(mat)
-x.get_array()[:] = spsolve(K, g.get_array())
+x[:] = spsolve(K, g[:])
 
 print("Plotting...")
-w = xm["src_soln.w"]
-tx = xm["src_soln.tx"]
-ty = xm["src_soln.ty"]
+w = x["soln.w"]
+tx = x["soln.tx"]
+ty = x["soln.ty"]
 
 fig, ax = plt.subplots(1, 3, figsize=(8, 3))
 for index, soln in enumerate([w, tx, ty]):
