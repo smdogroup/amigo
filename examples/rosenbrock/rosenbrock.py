@@ -33,4 +33,4 @@ if args.build:
 model.initialize()
 
 opt = am.Optimizer(model)
-opt.optimize()
+opt.optimize({"max_iterations": 50})

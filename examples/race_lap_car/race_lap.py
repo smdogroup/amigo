@@ -579,11 +579,9 @@ opt_data = opt.optimize(
     {
         "initial_barrier_param": 1.0,
         "max_iterations": 500,
-        "fraction_to_boundary": 0.995,
         "max_line_search_iterations": 30,
+        "convergence_tolerance": 1e-7,
         "init_least_squares_multipliers": True,
-        "acceptable_tol": 1e-7,
-        "acceptable_iter": 15,
         "filter_line_search": True,
     }
     # opt_data = opt.optimize(

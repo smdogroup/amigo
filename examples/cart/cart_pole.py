@@ -343,12 +343,9 @@ data["cart.m2"] = 0.3
 opt_options = {
     "initial_barrier_param": 0.1,
     "convergence_tolerance": 5e-7,
-    "max_line_search_iterations": 4,  # 30,  # Reasonable for intermediate problem
-    "max_iterations": 500,  # Sufficient iterations
-    # "init_affine_step_multipliers": True,  # Enable for better scaling
-    # Use the new heuristic barrier parameter update
-    # "barrier_strategy": "heuristic",
-    # "verbose_barrier": True,  # Show ξ and complementarity values
+    "max_line_search_iterations": 30,
+    "max_iterations": 500,
+    "filter_line_search": True,
 }
 
 solver = None
@@ -377,14 +374,12 @@ for opt_iter in range(4):
         upper["cart.qdot"] = float("inf")
         upper["cart.x"] = 50
 
-        # Serialize the model
-        with open("cart_pole_model.json", "w") as fp:
-            json.dump(model.serialize(), fp, indent=2)
-
-        # Serialize the vectors
-        vecs = {"data": data, "x": x, "lower": lower, "upper": upper}
-        with open("cart_pole_vectors.json", "w") as fp:
-            json.dump(model.serialize_vectors(vecs), fp, indent=2)
+        # # Serialize the model (requires serialize method)
+        # with open("cart_pole_model.json", "w") as fp:
+        #     json.dump(model.serialize(), fp, indent=2)
+        # vecs = {"data": data, "x": x, "lower": lower, "upper": upper}
+        # with open("cart_pole_vectors.json", "w") as fp:
+        #     json.dump(model.serialize_vectors(vecs), fp, indent=2)
 
     # Set up the optimizer
     opt = am.Optimizer(
