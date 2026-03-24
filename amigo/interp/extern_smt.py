@@ -3,7 +3,7 @@ import numpy as np
 
 
 class ExternalSMTComponent:
-    def __init__(self, input_names, output_name, model, smt_model):
+    def __init__(self, num_points, num_inputs, smt_model):
         """Evaluate the SMT model to compute outputs as a function of inputs
 
         inputs is of dimension (num_points, num_inputs) and the output of the model
@@ -15,14 +15,8 @@ class ExternalSMTComponent:
             con[i] = SMT(inputs[i, :]) - outputs[i] = 0
         """
 
-        self.input_indices = []
-        for input_name in input_names:
-            self.input_indices.append(model.get_indices(input_name))
-
-        self.output_indices = model.get_indices(output_name)
-
-        self.num_points = len(self.output_indices)
-        self.num_inputs = len(self.input_indices)
+        self.num_points = num_points
+        self.num_inputs = num_inputs
         self.smt = smt_model
 
         # Set the number of variables and constraints
@@ -38,8 +32,6 @@ class ExternalSMTComponent:
         )
 
         # Total number of inputs over all points
-        nv = self.num_points * self.num_inputs
-
         self.cols = np.zeros(self.num_points * (self.num_inputs + 1), dtype=int)
         for i in range(self.num_inputs):
             self.cols[i :: self.num_inputs + 1] = np.arange(
@@ -52,16 +44,21 @@ class ExternalSMTComponent:
         return
 
     def get_constraint_jacobian_csr(self):
-        print(self.ncon, self.nvars, self.rowp, self.cols)
         return self.ncon, self.nvars, self.rowp, self.cols
 
     def evaluate(self, x, con, grad, jac):
+
         inputs = np.zeros((self.num_points, self.num_inputs))
-        for i, index in enumerate(self.input_indices):
-            inputs[:, i] = x[index]
+        for i in range(self.num_inputs):
+            inputs[:, i] = x[i * self.num_points : (i + 1) * self.num_points]
+
+        start = self.num_inputs * self.num_points
+        end = (self.num_inputs + 1) * self.num_points
+        outputs = x[start:end]
 
         # Evaluate the interpolation constraint
-        con[:] = self.smt.predict_values(inputs) - x[self.output_indices]
+        predict = self.smt.predict_values(inputs)
+        con[:] = predict - outputs
 
         # Compute the interpolation constraint Jacobian
         for i in range(self.num_inputs):

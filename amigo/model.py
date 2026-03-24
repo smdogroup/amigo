@@ -475,7 +475,7 @@ class Model:
         Args:
             name (str): Name of the external component
             comp_obj (object): Python object
-            inputs (List of str): List of strings of the input name
+            inputs (List of str): List of strings of the input names
             constraints (List of str): List of strings of the constraint names
         """
 

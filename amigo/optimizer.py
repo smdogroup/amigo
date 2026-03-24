@@ -565,8 +565,10 @@ class Optimizer:
         # Compute the gradient at the new point with the updated multipliers
         x = self.vars.get_solution()
         if self.distribute:
+            self.mpi_problem.update(x)
             self.mpi_problem.gradient(1.0, x, self.grad)
         else:
+            self.problem.update(x)
             self.problem.gradient(1.0, x, self.grad)
 
         # Compute the residual
