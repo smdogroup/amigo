@@ -1,4 +1,3 @@
-
 def _normalize_shape(shape):
     if shape is None:
         return None
@@ -59,7 +58,6 @@ class VarNode(ExprNode):
 
     def is_active(self):
         return self.active
-
 
 
 class IndexNode(ExprNode):
@@ -247,7 +245,6 @@ class Expr:
 
     def is_active(self):
         return self.node.is_active()
-
 
 
 class ExprBuilder:

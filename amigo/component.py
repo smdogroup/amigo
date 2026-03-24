@@ -687,9 +687,7 @@ class Component:
             mult_name = self.constraints.get_multiplier_name(name)
             if mult_name not in self.inputs:
                 shape = self.constraints.get_shape(name)
-                self.multipliers[mult_name] = Expr(
-                    VarNode(mult_name, shape=shape)
-                )
+                self.multipliers[mult_name] = Expr(VarNode(mult_name, shape=shape))
 
         return
 
