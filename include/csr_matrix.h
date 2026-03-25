@@ -26,6 +26,7 @@ class SerialCSRMatBackend {
   void copy_data_device_to_host(T* data) {}
   void copy_data_device_to_host(int ext_offset, int ext_size, T* ext_data) {}
   void zero() {}
+  void set_values(int n, const int* idx, const T value) {}
   void add_diagonal(const T* values) {}
   void get_device_data(int* rowp[], int* cols[], T* data[]) {
     if (rowp) {
@@ -475,6 +476,27 @@ class CSRMat {
       }
 
       x_array[i] = x_array[i] + val / data[diag[i]];
+    }
+  }
+
+  /**
+   * @brief Set the values at the specified matrix indices
+   *
+   * @tparam policy Execution policy
+   * @param idx Indices in the data array
+   * @param value Values to set
+   */
+  template <ExecPolicy policy>
+  void set_values(std::shared_ptr<Vector<int>> idx, T value) {
+    if constexpr (policy == ExecPolicy::SERIAL ||
+                  policy == ExecPolicy::OPENMP) {
+      int nindices = idx->get_size();
+      int* indices = idx->get_array();
+      for (int i = 0; i < nindices; i++) {
+        data[indices[i]] = value;
+      }
+    } else {
+      backend.set_values(idx->get_size(), idx->get_device_array(), value);
     }
   }
 

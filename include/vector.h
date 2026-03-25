@@ -26,6 +26,7 @@ class SerialVecBackend {
   void axpy(T alpha, const T* d_x) const {}
   void scale(T alpha) {}
   void zero() {}
+  void set_values(int n, const int d_idx[], T value) {}
   T* get_device_ptr() { return nullptr; }
   const T* get_device_ptr() const { return nullptr; }
 };
@@ -115,6 +116,21 @@ class Vector {
       for (int i = 0; i < size; i++) {
         array[i] = dis(gen);
       }
+    }
+  }
+
+  template <ExecPolicy policy>
+  void set_values(std::shared_ptr<Vector<int>> indices, const T value) {
+    if constexpr (policy == ExecPolicy::SERIAL ||
+                  policy == ExecPolicy::OPENMP) {
+      int nentries = indices->get_size();
+      const int* idx = indices->get_array();
+      for (int i = 0; i < nentries; i++) {
+        array[idx[i]] = value;
+      }
+    } else {
+      int nentries = indices->get_size();
+      backend.set_values(nentries, indices->get_device_array(), value);
     }
   }
 

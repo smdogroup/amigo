@@ -14,6 +14,10 @@ template <typename T>
 void add_diagonal_cuda(int nrows, const int* d_indices, const T* d_values,
                        T* d_data, cudaStream_t stream = 0);
 
+template <typename T>
+void set_value_at_indices_cuda(T value, int nentries, const int* d_indices,
+                               T* d_array, cudaStream_t stream = 0);
+
 }  // namespace detail
 
 template <typename T>
@@ -92,6 +96,10 @@ class CudaCSRMatBackend {
   }
 
   void zero() { cudaMemset(d_data, 0, nnz * sizeof(T)); }
+
+  void set_values(int n, const int* d_idx, T value) {
+    detail::set_value_at_indices_cuda(value, n, d_idx, d_data);
+  }
 
   void add_diagonal(const T* d_values) {
     detail::add_diagonal_cuda(nrows, d_diag, d_values, d_data);

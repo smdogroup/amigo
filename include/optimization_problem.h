@@ -4,6 +4,7 @@
 #include <mpi.h>
 
 #include "component_group_base.h"
+#include "dirichlet_bcs.h"
 #include "matrix_distribute.h"
 #include "node_owners.h"
 #include "vector_distribute.h"
