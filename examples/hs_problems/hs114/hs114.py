@@ -40,21 +40,14 @@ class HS114(am.Component):
 
         # Objective
         self.objective["obj"] = (
-            5.04 * x[0] + 0.035 * x[1] + 10 * x[2]
-            + 3.36 * x[4] - 0.063 * x[3] * x[6]
+            5.04 * x[0] + 0.035 * x[1] + 10 * x[2] + 3.36 * x[4] - 0.063 * x[3] * x[6]
         )
 
         # Intermediates
         G1 = 35.82 - 0.222 * x[9] - b * x[8]
         G2 = -133 + 3 * x[6] - a * x[9]
-        G5 = (
-            1.12 * x[0] + 0.13167 * x[0] * x[7]
-            - 0.00667 * x[0] * x[7] ** 2 - a * x[3]
-        )
-        G6 = (
-            57.425 + 1.098 * x[7] - 0.038 * x[7] ** 2
-            + 0.325 * x[5] - a * x[6]
-        )
+        G5 = 1.12 * x[0] + 0.13167 * x[0] * x[7] - 0.00667 * x[0] * x[7] ** 2 - a * x[3]
+        G6 = 57.425 + 1.098 * x[7] - 0.038 * x[7] ** 2 + 0.325 * x[5] - a * x[6]
 
         # Inequality constraints (>= 0)
         self.constraints["g1"] = G1
@@ -68,9 +61,7 @@ class HS114(am.Component):
 
         # Equality constraints (= 0)
         self.constraints["h1"] = 1.22 * x[3] - x[0] - x[4]
-        self.constraints["h2"] = (
-            98000 * x[2] / (x[3] * x[8] + 1000 * x[2]) - x[5]
-        )
+        self.constraints["h2"] = 98000 * x[2] / (x[3] * x[8] + 1000 * x[2]) - x[5]
         self.constraints["h3"] = (x[1] + x[4]) / x[0] - x[7]
 
 

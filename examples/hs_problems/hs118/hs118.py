@@ -73,17 +73,17 @@ class HS118(am.Component):
         k = 0
         for group in range(4):  # 4 groups of differences
             for col in range(3):
-                i = group * 3 + col        # source index
+                i = group * 3 + col  # source index
                 j = (group + 1) * 3 + col  # target index
                 diff = x[j] - x[i] + 7
-                self.constraints[f"d{k+1}"] = diff               # >= 0 (lower)
-                self.constraints[f"d{k+2}"] = upper[col] - diff   # >= 0 (upper)
+                self.constraints[f"d{k+1}"] = diff  # >= 0 (lower)
+                self.constraints[f"d{k+2}"] = upper[col] - diff  # >= 0 (upper)
                 k += 2
 
         # Summation constraints: sum of each row >= threshold
         thresholds = [60, 50, 70, 85, 100]
         for row in range(5):
-            s = x[row*3] + x[row*3+1] + x[row*3+2]
+            s = x[row * 3] + x[row * 3 + 1] + x[row * 3 + 2]
             self.constraints[f"s{row+1}"] = s - thresholds[row]
 
 

@@ -11,7 +11,6 @@ HS111: 10 variables, 3 equalities: larger scale
 import amigo as am
 import argparse
 
-
 c_vals = [
     -6.089,
     -17.164,

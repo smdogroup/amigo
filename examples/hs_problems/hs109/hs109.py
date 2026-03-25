@@ -41,8 +41,7 @@ class HS109(am.Component):
 
         # Objective
         self.objective["obj"] = (
-            3 * x[0] + 1e-6 * x[0] ** 3
-            + 2 * x[1] + 0.522074e-6 * x[1] ** 3
+            3 * x[0] + 1e-6 * x[0] ** 3 + 2 * x[1] + 0.522074e-6 * x[1] ** 3
         )
 
         # Inequality constraints (>= 0)
@@ -55,23 +54,29 @@ class HS109(am.Component):
         self.constraints["h1"] = (
             x[4] * x[5] * am.sin(-x[2] - 0.25)
             + x[4] * x[6] * am.sin(-x[3] - 0.25)
-            + 2 * b * x[4] ** 2 - a * x[0] + 400 * a
+            + 2 * b * x[4] ** 2
+            - a * x[0]
+            + 400 * a
         )
         self.constraints["h2"] = (
             x[4] * x[5] * am.sin(x[2] - 0.25)
             + x[5] * x[6] * am.sin(x[2] - x[3] - 0.25)
-            + 2 * b * x[5] ** 2 - a * x[1] + 400 * a
+            + 2 * b * x[5] ** 2
+            - a * x[1]
+            + 400 * a
         )
         self.constraints["h3"] = (
             x[4] * x[6] * am.sin(x[3] - 0.25)
             + x[5] * x[6] * am.sin(x[3] - x[2] - 0.25)
-            + 2 * b * x[6] ** 2 + 881.779 * a
+            + 2 * b * x[6] ** 2
+            + 881.779 * a
         )
         self.constraints["h4"] = (
             a * x[7]
             + x[4] * x[5] * am.cos(-x[2] - 0.25)
             + x[4] * x[6] * am.cos(-x[3] - 0.25)
-            - 200 * a - 2 * c * x[4] ** 2
+            - 200 * a
+            - 2 * c * x[4] ** 2
             + 0.7533e-3 * a * x[4] ** 2
         )
         self.constraints["h5"] = (
@@ -79,13 +84,15 @@ class HS109(am.Component):
             + x[4] * x[5] * am.cos(x[2] - 0.25)
             + x[5] * x[6] * am.cos(x[2] - x[3] - 0.25)
             - 2 * c * x[5] ** 2
-            + 0.7533e-3 * a * x[5] ** 2 - 200 * a
+            + 0.7533e-3 * a * x[5] ** 2
+            - 200 * a
         )
         self.constraints["h6"] = (
             x[4] * x[6] * am.cos(x[3] - 0.25)
             + x[5] * x[6] * am.cos(x[3] - x[2] - 0.25)
             - 2 * c * x[6] ** 2
-            + 22.938 * a + 0.7533e-3 * a * x[6] ** 2
+            + 22.938 * a
+            + 0.7533e-3 * a * x[6] ** 2
         )
 
 
