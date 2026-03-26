@@ -432,6 +432,118 @@ class InteriorPointOptimizer {
   bool has_slacks() const { return n_slacks_ > 0; }
   int get_num_slacks() const { return n_slacks_; }
 
+  // NLP scaling: gradient-based.  Computed once at the initial point.
+  // obj_scale_ scales the objective via alpha; constr_scale_ scales
+  // Jacobian rows via D*H*D and gradient post-processing.
+
+  /// Compute scaling factors from initial gradient and Jacobian row norms.
+  void compute_nlp_scaling(const std::shared_ptr<Vector<T>> x,
+                           const std::shared_ptr<Vector<T>> grad,
+                           T max_gradient = T(100),
+                           T min_value = T(1e-8)) {
+    const T* g = grad->template get_array<policy>();
+
+    // Objective: df = min(1, max_gradient / ||grad_f||_inf)
+    T obj_max = T(0);
+    for (int i = 0; i < np_; i++) {
+      T v = std::abs(g[(*pidx_)[i]]);
+      if (v > obj_max) obj_max = v;
+    }
+    T global_obj_max;
+    MPI_Allreduce(&obj_max, &global_obj_max, 1, get_mpi_type<T>(), MPI_MAX, comm_);
+
+    obj_scale_ = (global_obj_max > max_gradient)
+                     ? max_gradient / global_obj_max
+                     : T(1);
+    if (obj_scale_ < min_value) obj_scale_ = min_value;
+
+    // Constraint: dc[j] = min(1, max_gradient / ||J_row_j||_inf)
+    // Assemble KKT at (x, lam=0) to read Jacobian rows.
+    auto hess = problem_->create_matrix();
+    problem_->hessian(T(1), x, hess);
+    hess->copy_data_device_to_host();
+
+    int nr, nc_mat, nnz_mat;
+    const int *rp, *cl;
+    T* dt;
+    hess->get_data(&nr, &nc_mat, &nnz_mat, &rp, &cl, &dt);
+
+    auto ml = (policy == ExecPolicy::CUDA) ? MemoryLocation::HOST_AND_DEVICE
+                                           : MemoryLocation::HOST_ONLY;
+    constr_scale_ = std::make_shared<Vector<T>>(nc_, 0, ml);
+
+    // Scan each constraint row for its inf-norm
+    for (int j = 0; j < nc_; j++) {
+      int row = (*cidx_)[j];
+      T row_max = T(0);
+      for (int k = rp[row]; k < rp[row + 1]; k++) {
+        T v = std::abs(dt[k]);
+        if (v > row_max) row_max = v;
+      }
+      T dc = (row_max > max_gradient) ? max_gradient / row_max : T(1);
+      if (dc < min_value) dc = min_value;
+      (*constr_scale_)[j] = dc;
+    }
+
+    // Scale constraint targets for consistency
+    for (int j = 0; j < nc_; j++) {
+      T dc = (*constr_scale_)[j];
+      if (dc != T(1)) (*lbh_)[j] *= dc;
+    }
+    lbh_->copy_host_to_device();
+    info_.lbh = lbh_->template get_array<policy>();
+
+    // Per-variable scaling: 1.0 for primals, dc[j] for constraints.
+    scale_vec_.resize(nr, T(1));
+    for (int j = 0; j < nc_; j++)
+      scale_vec_[(*cidx_)[j]] = (*constr_scale_)[j];
+
+    constr_scale_->copy_host_to_device();
+    scaling_active_ = true;
+  }
+
+  /// Scale constraint rows of the gradient in-place.
+  void apply_gradient_scaling(std::shared_ptr<Vector<T>> grad) const {
+    if (!scaling_active_) return;
+    T* g = grad->template get_array<policy>();
+    for (int j = 0; j < nc_; j++)
+      g[(*cidx_)[j]] *= (*constr_scale_)[j];
+  }
+
+  /// D*H*D similarity transform on the KKT matrix (scales Jacobian blocks).
+  void apply_hessian_scaling(std::shared_ptr<CSRMat<T>> hess) const {
+    if (!scaling_active_) return;
+    int nr, nc_mat, nnz_mat;
+    const int *rp, *cl;
+    T* dt;
+    hess->get_data(&nr, &nc_mat, &nnz_mat, &rp, &cl, &dt);
+    const T* sv = scale_vec_.data();
+    for (int i = 0; i < nr; i++) {
+      T di = sv[i];
+      for (int k = rp[i]; k < rp[i + 1]; k++)
+        dt[k] *= di * sv[cl[k]];
+    }
+  }
+
+  /// Scale constraint multipliers into scaled space: y[j] *= dc[j].
+  void scale_multipliers(std::shared_ptr<Vector<T>> x) const {
+    if (!scaling_active_) return;
+    T* xlam = x->template get_array<policy>();
+    for (int j = 0; j < nc_; j++)
+      xlam[(*cidx_)[j]] *= (*constr_scale_)[j];
+  }
+
+  /// Unscale constraint multipliers: y[j] /= dc[j].
+  void unscale_multipliers(std::shared_ptr<Vector<T>> x) const {
+    if (!scaling_active_) return;
+    T* xlam = x->template get_array<policy>();
+    for (int j = 0; j < nc_; j++)
+      xlam[(*cidx_)[j]] /= (*constr_scale_)[j];
+  }
+
+  T get_obj_scale() const { return obj_scale_; }
+  bool has_scaling() const { return scaling_active_; }
+
   // Accessors
   int get_num_design_variables() const { return np_; }
   int get_num_constraints() const { return nc_; }
@@ -477,6 +589,12 @@ class InteriorPointOptimizer {
   int n_slacks_ = 0;
   std::shared_ptr<Vector<int>> slack_global_;
   std::shared_ptr<Vector<int>> constr_global_;
+
+  // NLP scaling state
+  T obj_scale_ = T(1);
+  std::shared_ptr<Vector<T>> constr_scale_;
+  std::vector<T> scale_vec_;       // per-variable: 1.0 primals, dc[j] constraints
+  bool scaling_active_ = false;
 };
 
 }  // namespace amigo

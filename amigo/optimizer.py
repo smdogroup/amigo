@@ -189,13 +189,16 @@ class DirectScipySolver(_HessianDiagMixin):
         H = csr_matrix((data, self.cols, self.rowp), shape=shape).tocsc()
         self.lu = splu(H, permc_spec="COLAMD", diag_pivot_thresh=1.0)
 
-    def factor(self, alpha, x, diag):
+    def factor(self, alpha, x, diag, post_hessian=None):
         """Assemble Hessian, add diagonal, and factorize (one shot).
 
         Used for inertia-correction retries where we need a fresh
         assembly (since add_diagonal_and_factor mutates self.hess).
         """
         self.problem.hessian(alpha, x, self.hess)
+        if post_hessian is not None:
+            self.hess.copy_data_device_to_host()
+            post_hessian(self.hess)
         self.problem.add_diagonal(diag, self.hess)
         self.hess.copy_data_device_to_host()
         shape = (self.nrows, self.ncols)
@@ -586,8 +589,11 @@ class MumpsSolver(_HessianDiagMixin):
         self._update_values()
         self._factorize_current()
 
-    def factor(self, alpha, x, diag):
+    def factor(self, alpha, x, diag, post_hessian=None):
         self.problem.hessian(alpha, x, self.hess)
+        if post_hessian is not None:
+            self.hess.copy_data_device_to_host()
+            post_hessian(self.hess)
         self.problem.add_diagonal(diag, self.hess)
         self.hess.copy_data_device_to_host()
         self._update_values()
@@ -697,13 +703,16 @@ class PardisoSolver(_HessianDiagMixin):
         self._matrix.data[:] = data[self._upper_mask]
         self.pardiso.factorize(self._matrix)
 
-    def factor(self, alpha, x, diag, _debug_inertia=False):
+    def factor(self, alpha, x, diag, _debug_inertia=False, post_hessian=None):
         """Assemble Hessian, add diagonal, and LDL^T factorize (one shot).
 
         Used for inertia-correction retries where we need a fresh
         assembly (since add_diagonal_and_factor mutates self.hess).
         """
         self.problem.hessian(alpha, x, self.hess)
+        if post_hessian is not None:
+            self.hess.copy_data_device_to_host()
+            post_hessian(self.hess)
         self.problem.add_diagonal(diag, self.hess)
         self.hess.copy_data_device_to_host()
         data = self.hess.get_data()
@@ -1143,9 +1152,13 @@ class InertiaCorrector:
         comm_rank,
         max_corrections=40,
         inertia_tolerance=0,
+        obj_scale=1.0,
+        hessian_scaling_fn=None,
     ):
         """Assemble, regularize, and factorize the KKT matrix."""
-        solver.assemble_hessian(1.0, x)
+        solver.assemble_hessian(obj_scale, x)
+        if hessian_scaling_fn is not None:
+            hessian_scaling_fn(solver.hess)
 
         primal_mask = ~self.mult_ind
         n_primal = int(np.sum(primal_mask))
@@ -1178,7 +1191,7 @@ class InertiaCorrector:
             except Exception:
                 diag_arr[primal_mask] += self._dw_init
                 diag.copy_host_to_device()
-                solver.factor(1.0, x, diag)
+                solver.factor(obj_scale, x, diag, post_hessian=hessian_scaling_fn)
             return
 
         reg_diag = diag.get_array().copy()
@@ -1203,7 +1216,7 @@ class InertiaCorrector:
                 if first:
                     solver.add_diagonal_and_factor(diag)
                 else:
-                    solver.factor(1.0, x, diag)
+                    solver.factor(obj_scale, x, diag, post_hessian=hessian_scaling_fn)
                 return *solver.get_inertia(), False
             except Exception:
                 return 0, 0, True
@@ -1382,6 +1395,16 @@ class Optimizer:
             self.upper = upper.get_vector()
         else:
             self.upper = upper
+
+        # Fill slack bounds from inequality constraint metadata.
+        # User-provided vectors default to 0 at slack positions.
+        if hasattr(model, "num_slacks") and model.num_slacks > 0:
+            lb_arr = self.lower.get_array()
+            ub_arr = self.upper.get_array()
+            for k in range(model.num_slacks):
+                idx = model.slack_indices[k]
+                lb_arr[idx] = model._slack_meta[k]["lower"]
+                ub_arr[idx] = model._slack_meta[k]["upper"]
 
         # Distribute the initial point
         if self.distribute:
@@ -1569,6 +1592,7 @@ class Optimizer:
             "quality_function_norm_scaling": True,
             "quality_function_predictor_corrector": True,
             "pc_kappa_mu_decay": 0.2,
+            "nlp_scaling_max_gradient": 100.0,
         }
 
         for name in options:
@@ -1809,7 +1833,7 @@ class Optimizer:
         self.diag.zero()
         self.optimizer.set_design_vars_value(1.0, self.diag)
         self.diag.copy_host_to_device()
-        self.solver.factor(0.0, x, self.diag)
+        self.solver.factor(0.0, x, self.diag, post_hessian=self._hessian_scaling_fn)
         self.solver.solve(self.res, self.px)
 
         # Safeguard: discard if multipliers are too large
@@ -1834,16 +1858,18 @@ class Optimizer:
           - Returns the initial barrier mu = avg complementarity
         """
         x = self.vars.get_solution()
-        if self.distribute:
-            self.mpi_problem.gradient(1.0, x, self.grad)
-        else:
-            self.problem.gradient(1.0, x, self.grad)
+        self._update_gradient(x)
 
         # Solve the KKT system with mu=0 (affine direction)
         mu = 0.0
         self.optimizer.compute_residual(mu, self.vars, self.grad, self.res)
         self.optimizer.compute_diagonal(self.vars, self.diag)
-        self.solver.factor(1.0, x, self.diag)
+        self.solver.factor(
+            self._obj_scale,
+            x,
+            self.diag,
+            post_hessian=self._hessian_scaling_fn,
+        )
         self.solver.solve(self.res, self.px)
 
         # Extract the bound dual steps via back-substitution
@@ -1889,12 +1915,14 @@ class Optimizer:
 
     def _update_gradient(self, x):
         """Evaluate problem functions and gradient at x."""
+        alpha = self._obj_scale
         if self.distribute:
             self.mpi_problem.update(x)
-            self.mpi_problem.gradient(1.0, x, self.grad)
+            self.mpi_problem.gradient(alpha, x, self.grad)
         else:
             self.problem.update(x)
-            self.problem.gradient(1.0, x, self.grad)
+            self.problem.gradient(alpha, x, self.grad)
+        self.optimizer.apply_gradient_scaling(self.grad)
 
     def _factorize_kkt(
         self,
@@ -1931,10 +1959,17 @@ class Optimizer:
                 comm_rank,
                 max_corrections=options["max_inertia_corrections"],
                 inertia_tolerance=options.get("inertia_tolerance", 0),
+                obj_scale=self._obj_scale,
+                hessian_scaling_fn=self._hessian_scaling_fn,
             )
         else:
             try:
-                self.solver.factor(1.0, x, self.diag)
+                self.solver.factor(
+                    self._obj_scale,
+                    x,
+                    self.diag,
+                    post_hessian=self._hessian_scaling_fn,
+                )
             except Exception:
                 # Factorization failed: add primal regularization and retry
                 diag_arr = self.diag.get_array()
@@ -1943,7 +1978,12 @@ class Optimizer:
                 else:
                     diag_arr += 1e-4
                 self.diag.copy_host_to_device()
-                self.solver.factor(1.0, x, self.diag)
+                self.solver.factor(
+                    self._obj_scale,
+                    x,
+                    self.diag,
+                    post_hessian=self._hessian_scaling_fn,
+                )
             return True
 
     def _iterative_refinement(self, mu, mult_ind, condensed_rhs, max_steps=10):
@@ -2470,7 +2510,7 @@ class Optimizer:
         lam_backup = x_arr[mult_ind].copy()
         x_arr[mult_ind] = 0.0
         x_vec.copy_host_to_device()
-        f_obj = problem.lagrangian(1.0, x_vec)
+        f_obj = problem.lagrangian(self._obj_scale, x_vec)
         x_arr[mult_ind] = lam_backup
         x_vec.copy_host_to_device()
 
@@ -2942,6 +2982,8 @@ class Optimizer:
         opt_data = {"options": options, "converged": False, "iterations": []}
 
         # 1. Unpack frequently-used options
+        self._obj_scale = 1.0
+        self._hessian_scaling_fn = None
         # self._debug_iter = True
         self.barrier_param = options["initial_barrier_param"]
         max_iters = options["max_iterations"]
@@ -2991,6 +3033,17 @@ class Optimizer:
 
         # Step 4: Recompute gradient at the pushed x with lam=0
         self._update_gradient(x)
+
+        # Step 4b: Gradient-based NLP scaling from initial point.
+        nlp_max_grad = options["nlp_scaling_max_gradient"]
+        if nlp_max_grad > 0 and not self.distribute:
+            self.optimizer.compute_nlp_scaling(x, self.grad, max_gradient=nlp_max_grad)
+            self._obj_scale = self.optimizer.get_obj_scale()
+            if self.optimizer.has_scaling():
+                self._hessian_scaling_fn = self.optimizer.apply_hessian_scaling
+                self._update_gradient(x)
+                if comm_rank == 0:
+                    print(f"  NLP scaling: obj_scale={self._obj_scale:.4e}")
 
         # Step 5: Least-squares constraint multiplier initialization
         if options["init_affine_step_multipliers"]:
@@ -3869,7 +3922,12 @@ class Optimizer:
         self.optimizer.compute_diagonal(self.vars, self.diag)
 
         # Factor the KKT system
-        self.solver.factor(1.0, x, self.diag)
+        self.solver.factor(
+            self._obj_scale,
+            x,
+            self.diag,
+            post_hessian=self._hessian_scaling_fn,
+        )
 
         if method == "adjoint":
             for i in range(len(of_indices)):

@@ -697,5 +697,20 @@ PYBIND11_MODULE(amigo, mod) {
            py::arg("slack_indices"), py::arg("constr_indices"))
       .def("initialize_slacks", &IPMOpt::initialize_slacks,
            py::arg("grad"), py::arg("vars"))
-      .def("has_slacks", &IPMOpt::has_slacks);
+      .def("has_slacks", &IPMOpt::has_slacks)
+      // NLP scaling
+      .def("compute_nlp_scaling", &IPMOpt::compute_nlp_scaling,
+           py::arg("x"), py::arg("grad"),
+           py::arg("max_gradient") = 100.0,
+           py::arg("min_value") = 1e-8)
+      .def("apply_gradient_scaling", &IPMOpt::apply_gradient_scaling,
+           py::arg("grad"))
+      .def("apply_hessian_scaling", &IPMOpt::apply_hessian_scaling,
+           py::arg("hess"))
+      .def("scale_multipliers", &IPMOpt::scale_multipliers,
+           py::arg("x"))
+      .def("unscale_multipliers", &IPMOpt::unscale_multipliers,
+           py::arg("x"))
+      .def("get_obj_scale", &IPMOpt::get_obj_scale)
+      .def("has_scaling", &IPMOpt::has_scaling);
 }
