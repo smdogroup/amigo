@@ -3916,7 +3916,9 @@ class Optimizer:
                         filter_monotone_mu = new_mu
                     self.barrier_param = filter_monotone_mu
 
-                elif i > 0 and self.barrier_param > min(tol, compl_inf_tol) / (options["barrier_tol_factor"] + 1.0):
+                elif i > 0 and self.barrier_param > min(tol, compl_inf_tol) / (
+                    options["barrier_tol_factor"] + 1.0
+                ):
                     # Monotone A-3 barrier update
                     kappa_eps = options["barrier_tol_factor"]
                     kappa_mu = options["mu_linear_decrease_factor"]
