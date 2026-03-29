@@ -10,6 +10,7 @@ node_modules/
 **/__pycache__
 **/*.pyd
 **/*.so
+**/_amigo_build/
 *.pdf
 *.png
 *.aux

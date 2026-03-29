@@ -923,6 +923,7 @@ class InertiaCorrector:
     def __init__(self, mult_ind, barrier_param, options):
         self.mult_ind = mult_ind
         self._barrier = barrier_param
+        self._verbose = options.get("verbose_barrier", False)
         self.numerical_eps = 1e-12
 
         # Perturbation state
@@ -1236,7 +1237,7 @@ class InertiaCorrector:
                     )
                 return True
 
-            if comm_rank == 0 and not singular:
+            if comm_rank == 0 and not singular and self._verbose:
                 print(
                     f"  Inertia: expected ({n_primal}+, {n_dual}-), "
                     f"got ({n_pos}+, {n_neg}-), "
