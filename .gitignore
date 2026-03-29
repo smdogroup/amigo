@@ -63,6 +63,22 @@ env/
 /examples/**/*.inp
 /examples/**/*.tex
 /examples/**/*.tikz
+/examples/raceproject/
+/examples/river_crossing/
+*.gif
+*.out
+*.md
+!README.md
+!website/**/*.md
+
+# External dependencies
+extern/
+
+# IDE
+.vscode/
+
+# Docs build
+docs/
 
 # OpenMDAO output
 .openmdao_out
