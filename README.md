@@ -60,7 +60,8 @@ git clone https://github.com/coin-or-tools/ThirdParty-Mumps.git && cd ThirdParty
 ### macOS
 
 ```bash
-brew install mumps
+brew tap brewsci/num
+brew install brewsci-mumps
 ```
 
 ### Windows

@@ -272,7 +272,9 @@ class MumpsSolver(_HessianDiagMixin):
                 search_dirs.append(os.path.join(conda, "Library", "bin"))
         elif sys.platform == "darwin":
             names = ["libdmumps.dylib"]
-            search_dirs = [lib_dir] if lib_dir else []
+            brew_prefix = "/opt/homebrew/opt/brewsci-mumps/lib"
+            brew_x86 = "/usr/local/opt/brewsci-mumps/lib"
+            search_dirs = [d for d in [lib_dir, brew_prefix, brew_x86] if d]
         else:
             names = ["libdmumps.so"]
             search_dirs = [lib_dir] if lib_dir else []
@@ -297,7 +299,7 @@ class MumpsSolver(_HessianDiagMixin):
             "MUMPS library not found. "
             "Windows: build coin-or/ThirdParty-Mumps via MSYS2. "
             "Linux: apt install libmumps-dev or conda install mumps-seq. "
-            "Mac: brew install brewsci/num/mumps. "
+            "Mac: brew tap brewsci/num && brew install brewsci-mumps. "
             "Or set MUMPS_LIB_DIR to the directory containing the library."
         )
 
