@@ -1088,7 +1088,7 @@ class Model:
 
     def eval_hessian(self, x: ModelVector, mat: CSRMat, alpha: float = 1.0):
         self.problem.hessian(alpha, x.get_vector(), mat)
-    
+
     def compute_output(self, x: ModelVector, output: ModelVector):
         return self.problem.compute_output(x.get_vector(), output.get_vector())
 
