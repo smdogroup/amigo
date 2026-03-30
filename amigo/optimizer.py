@@ -925,6 +925,7 @@ class InertiaCorrector:
     def __init__(self, mult_ind, barrier_param, options):
         self.mult_ind = mult_ind
         self._barrier = barrier_param
+        self._verbose = options.get("verbose_barrier", False)
         self.numerical_eps = 1e-12
 
         # Perturbation state
@@ -1238,7 +1239,7 @@ class InertiaCorrector:
                     )
                 return True
 
-            if comm_rank == 0 and not singular:
+            if comm_rank == 0 and not singular and self._verbose:
                 print(
                     f"  Inertia: expected ({n_primal}+, {n_dual}-), "
                     f"got ({n_pos}+, {n_neg}-), "
@@ -3918,7 +3919,9 @@ class Optimizer:
                         filter_monotone_mu = new_mu
                     self.barrier_param = filter_monotone_mu
 
-                elif i > 0 and self.barrier_param > tol:
+                elif i > 0 and self.barrier_param > min(tol, compl_inf_tol) / (
+                    options["barrier_tol_factor"] + 1.0
+                ):
                     # Monotone A-3 barrier update
                     kappa_eps = options["barrier_tol_factor"]
                     kappa_mu = options["mu_linear_decrease_factor"]
@@ -3938,12 +3941,14 @@ class Optimizer:
 
                     if should_reduce:
                         if heuristic:
+                            kappa_eps = options["barrier_tol_factor"]
+                            mu_floor = min(tol, compl_inf_tol) / (kappa_eps + 1.0)
                             self.barrier_param, _ = self._compute_barrier_heuristic(
                                 xi_h,
                                 comp_h,
                                 options["heuristic_barrier_gamma"],
                                 options["heuristic_barrier_r"],
-                                tol,
+                                mu_floor,
                             )
                         else:
                             # A-3 monotone with while-loop for multi-step reduction
