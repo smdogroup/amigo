@@ -1,3 +1,6 @@
+import os
+
+os.environ["AMIGO_SOLVER"] = "scipy"
 import amigo as am
 import numpy as np
 import argparse
@@ -5,7 +8,6 @@ import json
 import matplotlib.pylab as plt
 import matplotlib.animation as animation
 import niceplots
-
 
 # Assumptions:
 # unit gravity
