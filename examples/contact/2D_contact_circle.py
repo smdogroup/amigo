@@ -14,17 +14,17 @@ E = 25000
 Fv = -120
 Mv = 0.0
 
-def get_transformation(x1,x2,y1,y2):
-    phi = np.arctan2(y2-y1,x2-x1)
-    T = np.empty(6,6)
-    T[0,:] = [np.cos(phi), np.sin(phi), 0, 0, 0, 0]
-    T[1,:] = [-np.sin(phi), np.cos(phi), 0, 0, 0, 0]
-    T[2,:] = [0, 0, 1, 0, 0, 0]
-    T[3,:] = [0, 0, 0, np.cos(phi), np.sin(phi), 0]
-    T[4,:] = [0, 0, 0, -np.sin(phi), np.cos(phi), 0]
-    T[5,:] = [0, 0, 0, 0, 0, 1]
-    return T
 
+def get_transformation(x1, x2, y1, y2):
+    phi = np.arctan2(y2 - y1, x2 - x1)
+    T = np.empty(6, 6)
+    T[0, :] = [np.cos(phi), np.sin(phi), 0, 0, 0, 0]
+    T[1, :] = [-np.sin(phi), np.cos(phi), 0, 0, 0, 0]
+    T[2, :] = [0, 0, 1, 0, 0, 0]
+    T[3, :] = [0, 0, 0, np.cos(phi), np.sin(phi), 0]
+    T[4, :] = [0, 0, 0, -np.sin(phi), np.cos(phi), 0]
+    T[5, :] = [0, 0, 0, 0, 0, 1]
+    return T
 
 
 class beam_element(am.Component):
@@ -67,35 +67,37 @@ class beam_element(am.Component):
         # de_local = T @ de_local
         dx = x[1] - x[0]
         dy = y[1] - y[0]
-        L = (dx*dx + dy*dy)**0.5
+        L = (dx * dx + dy * dy) ** 0.5
         c = dx / L
         s = dy / L
-        T = [[ c, s, 0, 0, 0, 0],
-             [-s, c, 0, 0, 0, 0],
-             [ 0, 0, 1, 0, 0, 0],
-             [ 0, 0, 0, c, s, 0],
-             [ 0, 0, 0,-s, c, 0],
-             [ 0, 0, 0, 0, 0, 1]]
-        
+        T = [
+            [c, s, 0, 0, 0, 0],
+            [-s, c, 0, 0, 0, 0],
+            [0, 0, 1, 0, 0, 0],
+            [0, 0, 0, c, s, 0],
+            [0, 0, 0, -s, c, 0],
+            [0, 0, 0, 0, 0, 1],
+        ]
+
         de_local = T @ de_global
 
         # thickness Optimization changes I
         h = self.data["h"]
         I = 1.0 / 12.0 * 0.333 * h**3
-        
+
         # Create local beam element stiffness matrix
-        L = length/nelems
+        L = length / nelems
         A = 1.0
         I = 1.0
-        a1 = E*A/L
-        a2 = E*I/(L**3.0)
-        Ke = np.empty((6,6))
-        Ke[0,:] = [a1, 0, 0, -a1, 0, 0]
-        Ke[1,:] = [0, 12*a2, 6*L*a2, 0, -12*a2, 6*L*a2]
-        Ke[2,:] = [0, 0, 4*L**2*a2, 0, -6*L*a2, 2*L**2*a2]
-        Ke[3,:] = [0, 0, 0, a1, 0, 0]
-        Ke[4,:] = [0, 0, 0, 0, 12*a2, -6*L*a2]
-        Ke[5,:] = [0, 0, 0, 0, 0, 4*L**2*a2]
+        a1 = E * A / L
+        a2 = E * I / (L**3.0)
+        Ke = np.empty((6, 6))
+        Ke[0, :] = [a1, 0, 0, -a1, 0, 0]
+        Ke[1, :] = [0, 12 * a2, 6 * L * a2, 0, -12 * a2, 6 * L * a2]
+        Ke[2, :] = [0, 0, 4 * L**2 * a2, 0, -6 * L * a2, 2 * L**2 * a2]
+        Ke[3, :] = [0, 0, 0, a1, 0, 0]
+        Ke[4, :] = [0, 0, 0, 0, 12 * a2, -6 * L * a2]
+        Ke[5, :] = [0, 0, 0, 0, 0, 4 * L**2 * a2]
         Ke = Ke + Ke.T - np.diag(np.diag(Ke))
 
         # Calculate strain energy U for element
@@ -149,7 +151,7 @@ class AppliedLoadDist(am.Component):
         # Fv = self.constants["Fv"]
         # Mt = self.constants["Mt"]
         # Work done by external forces (negative contributes to total PE)
-        Le = length/50
+        Le = length / 50
         fe = [
             Fv * Le * 0.5,
             Fv * Le * (Le / 12),
@@ -159,12 +161,10 @@ class AppliedLoadDist(am.Component):
         de = np.array([v[0], t[0], v[1], t[1]])
         # self.objective["work"] = -1*(fe @ de)
         self.objective["work"] = -(
-            fe[0] * de[0] +
-            fe[1] * de[1] +
-            fe[2] * de[2] +
-            fe[3] * de[3]
+            fe[0] * de[0] + fe[1] * de[1] + fe[2] * de[2] + fe[3] * de[3]
         )
         return
+
 
 class AppliedLoad(am.Component):
     """
@@ -193,7 +193,7 @@ class AppliedLoad(am.Component):
         # Work done by external forces (negative contributes to total PE)
         self.objective["work"] = -(Fv * v + Mt * t)
         return
-    
+
 
 class NodeSource(am.Component):
     def __init__(self):
@@ -214,9 +214,10 @@ class NodeSource(am.Component):
     # def compute(self):
     #     y = self.data["y_coord"]
     #     v = self.inputs["v"]
-        # slack = self.inputs["slack"]
+    # slack = self.inputs["slack"]
 
-        # self.constraints["gap"] = -(y + v - (-0.4)) + slack
+    # self.constraints["gap"] = -(y + v - (-0.4)) + slack
+
 
 # class ContactBoundary(am.Component):
 #     def __init__(self):
@@ -236,7 +237,7 @@ class NodeSource(am.Component):
 #     def compute(self):
 #         v = self.inputs["v"]
 #         y_coord = self.data["y_coord"]
-#         self.constraints["gap"] = v 
+#         self.constraints["gap"] = v
 
 
 class Compliance(am.Component):
@@ -262,6 +263,7 @@ class Compliance(am.Component):
         self.outputs["c"] = (
             Fv * v + Mt * t
         )  # dot(Fv, v), but only for one nodal v displ.
+
 
 class VolumeConstraint(am.Component):
     """sum(h)*b*L0 = volume of beam"""
@@ -304,27 +306,27 @@ args = parser.parse_args()
 # conn = np.array([[0, 2], [0, 1], [1, 2], [1, 3], [2, 3]], dtype=int)
 
 
-# Circle 
+# Circle
 n = 100
 r = 0.5
 
 X = np.zeros((n, 2))
 
 for i in range(n):
-    theta = 2*np.pi*i/n
-    X[i,0] = r*np.cos(theta)
-    X[i,1] = r*np.sin(theta)
+    theta = 2 * np.pi * i / n
+    X[i, 0] = r * np.cos(theta)
+    X[i, 1] = r * np.sin(theta)
 
 nnodes = n
-x_coord = X[:,0]
-y_coord = X[:,1]
+x_coord = X[:, 0]
+y_coord = X[:, 1]
 
-conn = np.zeros((n,2), dtype=int)
+conn = np.zeros((n, 2), dtype=int)
 
-for i in range(n-1):
-    conn[i] = [i, i+1]
+for i in range(n - 1):
+    conn[i] = [i, i + 1]
 
-conn[n-1] = [n-1, 0]
+conn[n - 1] = [n - 1, 0]
 
 nelems = n
 
@@ -348,11 +350,11 @@ model.link("beam_element.t", "src.t", tgt_indices=conn)
 # Fixed boundary conditions at cantilever support
 bcs = BoundaryCondition()
 model.add_component("bcs", 2, bcs)
-bc1 = n//4 -1
-bc2 = n//4 +1
-model.link("src.u", "bcs.u", src_indices=[bc1,bc2])
-model.link("src.v", "bcs.v", src_indices=[bc1,bc2])
-model.link("src.t", "bcs.t", src_indices=[bc1,bc2])
+bc1 = n // 4 - 1
+bc2 = n // 4 + 1
+model.link("src.u", "bcs.u", src_indices=[bc1, bc2])
+model.link("src.v", "bcs.v", src_indices=[bc1, bc2])
+model.link("src.t", "bcs.t", src_indices=[bc1, bc2])
 
 # Apply load at free end (contributes to potential energy)
 # load = AppliedLoad()
@@ -412,14 +414,14 @@ upper["src.v"] = float("inf")
 
 
 for i, node in enumerate(X):
-    
+
     y_floor = -0.4
-    lower_bound_nodal = y_floor - y_coord[i] 
+    lower_bound_nodal = y_floor - y_coord[i]
     lower[f"src.v[{i}]"] = lower_bound_nodal
-    
+
     penetration = None
     if lower_bound_nodal > 0:
-        penetration = ', penetrates'
+        penetration = ", penetrates"
     print(lower_bound_nodal, penetration)
 
 
@@ -428,16 +430,16 @@ upper["src.t"] = float("inf")
 
 # Amigo potential energy minimization parameters
 opt_options = {
-        #"barrier_strategy": "quality_function",
-        #"initial_barrier_param": 0.1,
-        #"monotone_barrier_fraction": 0.2,
-        #"max_iterations": 1000,
-        #"fraction_to_boundary": 0.995,
-        #"use_armijo_line_search": False,
-        #"max_line_search_iterations": 30,
-        #"init_least_squares_multipliers": True,
-        #"acceptable_tol": 1e-7,
-        #"acceptable_iter": 15,
+    # "barrier_strategy": "quality_function",
+    # "initial_barrier_param": 0.1,
+    # "monotone_barrier_fraction": 0.2,
+    # "max_iterations": 1000,
+    # "fraction_to_boundary": 0.995,
+    # "use_armijo_line_search": False,
+    # "max_line_search_iterations": 30,
+    # "init_least_squares_multipliers": True,
+    # "acceptable_tol": 1e-7,
+    # "acceptable_iter": 15,
     "max_iterations": 200,
     "convergence_tolerance": 1e-6,
     "max_line_search_iterations": 1,
@@ -448,8 +450,8 @@ opt_options = {
 opt = am.Optimizer(
     model,
     x,
-    lower = lower,
-    upper = upper,
+    lower=lower,
+    upper=upper,
 )
 opt.optimize(opt_options)
 
@@ -457,51 +459,55 @@ opt.optimize(opt_options)
 # #     of="comp.c[0]", wrt="beam_element.h", method="adjoint"
 # # )
 
+
 def plot_truss(ax, xpts, conn):
     # Show the node numbers
     for i, pt in enumerate(xpts):
-        ax.text(pt[0] + 0.02, pt[1] + 0.05, "N%d" %(i + 1))
+        ax.text(pt[0] + 0.02, pt[1] + 0.05, "N%d" % (i + 1))
 
     # Loop over the elements in the connectivity
     for i, e in enumerate(conn):
         xe = [xpts[e[0], 0], xpts[e[1], 0]]
         ye = [xpts[e[0], 1], xpts[e[1], 1]]
-        ax.plot(xe, ye, '-ok')
+        ax.plot(xe, ye, "-ok")
 
         xmid = 0.5 * (xe[0] + xe[1])
         ymid = 0.5 * (ye[0] + ye[1])
-        ax.text(xmid - 0.02, ymid + 0.02, "E%d" %(i + 1))
+        ax.text(xmid - 0.02, ymid + 0.02, "E%d" % (i + 1))
 
     ax.set_aspect("equal", "box")
 
-def plot_disp(ax,x, u=None, scale=1.0, color='k'):
-        """
-        Visualize the truss and optionally its deformation.
-        """
 
-        if u is not None:
-            x = x + scale*u.reshape((-1, 2))
-        else:
-            x = x
+def plot_disp(ax, x, u=None, scale=1.0, color="k"):
+    """
+    Visualize the truss and optionally its deformation.
+    """
 
-        for index in range(nelems):
-            i = conn[index, 0]
-            j = conn[index, 1]
-            ax.plot([x[i,0], x[j,0]], [x[i,1], x[j,1]], f'-{color}o')
+    if u is not None:
+        x = x + scale * u.reshape((-1, 2))
+    else:
+        x = x
 
-        # plt.show()
+    for index in range(nelems):
+        i = conn[index, 0]
+        j = conn[index, 1]
+        ax.plot([x[i, 0], x[j, 0]], [x[i, 1], x[j, 1]], f"-{color}o")
 
-        return
+    # plt.show()
+
+    return
+
 
 def build_global_displacement(u, v):
     nnodes = len(u)
     q = np.zeros(2 * nnodes)
 
     for i in range(nnodes):
-        q[2*i + 0] = u[i]
-        q[2*i + 1] = v[i]
+        q[2 * i + 0] = u[i]
+        q[2 * i + 1] = v[i]
 
     return q
+
 
 # fig, ax = plt.subplots()
 # plot_disp(ax, X)
@@ -514,16 +520,16 @@ def build_global_displacement(u, v):
 u = x["src.u"]
 v = x["src.v"]
 t = x["src.t"]
-U = build_global_displacement(u,v)
+U = build_global_displacement(u, v)
 
 
-u = x['src.v']
+u = x["src.v"]
 mu = opt.barrier_param
-lbxv = lower['src.v']
+lbxv = lower["src.v"]
 zl = mu / (u - lbxv)
 
 zl_highest = [i for i in zl if i >= 1]
-print('zl > epsilon:', zl_highest)
+print("zl > epsilon:", zl_highest)
 
 
 # fig, ax = plt.subplots()
@@ -533,12 +539,12 @@ print('zl > epsilon:', zl_highest)
 # np.save('U_bounded.npy',U)
 # U_unbounded = np.load('U_unbounded.npy')
 
-fig, ax = plt.subplots(facecolor='w')
+fig, ax = plt.subplots(facecolor="w")
 plot_disp(ax, X)
-plot_disp(ax, X, U, color='r')
-ax.set_aspect('equal')
+plot_disp(ax, X, U, color="r")
+ax.set_aspect("equal")
 
-plt.axhline(y_floor, color = 'black')
-plt.savefig('2d_contact.png')
-print('hello')
+plt.axhline(y_floor, color="black")
+plt.savefig("2d_contact.png")
+print("hello")
 # plt.show()

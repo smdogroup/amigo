@@ -10,6 +10,7 @@ import openmdao.api as om
 # Cantilever Euler-Bernoulli Beam with Contact constraint
 # Author: Jack Turbush
 
+
 def original_om_problem():
     from openmdao.test_suite.test_examples.beam_optimization.beam_group import BeamGroup
 
@@ -78,7 +79,7 @@ class beam_element(am.Component):
 
         # thickness Optimization changes I
         h = self.data["h"]
-        I = 1.0 #/ 12.0 * 0.333 * h**3
+        I = 1.0  # / 12.0 * 0.333 * h**3
 
         # Create beam element stiffness matrix
         Ke = np.empty((4, 4))
@@ -135,7 +136,7 @@ class AppliedLoad(am.Component):
         v = self.inputs["v"]
         t = self.inputs["t"]
         # Work done by external forces (negative contributes to total PE)
-        Le = length/50
+        Le = length / 50
         fe = [
             Fv * Le * 0.5,
             Fv * Le * (Le / 12),
@@ -145,12 +146,10 @@ class AppliedLoad(am.Component):
         de = np.array([v[0], t[0], v[1], t[1]])
         # self.objective["work"] = -1*(fe @ de)
         self.objective["work"] = -(
-            fe[0] * de[0] +
-            fe[1] * de[1] +
-            fe[2] * de[2] +
-            fe[3] * de[3]
+            fe[0] * de[0] + fe[1] * de[1] + fe[2] * de[2] + fe[3] * de[3]
         )
         return
+
 
 class ContactPenalty(am.Component):
     """
@@ -173,10 +172,11 @@ class ContactPenalty(am.Component):
 
         gap_n = -1e-3 - v
         epsilon = 1e-8
-        phi = 0.5 * ((gap_n**2 + epsilon**2)**0.5 - gap_n)
-        
+        phi = 0.5 * ((gap_n**2 + epsilon**2) ** 0.5 - gap_n)
+
         self.objective["penalty"] = 0.5 * penalty_parameter * gap_n**2
-        return 
+        return
+
 
 class NodeSource(am.Component):
     def __init__(self):
@@ -189,6 +189,7 @@ class NodeSource(am.Component):
         # Displacement degrees of freedom
         self.add_input("v")
         self.add_input("t")
+
 
 class Compliance(am.Component):
     """Compliance for an applied load condition at the tip"""
@@ -206,7 +207,7 @@ class Compliance(am.Component):
         t = self.inputs["t"]
         # Fv = self.constants["Fv"]
         # Mt = self.constants["Mt"]
-        Le = length/50
+        Le = length / 50
         fe = [
             Fv * Le * 0.5,
             Fv * Le * (Le / 12),
@@ -216,10 +217,7 @@ class Compliance(am.Component):
         de = np.array([v[0], t[0], v[1], t[1]])
         # self.objective["work"] = -1*(fe @ de)
         self.outputs["c"] = (
-            fe[0] * de[0] +
-            fe[1] * de[1] +
-            fe[2] * de[2] +
-            fe[3] * de[3]
+            fe[0] * de[0] + fe[1] * de[1] + fe[2] * de[2] + fe[3] * de[3]
         )
 
 
@@ -242,7 +240,11 @@ def main():
     # Set up the argument parser
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--build", dest="build", action="store_true", default=False, help="Enable building"
+        "--build",
+        dest="build",
+        action="store_true",
+        default=False,
+        help="Enable building",
     )
     parser.add_argument(
         "--optimizer",
@@ -296,7 +298,6 @@ def main():
     model.add_component("vol_con", nelems, vol_con)
     model.link("beam_element.h", "vol_con.h")
 
-
     model.link("comp.c[1:]", "comp.c[0]")
     # Summing constraints as output
     model.link("vol_con.con[1:]", "vol_con.con[0]")
@@ -330,12 +331,12 @@ def main():
         "initial_barrier_param": 0.1,
     }
 
-    #indiv. Amigo problem:
+    # indiv. Amigo problem:
     opt = am.Optimizer(
         model,
         x,
-        lower = lower,
-        upper = upper,
+        lower=lower,
+        upper=upper,
     )
     opt.optimize(opt_options)
 
@@ -344,16 +345,17 @@ def main():
     # )
 
     # verify the contact forces in all the elements!
-    x_v = x['src.v']
+    x_v = x["src.v"]
     mu = opt.barrier_param
-    lbxv = lower['src.v']
+    lbxv = lower["src.v"]
     zl = mu / (x_v - lbxv)
-    print('zl:', zl)
+    print("zl:", zl)
 
     return x, x_coords
 
+
 def plot(v, x_c):
-    x_ref_arr = np.linspace(0,1,51)
+    x_ref_arr = np.linspace(0, 1, 51)
     EI = E
     lam = -75
     v_ref = np.empty_like(x_ref_arr)
@@ -364,33 +366,42 @@ def plot(v, x_c):
     a4 = 4.17e-4
     for i in range(len(x_ref_arr)):
         x = x_ref_arr[i]
-        v_ref[i] = (Fv*x**2/(24*EI))*(x**2 + 6 - 4*x) - (lam*x**2)/(6*EI)*(3-x)
-        v_nocontact[i] = (Fv*x**2/(24*EI))*(x**2 + 6 - 4*x)
-        v_ref_pen[i] = a2 * x**2 + a3*x**3 + a4*x**4
+        v_ref[i] = (Fv * x**2 / (24 * EI)) * (x**2 + 6 - 4 * x) - (lam * x**2) / (
+            6 * EI
+        ) * (3 - x)
+        v_nocontact[i] = (Fv * x**2 / (24 * EI)) * (x**2 + 6 - 4 * x)
+        v_ref_pen[i] = a2 * x**2 + a3 * x**3 + a4 * x**4
 
-    v_cant = np.load('v_cant.npy') # cantilever
-    v_unbd = np.load('v_unbounded.npy')
-    fig,ax = plt.subplots()
-    ax.plot(x_c,v)
-    ax.plot(x_c,v_cant)
-    ax.plot(x_c,v_unbd)
+    v_cant = np.load("v_cant.npy")  # cantilever
+    v_unbd = np.load("v_unbounded.npy")
+    fig, ax = plt.subplots()
+    ax.plot(x_c, v)
+    ax.plot(x_c, v_cant)
+    ax.plot(x_c, v_unbd)
     # ax.plot(x_c, -v_ref_pen)
-    print('tip disp', v[-1], v_cant[-1])
+    print("tip disp", v[-1], v_cant[-1])
 
-    ax.legend([r"$v_{\text{penalty}}$",r"$v_{\text{constraint}}$",r"$v_{\text{unbounded}}$",r"$v_\text{ref_pen}$"])
-    print('max relative error: ', np.max(np.abs(v-v_cant)))#/np.linalg.norm(v))
+    ax.legend(
+        [
+            r"$v_{\text{penalty}}$",
+            r"$v_{\text{constraint}}$",
+            r"$v_{\text{unbounded}}$",
+            r"$v_\text{ref_pen}$",
+        ]
+    )
+    print("max relative error: ", np.max(np.abs(v - v_cant)))  # /np.linalg.norm(v))
     # ax.plot((v-v_ref)/v_ref)
     ax.grid(True)
-    plt.axhline(-1e-3, color = 'black')
-    ax.set_ylabel('$vertical displacement (m)$')
-    ax.set_xlabel('$x(m)$')
-    plt.savefig('contact_penalty.png')
+    plt.axhline(-1e-3, color="black")
+    ax.set_ylabel("$vertical displacement (m)$")
+    ax.set_xlabel("$x(m)$")
+    plt.savefig("contact_penalty.png")
     # plt.show()
 
+
 if __name__ == "__main__":
-    x,x_c = main()
+    x, x_c = main()
     # print(np.load('v_unbounded.npy'))
     # exit()
     # np.save('v_unbounded.npy',x['src.v'])
-    plot(x['src.v'], x_c)
-
+    plot(x["src.v"], x_c)

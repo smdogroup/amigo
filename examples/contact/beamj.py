@@ -449,14 +449,14 @@ opt_options = {
     "convergence_tolerance": 1e-6,
     "max_line_search_iterations": 1,
     "initial_barrier_param": 0.1,
-    #"initial_barrier_param": 1.0,
-    #"max_iterations": 2000,
-    #"fraction_to_boundary": 0.995,
-    #"max_line_search_iterations": 40,
-    #"init_least_squares_multipliers": False,
-    #"filter_line_search": True,
-    #"second_order_correction": True,
-    #"check_update_step": True,
+    # "initial_barrier_param": 1.0,
+    # "max_iterations": 2000,
+    # "fraction_to_boundary": 0.995,
+    # "max_line_search_iterations": 40,
+    # "init_least_squares_multipliers": False,
+    # "filter_line_search": True,
+    # "second_order_correction": True,
+    # "check_update_step": True,
 }
 
 # #indiv. Amigo problem:

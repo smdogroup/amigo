@@ -138,7 +138,7 @@ class AppliedLoad(am.Component):
         # Fv = self.constants["Fv"]
         # Mt = self.constants["Mt"]
         # Work done by external forces (negative contributes to total PE)
-        Le = length/nelems
+        Le = length / nelems
         fe = [
             Fv * Le * 0.5,
             Fv * Le * (Le / 12),
@@ -148,10 +148,7 @@ class AppliedLoad(am.Component):
         de = np.array([v[0], t[0], v[1], t[1]])
         # self.objective["work"] = -1*(fe @ de)
         self.objective["work"] = -(
-            fe[0] * de[0] +
-            fe[1] * de[1] +
-            fe[2] * de[2] +
-            fe[3] * de[3]
+            fe[0] * de[0] + fe[1] * de[1] + fe[2] * de[2] + fe[3] * de[3]
         )
         return
 
@@ -187,7 +184,7 @@ class Compliance(am.Component):
         t = self.inputs["t"]
         # Fv = self.constants["Fv"]
         # Mt = self.constants["Mt"]
-        Le = length/nelems
+        Le = length / nelems
         fe = [
             Fv * Le * 0.5,
             Fv * Le * (Le / 12),
@@ -197,10 +194,7 @@ class Compliance(am.Component):
         de = np.array([v[0], t[0], v[1], t[1]])
         # self.objective["work"] = -1*(fe @ de)
         self.outputs["c"] = (
-            fe[0] * de[0] +
-            fe[1] * de[1] +
-            fe[2] * de[2] +
-            fe[3] * de[3]
+            fe[0] * de[0] + fe[1] * de[1] + fe[2] * de[2] + fe[3] * de[3]
         )
 
 
@@ -328,9 +322,9 @@ recorder = om.SqliteRecorder("opt_history.sql")
 prob.driver.add_recorder(recorder)
 
 # Optional: record iterations
-prob.driver.recording_options['record_desvars'] = True
-prob.driver.recording_options['record_objectives'] = True
-prob.driver.recording_options['record_constraints'] = True
+prob.driver.recording_options["record_desvars"] = True
+prob.driver.recording_options["record_objectives"] = True
+prob.driver.recording_options["record_constraints"] = True
 
 # OpenMDAO Independent Variables
 indeps = prob.model.add_subsystem("indeps", om.IndepVarComp())
@@ -375,9 +369,9 @@ prob.driver.options["tol"] = 1e-5
 prob.driver.options["disp"] = True
 
 # perform optimziation
-prob.model.add_design_var("indeps.h", lower=0.001, upper=1.0, ref = 1.0e-1)
+prob.model.add_design_var("indeps.h", lower=0.001, upper=1.0, ref=1.0e-1)
 prob.model.add_objective("fea.c", ref=1.0e3)
-prob.model.add_constraint("fea.con", equals=0.03) # formerly 0.03
+prob.model.add_constraint("fea.con", equals=0.03)  # formerly 0.03
 prob.setup(check=True)
 
 
@@ -400,13 +394,15 @@ ax.set_ylabel(r"$h*$")
 ax.set_xlabel(r"$x$")
 ax.set_title("Optimized Thickness Distribution")
 
-fig,ax = plt.subplots()
+fig, ax = plt.subplots()
 ax.plot(x["src.v"])
+
 
 def beam_coordinates(v, L):
     n = len(v)
     x = np.linspace(0.0, L, n)
     return x, v
+
 
 def plot_deformed_beam(v, h, L, scale=1.0):
     x, w = beam_coordinates(v, L)
@@ -415,15 +411,15 @@ def plot_deformed_beam(v, h, L, scale=1.0):
     plt.figure(figsize=(10, 3))
 
     for e in range(len(h)):
-        x_e = [x[e], x[e+1]]
-        w_e = [w[e], w[e+1]]
+        x_e = [x[e], x[e + 1]]
+        w_e = [w[e], w[e + 1]]
 
         plt.plot(
             x_e,
             w_e,
             linewidth=10 * h[e] / np.max(h),
             solid_capstyle="round",
-            color="black"
+            color="black",
         )
 
     plt.axhline(0.0, color="gray", linestyle="--", linewidth=0.8)
@@ -433,6 +429,7 @@ def plot_deformed_beam(v, h, L, scale=1.0):
     plt.grid(True)
     plt.tight_layout()
     plt.show()
+
 
 plot_deformed_beam(x["src.v"], prob["indeps.h"], length)
 

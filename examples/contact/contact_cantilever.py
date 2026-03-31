@@ -10,6 +10,7 @@ import openmdao.api as om
 # Cantilever Euler-Bernoulli Beam with Contact constraint
 # Author: Jack Turbush
 
+
 def original_om_problem():
     from openmdao.test_suite.test_examples.beam_optimization.beam_group import BeamGroup
 
@@ -78,7 +79,7 @@ class beam_element(am.Component):
 
         # thickness Optimization changes I
         h = self.data["h"]
-        I = 1.0 #/ 12.0 * 0.333 * h**3
+        I = 1.0  # / 12.0 * 0.333 * h**3
 
         # Create beam element stiffness matrix
         Ke = np.empty((4, 4))
@@ -135,7 +136,7 @@ class AppliedLoad(am.Component):
         v = self.inputs["v"]
         t = self.inputs["t"]
         # Work done by external forces (negative contributes to total PE)
-        Le = length/50
+        Le = length / 50
         fe = [
             Fv * Le * 0.5,
             Fv * Le * (Le / 12),
@@ -145,10 +146,7 @@ class AppliedLoad(am.Component):
         de = np.array([v[0], t[0], v[1], t[1]])
         # self.objective["work"] = -1*(fe @ de)
         self.objective["work"] = -(
-            fe[0] * de[0] +
-            fe[1] * de[1] +
-            fe[2] * de[2] +
-            fe[3] * de[3]
+            fe[0] * de[0] + fe[1] * de[1] + fe[2] * de[2] + fe[3] * de[3]
         )
         return
 
@@ -166,11 +164,10 @@ class NodeSource(am.Component):
         self.add_input("t")
 
     #     self.add_constraint("v_floor", lower = -1e-3)
-    
+
     # def compute(self):
     #     v = self.inputs["v"]
     #     self.constraints["v_floor"] = v
-
 
 
 class Compliance(am.Component):
@@ -189,7 +186,7 @@ class Compliance(am.Component):
         t = self.inputs["t"]
         # Fv = self.constants["Fv"]
         # Mt = self.constants["Mt"]
-        Le = length/50
+        Le = length / 50
         fe = [
             Fv * Le * 0.5,
             Fv * Le * (Le / 12),
@@ -199,10 +196,7 @@ class Compliance(am.Component):
         de = np.array([v[0], t[0], v[1], t[1]])
         # self.objective["work"] = -1*(fe @ de)
         self.outputs["c"] = (
-            fe[0] * de[0] +
-            fe[1] * de[1] +
-            fe[2] * de[2] +
-            fe[3] * de[3]
+            fe[0] * de[0] + fe[1] * de[1] + fe[2] * de[2] + fe[3] * de[3]
         )
 
 
@@ -225,7 +219,11 @@ def main():
     # Set up the argument parser
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--build", dest="build", action="store_true", default=False, help="Enable building"
+        "--build",
+        dest="build",
+        action="store_true",
+        default=False,
+        help="Enable building",
     )
     parser.add_argument(
         "--optimizer",
@@ -273,7 +271,6 @@ def main():
     model.add_component("vol_con", nelems, vol_con)
     model.link("beam_element.h", "vol_con.h")
 
-
     model.link("comp.c[1:]", "comp.c[0]")
     # Summing constraints as output
     model.link("vol_con.con[1:]", "vol_con.con[0]")
@@ -293,7 +290,7 @@ def main():
 
     # Set bounds on displacements
     # lower["src.v"] = -float("inf")
-    lower["src.v"] = -1e-3 # mm
+    lower["src.v"] = -1e-3  # mm
     upper["src.v"] = float("inf")
 
     lower["src.t"] = -float("inf")
@@ -307,12 +304,12 @@ def main():
         "initial_barrier_param": 0.1,
     }
 
-    #indiv. Amigo problem:
+    # indiv. Amigo problem:
     opt = am.Optimizer(
         model,
         x,
-        lower = lower,
-        upper = upper,
+        lower=lower,
+        upper=upper,
     )
     opt.optimize(opt_options)
 
@@ -320,23 +317,20 @@ def main():
     #     of="comp.c[0]", wrt="beam_element.h", method="adjoint"
     # )
 
-
     # verify the contact forces in all the elements!
-    x_v = x['src.v']
+    x_v = x["src.v"]
     mu = opt.barrier_param
-    lbxv = lower['src.v']
+    lbxv = lower["src.v"]
     zl = mu / (x_v - lbxv)
-    print('zl:', zl)
+    print("zl:", zl)
 
     fig, ax = plt.subplots()
-    plt.plot(x_coords,zl)
+    plt.plot(x_coords, zl)
     plt.show()
     exit()
     return x, x_coords
 
-
     # exit()
-
 
     # # OpenMDAO optimization
     # prob = om.Problem()
@@ -378,7 +372,6 @@ def main():
     # else:
     #     prob.driver.options["optimizer"] = args.optimizer
 
-
     # prob.driver.options["maxiter"] = 1
     # prob.driver.options["tol"] = 1e-9
     # prob.driver.options["disp"] = True
@@ -388,7 +381,6 @@ def main():
     # prob.model.add_objective("fea.c", ref=1.0e3)
     # prob.model.add_constraint("fea.con", equals=0.03)
     # prob.setup(check=True)
-
 
     # # data = prob.check_partials(compact_print=False, step=1e-6)
     # # exit()
@@ -413,31 +405,34 @@ def main():
 
 
 def plot(v, x_c):
-    x_ref_arr = np.linspace(0,1,51)
+    x_ref_arr = np.linspace(0, 1, 51)
     EI = E
     lam = -75
     v_ref = np.empty_like(x_ref_arr)
     v_nocontact = np.empty_like(x_ref_arr)
     for i in range(len(x_ref_arr)):
         x = x_ref_arr[i]
-        v_ref[i] = (Fv*x**2/(24*EI))*(x**2 + 6 - 4*x) - (lam*x**2)/(6*EI)*(3-x)
-        v_nocontact[i] = (Fv*x**2/(24*EI))*(x**2 + 6 - 4*x)
+        v_ref[i] = (Fv * x**2 / (24 * EI)) * (x**2 + 6 - 4 * x) - (lam * x**2) / (
+            6 * EI
+        ) * (3 - x)
+        v_nocontact[i] = (Fv * x**2 / (24 * EI)) * (x**2 + 6 - 4 * x)
 
-    fig,ax = plt.subplots()
-    ax.plot(x_c,v)
+    fig, ax = plt.subplots()
+    ax.plot(x_c, v)
     # ax.plot(x_c,v_ref)
     # ax.plot(x_c,v_nocontact)
-    ax.legend([r"$v_{\text{amigo}}$",r"$v_{\text{amigo}}$",r"$v_\text{free}$"])
-    print('max relative error: ', np.max((v-v_ref))/np.linalg.norm(v))
+    ax.legend([r"$v_{\text{amigo}}$", r"$v_{\text{amigo}}$", r"$v_\text{free}$"])
+    print("max relative error: ", np.max((v - v_ref)) / np.linalg.norm(v))
     # ax.plot((v-v_ref)/v_ref)
     ax.grid(True)
-    plt.axhline(-1e-3, color = 'black')
-    ax.set_ylabel('$vertical displacement (m)$')
-    ax.set_xlabel('$x(m)$')
-    plt.savefig('contact.png')
+    plt.axhline(-1e-3, color="black")
+    ax.set_ylabel("$vertical displacement (m)$")
+    ax.set_xlabel("$x(m)$")
+    plt.savefig("contact.png")
     # plt.show()
 
+
 if __name__ == "__main__":
-    x,x_c = main()
+    x, x_c = main()
     # np.save('v_cant.npy', x['src.v'])
-    plot(x['src.v'], x_c)
+    plot(x["src.v"], x_c)
