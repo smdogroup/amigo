@@ -259,7 +259,7 @@ class MumpsSolver(_HessianDiagMixin):
             if conda:
                 search_dirs.append(os.path.join(conda, "Library", "bin"))
         elif sys.platform == "darwin":
-            names = ["libdmumps.dylib"]
+            names = ["libdmumps.dylib", "libcoinmumps.dylib"]
             brew_prefix = "/opt/homebrew/opt/brewsci-mumps/lib"
             brew_x86 = "/usr/local/opt/brewsci-mumps/lib"
             search_dirs = [d for d in [lib_dir, brew_prefix, brew_x86] if d]
@@ -1342,7 +1342,8 @@ class Optimizer:
         lower, upper : array-like, optional
             Variable bounds
         solver : Solver, optional
-            Linear solver for KKT system
+            Linear solver for KKT system.
+            Can also specify by passing string from ["scipy", "pardiso", "mumps"]
         comm : MPI communicator, optional
             For distributed optimization
         distribute : bool
@@ -1417,22 +1418,25 @@ class Optimizer:
         # AMIGO_SOLVER env var: "scipy", "mumps", "pardiso" (default: auto)
         if solver is None and self.distribute:
             self.solver = DirectPetscSolver(self.comm, self.mpi_problem)
-        elif solver is None:
-            solver_pref = os.environ.get("AMIGO_SOLVER", "").lower()
+        elif isinstance(solver, str):
+            solver_pref = solver.lower()
             if solver_pref == "scipy":
                 self.solver = DirectScipySolver(self.problem)
             elif solver_pref == "pardiso":
                 self.solver = PardisoSolver(self.problem)
-            else:
-                try:
-                    self.solver = MumpsSolver(self.problem)
-                except (ImportError, Exception):
-                    try:
-                        self.solver = PardisoSolver(self.problem)
-                    except (ImportError, Exception):
-                        self.solver = DirectScipySolver(self.problem)
-        else:
+            elif solver_pref == "mumps":
+                self.solver = MumpsSolver(self.problem)
+        elif solver is not None:
             self.solver = solver
+        else:
+            # Fallback
+            try:
+                self.solver = MumpsSolver(self.problem)
+            except (ImportError, Exception):
+                try:
+                    self.solver = PardisoSolver(self.problem)
+                except (ImportError, Exception):
+                    self.solver = DirectScipySolver(self.problem)
 
         # Create the interior point optimizer object
         if self.distribute:
