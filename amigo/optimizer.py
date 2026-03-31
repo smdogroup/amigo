@@ -5,6 +5,7 @@ import numpy as np
 from collections import deque
 from scipy.sparse import csr_matrix
 from scipy.sparse.linalg import splu
+from scipy.linalg import ldl, solve_triangular, solve
 
 from .amigo import InteriorPointOptimizer, MemoryLocation
 from .model import ModelVector
@@ -215,6 +216,84 @@ class DirectScipySolver(_HessianDiagMixin):
     def solve_array(self, rhs):
         """Solve K*x = rhs using existing factorization. Returns numpy array."""
         return self.lu.solve(rhs)
+
+
+class DirectScipyDenseSolver(_HessianDiagMixin):
+    def __init__(self, problem):
+        self.problem = problem
+        loc = MemoryLocation.HOST_AND_DEVICE
+        self.hess = self.problem.create_matrix(loc)
+        self.nrows, self.ncols, self.nnz, self.rowp, self.cols = (
+            self.hess.get_nonzero_structure()
+        )
+        self._diag_indices = _find_diag_indices(self.rowp, self.cols, self.nrows)
+
+    def add_diagonal_and_factor(self, diag):
+        """Add diagonal to the already-assembled Hessian and factorize.
+
+        Must be called after assemble_hessian().  Modifies self.hess
+        in-place, so a subsequent retry must use factor() (which
+        re-assembles from scratch).
+        """
+        self.problem.add_diagonal(diag, self.hess)
+        self.hess.copy_data_device_to_host()
+        shape = (self.nrows, self.ncols)
+        data = self.hess.get_data()
+        self.H = csr_matrix((data, self.cols, self.rowp), shape=shape).tocsc().todense()
+        self.L, self.D, self.perm = ldl(self.H)
+        # print(f"H: {self.H}")
+
+    def factor(self, alpha, x, diag, post_hessian=None):
+        """Assemble Hessian, add diagonal, and factorize (one shot).
+
+        Used for inertia-correction retries where we need a fresh
+        assembly (since add_diagonal_and_factor mutates self.hess).
+        """
+        self.problem.hessian(alpha, x, self.hess)
+        # if post_hessian is not None:
+        self.hess.copy_data_device_to_host()
+        post_hessian(self.hess)
+        self.problem.add_diagonal(diag, self.hess)
+        self.hess.copy_data_device_to_host()
+        shape = (self.nrows, self.ncols)
+        data = self.hess.get_data()
+        self.H = csr_matrix((data, self.cols, self.rowp), shape=shape).tocsc().todense()
+        self.L, self.D, self.perm = ldl(self.H)
+        print(f"x: {x.get_array()}")
+        print(f"H_: {self.H}")
+
+    def solve(self, bx, px):
+        """Solve the KKT system."""
+        bx.copy_device_to_host()
+        # px.get_array()[:] = self.lu.solve(bx.get_array())
+        b = bx.get_array()
+
+        b_p = b[self.perm]
+        y = solve_triangular(self.L, b_p, lower=True, unit_diagonal=True)
+        z = solve(self.D, y)
+        x_p = solve_triangular(self.L.T, z, lower=False, unit_diagonal=True)
+        px.get_array()[self.perm] = x_p
+        px.copy_host_to_device()
+
+    def solve_array(self, rhs):
+        """Solve K*x = rhs using existing factorization. Returns numpy array."""
+        rhs_p = rhs[self.perm]
+        y = solve_triangular(self.L, rhs_p, lower=True, unit_diagonal=True)
+        z = solve(self.D, y)
+        x_p = solve_triangular(self.L.T, z, lower=False, unit_diagonal=True)
+        rhs_p[self.perm] = x_p
+        return rhs_p
+
+    def get_inertia(self):
+        d = np.diag(self.D)
+        # print(f"d: {d}")
+        eigs, vecs = np.linalg.eigh(self.H)
+        # print(f"eigs: {eigs}")
+        n_pos = np.count_nonzero(d > 0)
+        n_neg = np.count_nonzero(d < 0)
+        n_zero = np.count_nonzero(d == 0)
+        # print(f"n_pos: {n_pos}, n_neg: {n_neg}, n_zero: {n_zero}", flush=True)
+        return n_pos, n_neg
 
 
 class MumpsSolver(_HessianDiagMixin):
@@ -1420,7 +1499,7 @@ class Optimizer:
         elif solver is None:
             solver_pref = os.environ.get("AMIGO_SOLVER", "").lower()
             if solver_pref == "scipy":
-                self.solver = DirectScipySolver(self.problem)
+                self.solver = DirectScipyDenseSolver(self.problem)
             elif solver_pref == "pardiso":
                 self.solver = PardisoSolver(self.problem)
             else:
@@ -1430,7 +1509,7 @@ class Optimizer:
                     try:
                         self.solver = PardisoSolver(self.problem)
                     except (ImportError, Exception):
-                        self.solver = DirectScipySolver(self.problem)
+                        self.solver = DirectScipyDenseSolver(self.problem)
         else:
             self.solver = solver
 

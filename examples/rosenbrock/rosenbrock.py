@@ -1,5 +1,7 @@
 import amigo as am
-import argparse
+import argparse, os
+
+os.environ["AMIGO_SOLVER"] = "scipy"
 
 
 class Rosenbrock(am.Component):
@@ -32,5 +34,9 @@ if args.build:
 
 model.initialize()
 
+(inputs, constraints, data, outputs) = model.get_names()
+print(f"inputs: {inputs}")
+print(f"constraints: {constraints}")
+
 opt = am.Optimizer(model)
-opt.optimize({"max_iterations": 50})
+opt.optimize({"max_iterations": 5})

@@ -1,11 +1,13 @@
 import amigo as am
 from amigo.interp import BSpline
 import numpy as np
-import sys
+import sys, os
 import matplotlib.pylab as plt
 import niceplots
 import argparse
 import json
+
+os.environ["AMIGO_SOLVER"] = "scipy"
 
 # Problem parameters
 num_time_steps = 500

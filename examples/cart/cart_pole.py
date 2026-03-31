@@ -1,10 +1,11 @@
 import argparse
-import json
+import json, os
 from pathlib import Path
 import amigo as am
 import numpy as np
 import cart_plots
 import matplotlib.pylab as plt
+os.environ["AMIGO_SOLVER"] = "scipy"
 
 try:
     from mpi4py import MPI
