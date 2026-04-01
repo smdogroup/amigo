@@ -225,8 +225,8 @@ class MumpsSolver(_HessianDiagMixin):
 
     Requires coin-or/ThirdParty-Mumps (with METIS ordering and scaling).
     Windows: build via MSYS2 with mingw-w64-x86_64-metis.
-    Linux: apt install libmumps-dev or conda install mumps-seq.
-    Mac: brew install brewsci/num/mumps.
+    Linux: apt install libmumps-dev or conda install mumps-seq or install via ThirdParty-Mumps.
+    Mac: install via ThirdParty-Mumps.
     """
 
     @staticmethod
