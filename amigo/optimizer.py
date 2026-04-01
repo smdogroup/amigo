@@ -225,8 +225,8 @@ class MumpsSolver(_HessianDiagMixin):
 
     Requires coin-or/ThirdParty-Mumps (with METIS ordering and scaling).
     Windows: build via MSYS2 with mingw-w64-x86_64-metis.
-    Linux: apt install libmumps-dev or conda install mumps-seq.
-    Mac: brew install brewsci/num/mumps.
+    Linux: apt install libmumps-dev or conda install mumps-seq or install via ThirdParty-Mumps.
+    Mac: install via ThirdParty-Mumps.
     """
 
     @staticmethod
@@ -259,13 +259,15 @@ class MumpsSolver(_HessianDiagMixin):
             if conda:
                 search_dirs.append(os.path.join(conda, "Library", "bin"))
         elif sys.platform == "darwin":
-            names = ["libdmumps.dylib", "libcoinmumps.dylib"]
+            names = ["libcoinmumps.dylib", "libdmumps.dylib"]
+            coinor = os.path.expanduser("~/mumps-coinor/lib")
             brew_prefix = "/opt/homebrew/opt/brewsci-mumps/lib"
             brew_x86 = "/usr/local/opt/brewsci-mumps/lib"
-            search_dirs = [d for d in [lib_dir, brew_prefix, brew_x86] if d]
+            search_dirs = [d for d in [lib_dir, coinor, brew_prefix, brew_x86] if d]
         else:
-            names = ["libdmumps.so"]
-            search_dirs = [lib_dir] if lib_dir else []
+            names = ["libcoinmumps.so", "libdmumps.so"]
+            coinor = os.path.expanduser("~/mumps-coinor/lib")
+            search_dirs = [d for d in [lib_dir, coinor] if d]
 
         # Try each directory + name combination, then bare names for PATH
         for d in search_dirs:
@@ -362,185 +364,117 @@ class MumpsSolver(_HessianDiagMixin):
         self._mumps.lrhs = self.nrows
 
     def _build_struct(self):
-        """Build the ctypes Structure matching DMUMPS_STRUC_C."""
+        """Build the ctypes Structure matching DMUMPS_STRUC_C (MUMPS 5.8.2)."""
         ct = self._ct
-        import sys
 
-        if sys.platform == "win32":
-            # Layout matching the Windows MUMPS build (newer/custom version)
-            _mumps_fields = [
-                ("sym", ct.c_int),
-                ("par", ct.c_int),
-                ("job", ct.c_int),
-                ("comm_fortran", ct.c_int),
-                ("icntl", ct.c_int * 60),
-                ("keep", ct.c_int * 500),
-                ("cntl", ct.c_double * 15),
-                ("dkeep", ct.c_double * 230),
-                ("keep8", ct.c_int64 * 150),
-                ("n", ct.c_int),
-                ("nblk", ct.c_int),
-                ("nz_alloc", ct.c_int),
-                ("nz", ct.c_int),
-                ("nnz", ct.c_int64),
-                ("irn", ct.POINTER(ct.c_int)),
-                ("jcn", ct.POINTER(ct.c_int)),
-                ("a", ct.POINTER(ct.c_double)),
-                ("nz_loc", ct.c_int),
-                ("nnz_loc", ct.c_int64),
-                ("irn_loc", ct.POINTER(ct.c_int)),
-                ("jcn_loc", ct.POINTER(ct.c_int)),
-                ("a_loc", ct.POINTER(ct.c_double)),
-                ("nelt", ct.c_int),
-                ("eltptr", ct.POINTER(ct.c_int)),
-                ("eltvar", ct.POINTER(ct.c_int)),
-                ("a_elt", ct.POINTER(ct.c_double)),
-                ("blkptr", ct.POINTER(ct.c_int)),
-                ("blkvar", ct.POINTER(ct.c_int)),
-                ("perm_in", ct.POINTER(ct.c_int)),
-                ("sym_perm", ct.POINTER(ct.c_int)),
-                ("uns_perm", ct.POINTER(ct.c_int)),
-                ("colsca", ct.POINTER(ct.c_double)),
-                ("rowsca", ct.POINTER(ct.c_double)),
-                ("colsca_from_mumps", ct.c_int),
-                ("rowsca_from_mumps", ct.c_int),
-                ("colsca_loc", ct.POINTER(ct.c_double)),
-                ("rowsca_loc", ct.POINTER(ct.c_double)),
-                ("rowind", ct.POINTER(ct.c_int)),
-                ("colind", ct.POINTER(ct.c_int)),
-                ("pivots", ct.POINTER(ct.c_double)),
-                ("rhs", ct.POINTER(ct.c_double)),
-                ("redrhs", ct.POINTER(ct.c_double)),
-                ("rhs_sparse", ct.POINTER(ct.c_double)),
-                ("sol_loc", ct.POINTER(ct.c_double)),
-                ("rhs_loc", ct.POINTER(ct.c_double)),
-                ("rhsintr", ct.POINTER(ct.c_double)),
-                ("irhs_sparse", ct.POINTER(ct.c_int)),
-                ("irhs_ptr", ct.POINTER(ct.c_int)),
-                ("isol_loc", ct.POINTER(ct.c_int)),
-                ("irhs_loc", ct.POINTER(ct.c_int)),
-                ("glob2loc_rhs", ct.POINTER(ct.c_int)),
-                ("glob2loc_sol", ct.POINTER(ct.c_int)),
-                ("nrhs", ct.c_int),
-                ("lrhs", ct.c_int),
-                ("lredrhs", ct.c_int),
-                ("nz_rhs", ct.c_int),
-                ("lsol_loc", ct.c_int),
-                ("nloc_rhs", ct.c_int),
-                ("lrhs_loc", ct.c_int),
-                ("nsol_loc", ct.c_int),
-                ("schur_mloc", ct.c_int),
-                ("schur_nloc", ct.c_int),
-                ("schur_lld", ct.c_int),
-                ("mblock", ct.c_int),
-                ("nblock", ct.c_int),
-                ("nprow", ct.c_int),
-                ("npcol", ct.c_int),
-                ("ld_rhsintr", ct.c_int),
-                ("info", ct.c_int * 80),
-                ("infog", ct.c_int * 80),
-                ("rinfo", ct.c_double * 40),
-                ("rinfog", ct.c_double * 40),
-                ("deficiency", ct.c_int),
-                ("pivnul_list", ct.POINTER(ct.c_int)),
-                ("mapping", ct.POINTER(ct.c_int)),
-                ("singular_values", ct.POINTER(ct.c_double)),
-                ("size_schur", ct.c_int),
-                ("listvar_schur", ct.POINTER(ct.c_int)),
-                ("schur", ct.POINTER(ct.c_double)),
-                ("wk_user", ct.POINTER(ct.c_double)),
-                ("version_number", ct.c_char * 32),
-                ("ooc_tmpdir", ct.c_char * 1024),
-                ("ooc_prefix", ct.c_char * 256),
-                ("write_problem", ct.c_char * 1024),
-                ("lwk_user", ct.c_int),
-                ("save_dir", ct.c_char * 1024),
-                ("save_prefix", ct.c_char * 256),
-                ("metis_options", ct.c_int * 40),
-                ("instance_number", ct.c_int),
-            ]
-        else:
-            # Layout matching MUMPS 5.x (Linux/Mac)
-            _mumps_fields = [
-                ("sym", ct.c_int),
-                ("par", ct.c_int),
-                ("job", ct.c_int),
-                ("comm_fortran", ct.c_int),
-                ("icntl", ct.c_int * 60),
-                ("keep", ct.c_int * 500),
-                ("cntl", ct.c_double * 15),
-                ("dkeep", ct.c_double * 230),
-                ("keep8", ct.c_int64 * 150),
-                ("n", ct.c_int),
-                ("nblk", ct.c_int),
-                ("nz_alloc", ct.c_int),
-                ("nz", ct.c_int),
-                ("nnz", ct.c_int64),
-                ("irn", ct.POINTER(ct.c_int)),
-                ("jcn", ct.POINTER(ct.c_int)),
-                ("a", ct.POINTER(ct.c_double)),
-                ("nz_loc", ct.c_int),
-                ("nnz_loc", ct.c_int64),
-                ("irn_loc", ct.POINTER(ct.c_int)),
-                ("jcn_loc", ct.POINTER(ct.c_int)),
-                ("a_loc", ct.POINTER(ct.c_double)),
-                ("nelt", ct.c_int),
-                ("eltptr", ct.POINTER(ct.c_int)),
-                ("eltvar", ct.POINTER(ct.c_int)),
-                ("a_elt", ct.POINTER(ct.c_double)),
-                ("blkptr", ct.POINTER(ct.c_int)),
-                ("blkvar", ct.POINTER(ct.c_int)),
-                ("perm_in", ct.POINTER(ct.c_int)),
-                ("sym_perm", ct.POINTER(ct.c_int)),
-                ("uns_perm", ct.POINTER(ct.c_int)),
-                ("colsca", ct.POINTER(ct.c_double)),
-                ("rowsca", ct.POINTER(ct.c_double)),
-                ("colsca_from_mumps", ct.c_int),
-                ("rowsca_from_mumps", ct.c_int),
-                ("rhs", ct.POINTER(ct.c_double)),
-                ("redrhs", ct.POINTER(ct.c_double)),
-                ("rhs_sparse", ct.POINTER(ct.c_double)),
-                ("sol_loc", ct.POINTER(ct.c_double)),
-                ("rhs_loc", ct.POINTER(ct.c_double)),
-                ("irhs_sparse", ct.POINTER(ct.c_int)),
-                ("irhs_ptr", ct.POINTER(ct.c_int)),
-                ("isol_loc", ct.POINTER(ct.c_int)),
-                ("irhs_loc", ct.POINTER(ct.c_int)),
-                ("nrhs", ct.c_int),
-                ("lrhs", ct.c_int),
-                ("lredrhs", ct.c_int),
-                ("nz_rhs", ct.c_int),
-                ("lsol_loc", ct.c_int),
-                ("nloc_rhs", ct.c_int),
-                ("lrhs_loc", ct.c_int),
-                ("schur_mloc", ct.c_int),
-                ("schur_nloc", ct.c_int),
-                ("schur_lld", ct.c_int),
-                ("mblock", ct.c_int),
-                ("nblock", ct.c_int),
-                ("nprow", ct.c_int),
-                ("npcol", ct.c_int),
-                ("info", ct.c_int * 80),
-                ("infog", ct.c_int * 80),
-                ("rinfo", ct.c_double * 40),
-                ("rinfog", ct.c_double * 40),
-                ("deficiency", ct.c_int),
-                ("pivnul_list", ct.POINTER(ct.c_int)),
-                ("mapping", ct.POINTER(ct.c_int)),
-                ("size_schur", ct.c_int),
-                ("listvar_schur", ct.POINTER(ct.c_int)),
-                ("schur", ct.POINTER(ct.c_double)),
-                ("instance_number", ct.c_int),
-                ("wk_user", ct.POINTER(ct.c_double)),
-                ("version_number", ct.c_char * 32),
-                ("ooc_tmpdir", ct.c_char * 256),
-                ("ooc_prefix", ct.c_char * 64),
-                ("write_problem", ct.c_char * 256),
-                ("lwk_user", ct.c_int),
-                ("save_dir", ct.c_char * 256),
-                ("save_prefix", ct.c_char * 256),
-                ("metis_options", ct.c_int * 40),
-            ]
+        _mumps_fields = [
+            # Control
+            ("sym", ct.c_int),
+            ("par", ct.c_int),
+            ("job", ct.c_int),
+            ("comm_fortran", ct.c_int),
+            ("icntl", ct.c_int * 60),
+            ("keep", ct.c_int * 500),
+            ("cntl", ct.c_double * 15),
+            ("dkeep", ct.c_double * 230),
+            ("keep8", ct.c_int64 * 150),
+            ("n", ct.c_int),
+            ("nblk", ct.c_int),
+            ("nz_alloc", ct.c_int),
+            # Assembled entry
+            ("nz", ct.c_int),
+            ("nnz", ct.c_int64),
+            ("irn", ct.POINTER(ct.c_int)),
+            ("jcn", ct.POINTER(ct.c_int)),
+            ("a", ct.POINTER(ct.c_double)),
+            # Distributed entry
+            ("nz_loc", ct.c_int),
+            ("nnz_loc", ct.c_int64),
+            ("irn_loc", ct.POINTER(ct.c_int)),
+            ("jcn_loc", ct.POINTER(ct.c_int)),
+            ("a_loc", ct.POINTER(ct.c_double)),
+            # Element entry
+            ("nelt", ct.c_int),
+            ("eltptr", ct.POINTER(ct.c_int)),
+            ("eltvar", ct.POINTER(ct.c_int)),
+            ("a_elt", ct.POINTER(ct.c_double)),
+            # Matrix by blocks
+            ("blkptr", ct.POINTER(ct.c_int)),
+            ("blkvar", ct.POINTER(ct.c_int)),
+            # Ordering
+            ("perm_in", ct.POINTER(ct.c_int)),
+            ("sym_perm", ct.POINTER(ct.c_int)),
+            ("uns_perm", ct.POINTER(ct.c_int)),
+            # Scaling
+            ("colsca", ct.POINTER(ct.c_double)),
+            ("rowsca", ct.POINTER(ct.c_double)),
+            ("colsca_from_mumps", ct.c_int),
+            ("rowsca_from_mumps", ct.c_int),
+            ("colsca_loc", ct.POINTER(ct.c_double)),
+            ("rowsca_loc", ct.POINTER(ct.c_double)),
+            # Info after facto
+            ("rowind", ct.POINTER(ct.c_int)),
+            ("colind", ct.POINTER(ct.c_int)),
+            ("pivots", ct.POINTER(ct.c_double)),
+            # RHS, solution, output data and statistics
+            ("rhs", ct.POINTER(ct.c_double)),
+            ("redrhs", ct.POINTER(ct.c_double)),
+            ("rhs_sparse", ct.POINTER(ct.c_double)),
+            ("sol_loc", ct.POINTER(ct.c_double)),
+            ("rhs_loc", ct.POINTER(ct.c_double)),
+            ("rhsintr", ct.POINTER(ct.c_double)),
+            ("irhs_sparse", ct.POINTER(ct.c_int)),
+            ("irhs_ptr", ct.POINTER(ct.c_int)),
+            ("isol_loc", ct.POINTER(ct.c_int)),
+            ("irhs_loc", ct.POINTER(ct.c_int)),
+            ("glob2loc_rhs", ct.POINTER(ct.c_int)),
+            ("glob2loc_sol", ct.POINTER(ct.c_int)),
+            ("nrhs", ct.c_int),
+            ("lrhs", ct.c_int),
+            ("lredrhs", ct.c_int),
+            ("nz_rhs", ct.c_int),
+            ("lsol_loc", ct.c_int),
+            ("nloc_rhs", ct.c_int),
+            ("lrhs_loc", ct.c_int),
+            ("nsol_loc", ct.c_int),
+            ("schur_mloc", ct.c_int),
+            ("schur_nloc", ct.c_int),
+            ("schur_lld", ct.c_int),
+            ("mblock", ct.c_int),
+            ("nblock", ct.c_int),
+            ("nprow", ct.c_int),
+            ("npcol", ct.c_int),
+            ("ld_rhsintr", ct.c_int),
+            ("info", ct.c_int * 80),
+            ("infog", ct.c_int * 80),
+            ("rinfo", ct.c_double * 40),
+            ("rinfog", ct.c_double * 40),
+            # Null space
+            ("deficiency", ct.c_int),
+            ("pivnul_list", ct.POINTER(ct.c_int)),
+            ("mapping", ct.POINTER(ct.c_int)),
+            ("singular_values", ct.POINTER(ct.c_double)),
+            # Schur
+            ("size_schur", ct.c_int),
+            ("listvar_schur", ct.POINTER(ct.c_int)),
+            ("schur", ct.POINTER(ct.c_double)),
+            # User workspace
+            ("wk_user", ct.POINTER(ct.c_double)),
+            # Version number (MUMPS_VERSION_MAX_LEN=30 + 1 + 1 = 32)
+            ("version_number", ct.c_char * 32),
+            # Out-of-core
+            ("ooc_tmpdir", ct.c_char * 1024),
+            ("ooc_prefix", ct.c_char * 256),
+            ("write_problem", ct.c_char * 1024),
+            ("lwk_user", ct.c_int),
+            # Save/restore
+            ("save_dir", ct.c_char * 1024),
+            ("save_prefix", ct.c_char * 256),
+            # Metis options
+            ("metis_options", ct.c_int * 40),
+            # Internal
+            ("instance_number", ct.c_int),
+        ]
 
         class DMUMPS_STRUC_C(ct.Structure):
             _fields_ = _mumps_fields
