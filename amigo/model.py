@@ -1,4 +1,5 @@
 import numpy as np
+import os
 import ast
 import sys
 import importlib
@@ -1053,13 +1054,17 @@ class Model:
     def _guess_source_dir(self):
         """Make a guess for the source directory"""
 
-        for name in self.comp:
-            cls = self.comp[name].comp_obj
-            module = sys.modules[cls.__module__]
-            source = getattr(module, "__file__", None)
+        try:
+            cwd = os.getcwd()
+            return Path(cwd)
+        except:
+            for name in self.comp:
+                cls = self.comp[name].comp_obj
+                module = sys.modules[cls.__module__]
+                source = getattr(module, "__file__", None)
 
-            if source is not None:
-                return Path(source).resolve().parent
+                if source is not None:
+                    return Path(source).resolve().parent
 
         return None
 
