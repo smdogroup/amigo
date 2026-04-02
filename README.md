@@ -52,16 +52,17 @@ Amigo's interior-point optimizer requires [MUMPS](https://mumps-solver.org/) for
 ### Linux
 
 ```bash
-sudo apt install gfortran libopenblas-dev libmetis-dev libscotch-dev make autoconf automake libtool
+sudo apt install build-essential cmake gfortran libopenmpi-dev libopenblas-dev
 git clone https://github.com/coin-or-tools/ThirdParty-Mumps.git && cd ThirdParty-Mumps
-./get.Mumps && ./configure --prefix=/usr/local && make -j$(nproc) && sudo make install
+./get.Mumps && ./configure --prefix=$HOME/mumps-coinor && make -j$(nproc) && make install
 ```
 
 ### macOS
 
 ```bash
-brew tap brewsci/num
-brew install brewsci-mumps
+brew install gcc open-mpi openblas
+git clone https://github.com/coin-or-tools/ThirdParty-Mumps.git && cd ThirdParty-Mumps
+./get.Mumps && ./configure --prefix=$HOME/mumps-coinor FC=gfortran && make -j$(sysctl -n hw.ncpu) && make install
 ```
 
 ### Windows
