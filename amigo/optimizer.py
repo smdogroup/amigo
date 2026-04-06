@@ -1164,7 +1164,7 @@ class InertiaCorrector:
                 # Success
                 self.last_delta_w = self._delta_x_curr
                 self.last_delta_c = self._delta_c_curr
-                if self._delta_x_curr > 0 and comm_rank == 0:
+                if self._delta_x_curr > 0 and comm_rank == 0 and self._verbose:
                     print(
                         f"  Inertia correction: "
                         f"delta_w={self._delta_x_curr:.2e}, "
@@ -1361,14 +1361,23 @@ class Optimizer:
 
         # Set the solver for the KKT system
         # AMIGO_SOLVER env var: "scipy", "mumps", "pardiso" (default: auto)
+        def _make_solver(name):
+            name = name.lower()
+            if name == "scipy":
+                return DirectScipySolver(self.problem)
+            elif name == "pardiso":
+                return PardisoSolver(self.problem)
+            elif name == "mumps":
+                return MumpsSolver(self.problem)
+            else:
+                raise ValueError(f"Unknown solver: {name!r}")
+
         if solver is None and self.distribute:
             self.solver = DirectPetscSolver(self.comm, self.mpi_problem)
         elif solver is None:
             solver_pref = os.environ.get("AMIGO_SOLVER", "").lower()
-            if solver_pref == "scipy":
-                self.solver = DirectScipySolver(self.problem)
-            elif solver_pref == "pardiso":
-                self.solver = PardisoSolver(self.problem)
+            if solver_pref:
+                self.solver = _make_solver(solver_pref)
             else:
                 try:
                     self.solver = MumpsSolver(self.problem)
@@ -1377,6 +1386,8 @@ class Optimizer:
                         self.solver = PardisoSolver(self.problem)
                     except (ImportError, Exception):
                         self.solver = DirectScipySolver(self.problem)
+        elif isinstance(solver, str):
+            self.solver = _make_solver(solver)
         else:
             self.solver = solver
 
@@ -2722,7 +2733,7 @@ class Optimizer:
 
                     if soc_ok:
                         self.vars.copy(self.temp)
-                        if comm_rank == 0:
+                        if comm_rank == 0 and options.get("verbose_barrier"):
                             print(f"  SOC accepted: {ls_baseline:.2e} -> {res_soc:.2e}")
                         return 1.0, j + 1, True
 
@@ -3075,7 +3086,7 @@ class Optimizer:
                     alpha_soc = soc_ax
 
                 if soc_accepted:
-                    if comm_rank == 0:
+                    if comm_rank == 0 and options.get("verbose_barrier"):
                         print(f"  SOC accepted (iter {soc_count+1}/{max_soc})")
                     return 1.0, n_steps + 1, True, False
 
@@ -3935,7 +3946,7 @@ class Optimizer:
             if not factorize_ok:
                 step_rejected = True
                 consecutive_rejections += 1
-                if comm_rank == 0:
+                if comm_rank == 0 and options.get("verbose_barrier"):
                     print(
                         f"  Inertia correction FAILED " f"({consecutive_rejections}x)"
                     )
