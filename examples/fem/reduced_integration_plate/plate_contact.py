@@ -16,6 +16,23 @@ A55 = A44
 q0 = 1  # N/m^2, load intensity
 
 
+class GapConstraint(am.Component):
+    """Floor contact: gap = y_coord + v - y_floor >= 0"""
+
+    def __init__(self):
+        super().__init__()
+        # self.add_data("y_coord")
+        self.add_input("w")
+        self.add_constraint("gap", lower=0.0, upper=float("inf"))
+
+    def compute(self):
+        # y = self.data["y_coord"]
+        z = 0.0
+        w = self.inputs["w"]
+        z_contact = 75.0e3  # ceiling
+        self.constraints["gap"] = -(w - z_contact)
+
+
 def potential_bending(soln, data=None, geo=None):
     """Strain energy density (integrand of TPE equation)"""
     tx_grad = soln["tx"]["grad"]
@@ -67,7 +84,7 @@ integrand_map = {
     "shear_potential": {
         "target": ["SURFACE1"],
         "integrand": potential_shear,
-        "rule": ["reduced"],
+        "rule": ["1dof"],  # reduced quadrature
     },
 }
 bc_map = {
@@ -77,7 +94,7 @@ bc_map = {
         "target": ["LINE1", "LINE2", "LINE3", "LINE4"],
     },
 }
-
+model = am.Model("model")
 # Load the plate
 mesh = Mesh("plate.inp")
 
@@ -107,7 +124,32 @@ problem = Problem(
     bc_map=bc_map,
     element_objs=element_objs,
 )
-model = problem.create_model("plate")
+submodel = problem.create_model("plate")
+model.add_model("fem", submodel)
+# Link nodes of constraint model to fem submodel
+
+# Floor contact constraint (only on non-BC nodes to avoid rank-deficient Jacobian)
+# non_bc_nodes = [i for i in range(n) if i not in bc_nodes]
+nodes = mesh.get_nodes_in_domain("SURFACE1")
+nodes_edge1 = mesh.get_nodes_in_domain("LINE1")
+nodes_edge2 = mesh.get_nodes_in_domain("LINE2")
+nodes_edge3 = mesh.get_nodes_in_domain("LINE3")
+nodes_edge4 = mesh.get_nodes_in_domain("LINE4")
+non_bc_nodes = []
+
+for i in nodes:
+    if i not in nodes_edge1:
+        non_bc_nodes.append(i)
+    if i not in nodes_edge2:
+        non_bc_nodes.append(i)
+    if i not in nodes_edge3:
+        non_bc_nodes.append(i)
+    if i not in nodes_edge4:
+        non_bc_nodes.append(i)
+
+model.add_component("contact", len(non_bc_nodes), GapConstraint())
+# model.link("fem.geo.y", "contact.y_coord", src_indices=non_bc_nodes)
+model.link("fem.soln.w", "contact.w", src_indices=non_bc_nodes)
 
 if args.build:
     model.build_module()
@@ -122,47 +164,46 @@ x = xm.get_vector()
 mat = p.create_matrix()
 g = p.create_vector()
 
-# Solve with Ku=F
-print("Evaluating the Hessian...")
-p.hessian(1.0, x, mat)  # assembles K
-p.gradient(1.0, x, g)  # assembles f (body force / BC terms)
+# print("Evaluating the Hessian...")
+# p.hessian(1.0, x, mat)  # assembles K
+# p.gradient(1.0, x, g)  # assembles f (body force / BC terms)
 
-print("Solving...")
-K = am.tocsr(mat)
-x.get_array()[:] = spsolve(K, g.get_array())
+# print("Solving...")
+# K = am.tocsr(mat)
+# x.get_array()[:] = spsolve(K, g.get_array())
 
-# Solve with optimization
-# opt_options = {
-#     "max_iterations": 200,
-#     "convergence_tolerance": 1e-6,
-#     "max_line_search_iterations": 1,
-#     "initial_barrier_param": 0.1,
-#     # "initial_barrier_param": 1.0,
-#     # "max_iterations": 2000,
-#     # "fraction_to_boundary": 0.995,
-#     # "max_line_search_iterations": 40,
-#     # "init_least_squares_multipliers": False,
-#     # "filter_line_search": True,
-#     # "second_order_correction": True,
-#     # "check_update_step": True,
-# }
 
-# # #indiv. Amigo problem:
-# opt = am.Optimizer(
-#     model,
-#     x,
-# )
-# opt.optimize(opt_options)
+opt_options = {
+    "max_iterations": 200,
+    "convergence_tolerance": 1e-6,
+    "max_line_search_iterations": 1,
+    "initial_barrier_param": 0.1,
+    # "initial_barrier_param": 1.0,
+    # "max_iterations": 2000,
+    # "fraction_to_boundary": 0.995,
+    # "max_line_search_iterations": 40,
+    # "init_least_squares_multipliers": False,
+    # "filter_line_search": True,
+    # "second_order_correction": True,
+    # "check_update_step": True,
+}
+
+# indiv. Amigo problem:
+opt = am.Optimizer(
+    model,
+    x,
+)
+opt.optimize(opt_options)
 
 print("Plotting...")
 
-w = xm["soln.w"]
-tx = xm["soln.tx"]
-ty = xm["soln.ty"]
+w = xm["fem.soln.w"]
+tx = xm["fem.soln.tx"]
+ty = xm["fem.soln.ty"]
 
 w_normalized = 1000 * D * w / (q0 * 1.0)
 print("max normalized plate deflection", np.max(np.abs(w_normalized)))
-print("max w", np.max(np.abs(w)))
+print("max plate deflection", np.max(w), np.min(w))
 
 fig, ax = plt.subplots(1, 3, figsize=(8, 3))
 for index, soln in enumerate([w, tx, ty]):
