@@ -58,11 +58,12 @@ class ExternalSMTComponent:
 
         # Evaluate the interpolation constraint
         predict = self.smt.predict_values(inputs)
-        con[:] = predict - outputs
+        con[:] = predict.flatten() - outputs
 
         # Compute the interpolation constraint Jacobian
         for i in range(self.num_inputs):
-            jac[i :: self.num_inputs + 1] = self.smt.predict_derivatives(inputs, i)
+            dpdx = self.smt.predict_derivatives(inputs, i)
+            jac[i :: self.num_inputs + 1] = dpdx.flatten()
         jac[self.num_inputs :: self.num_inputs + 1] = -1
 
         fobj = 0

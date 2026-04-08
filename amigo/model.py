@@ -1199,9 +1199,16 @@ class Model:
         comm=COMM_WORLD,
         source_dir: str | Path | None = None,
         build_dir: str | Path | None = None,
+        debug: bool = False,
     ):
         """
         Generate the model code and build it. Additional compile, link arguments and macros can be added here.
+
+        Args:
+            debug (bool): Build with debug symbols and no optimization (CMAKE_BUILD_TYPE=Debug).
+                          Useful for getting meaningful stack traces when the module crashes.
+                          The debug .so is placed in a separate _amigo_build_debug directory
+                          so it does not overwrite a Release build.
         """
 
         comm_rank = 0
@@ -1213,7 +1220,7 @@ class Model:
                 source_dir = self._guess_source_dir()
 
             self.generate_cpp()
-            self._build_module(source_dir=source_dir, build_dir=build_dir)
+            self._build_module(source_dir=source_dir, build_dir=build_dir, debug=debug)
 
         if comm is not None:
             comm.Barrier()
@@ -1291,20 +1298,28 @@ class Model:
         return
 
     def _build_module(
-        self, source_dir: str | Path, build_dir: str | Path | None = None
+        self,
+        source_dir: str | Path,
+        build_dir: str | Path | None = None,
+        debug: bool = False,
     ):
         """
         Build an extension module, utilizing the specified source and build directories.
-        If no build directory is specified, place it in source_dir/_amigo_build.
+        If no build directory is specified, place it in source_dir/_amigo_build (Release)
+        or source_dir/_amigo_build_debug (Debug).
 
         Args:
             source_dir (str or Path): Location of the source for the module
             build_dir (str, Path or None): Location of the build directory
+            debug (bool): Build with CMAKE_BUILD_TYPE=Debug
         """
+
+        build_type = "Debug" if debug else "Release"
 
         source_dir = Path(source_dir).resolve()
         if build_dir is None:
-            build_dir = source_dir / "_amigo_build"
+            suffix = "_debug" if debug else ""
+            build_dir = source_dir / f"_amigo_build{suffix}"
 
         build_dir = build_dir.resolve()
         build_dir.mkdir(parents=True, exist_ok=True)
@@ -1343,8 +1358,9 @@ amigo_add_python_module(
             f"-DCMAKE_PREFIX_PATH={amigo_cmake_dir}",
             f"-DPython3_EXECUTABLE={sys.executable}",
             f"-Dpybind11_DIR={cmake_pybind11_dir}",
+            f"-DCMAKE_BUILD_TYPE={build_type}",
         ]
-        build_cmd = ["cmake", "--build", str(build_dir), "--config", "Release"]
+        build_cmd = ["cmake", "--build", str(build_dir), "--config", build_type]
 
         print("Running CMake commands from amigo")
         print(" ".join(cmake_cmd))
