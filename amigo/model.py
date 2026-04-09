@@ -1270,13 +1270,26 @@ class Model:
         debug: bool = False,
     ):
         """
-        Generate the model code and build it. Additional compile, link arguments and macros can be added here.
+        Generate the model code and build it.
 
         Args:
-            debug (bool): Build with debug symbols and no optimization (CMAKE_BUILD_TYPE=Debug).
-                          Useful for getting meaningful stack traces when the module crashes.
-                          The debug .so is placed in a separate _amigo_build_debug directory
-                          so it does not overwrite a Release build.
+            comm: MPI communicator (e.g. ``mpi4py.MPI.COMM_WORLD``). When provided,
+                only rank 0 generates and compiles the C++ module; all ranks then
+                synchronize at a barrier before returning. Pass ``None`` for
+                single-process runs.
+            source_dir (str | Path | None): Directory that contains the amigo
+                C++ source and CMakeLists.txt. If ``None``, the directory is
+                inferred automatically from the current working directory or the
+                location of the calling script.
+            build_dir (str | Path | None): Directory where CMake will write its
+                build artefacts and the compiled ``.so``. If ``None``, a
+                subdirectory named ``_amigo_build`` is created inside
+                ``source_dir``.
+            debug (bool): Build with debug symbols and no optimization
+                (``CMAKE_BUILD_TYPE=Debug``). Useful for getting meaningful stack
+                traces when the module crashes. The debug ``.so`` is placed in a
+                separate ``_amigo_build_debug`` directory so it does not overwrite
+                a Release build.
         """
 
         comm_rank = 0
