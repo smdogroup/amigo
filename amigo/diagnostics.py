@@ -11,10 +11,6 @@ Usage
 
     diag = am.Diagnostics(model, x, lower, upper)
     diag.run(
-        evaluators={
-            "ac.res":   lambda x: compute_dynamics(x),   # returns np.ndarray
-            "trap.res": lambda x: compute_trap(x),
-        },
         spotlights={
             "ic.res": ["velocity", "gamma", "altitude", "range", "mass"],
             "fc.res": ["velocity", "gamma", "altitude"],
@@ -30,8 +26,8 @@ The five checks
 3. **Connectivity** - variables sharing the same short name across different
    components but whose global indices don't overlap are likely missing a
    ``model.link()`` call.
-4. **Constraint residuals** - evaluate user-supplied Python callables
-   (one per constraint group) and report ``max|res|`` / ``mean|res|`` for
+4. **Constraint residuals** - evaluate all constraints using
+   ``model.eval_constraints(x)`` and report ``max|res|`` / ``mean|res|`` for
    each group.  The largest value is an estimate of ``inf_pr`` at iter 0.
 5. **Spotlight constraints** - read named constraint-residual variables
    directly from ``x`` (useful for IC/FC whose values the user seeds during
@@ -90,26 +86,22 @@ class Diagnostics:
 
     def run(
         self,
-        evaluators: dict | None = None,
         spotlights: dict | None = None,
         tol: float = 1e-6,
-    ) -> None:
+    ):
         """Run all five checks and print a formatted report.
 
         Parameters
         ----------
-        evaluators:
-            ``{constraint_group_name: callable(x) -> array-like}``
-            The callable receives the ``ModelVector`` and must return the
-            constraint residuals for that group as a flat or shaped array.
         spotlights:
             ``{constraint_var_name: [label_0, label_1, ...]}``.
             Each named constraint variable is read directly from ``x`` and
-            its per-element value is printed with a pass/fail tag.
+            its per-element value is printed with a pass/fail tag.  Useful
+            when the user explicitly seeds constraint residual variables (e.g.
+            IC/FC targets) as part of the initial guess.
         tol:
             Residual tolerance used for pass/fail in spotlight check.
         """
-        evaluators = evaluators or {}
         spotlights = spotlights or {}
 
         nvar = self.model.num_variables
@@ -121,32 +113,51 @@ class Diagnostics:
         print(f"  Model: {mname!r}   Variables: {nvar}   Constraints: {ncon}")
         print(_SEP)
 
-        self._check_nan_inf()
-        self._check_bounds()
-        self._check_connectivity()
-        self._check_evaluators(evaluators)
-        self._check_spotlights(spotlights, tol)
+        nan_fail = self._check_nan_inf()
+        bounds_fail = self._check_bounds()
+        connect_fail = self._check_connectivity()
+        constrain_fail = self._check_constraints()
+        spot_fail = self._check_spotlights(spotlights, tol)
 
         print(f"{_SEP}\n")
 
+        total_fail = (
+            nan_fail or bounds_fail or connect_fail or constrain_fail or spot_fail
+        )
+
+        fail_dict = {
+            "nan_inf": nan_fail,
+            "bounds": bounds_fail,
+            "connectivity": connect_fail,
+            "constraints": constrain_fail,
+            "spotlights": spot_fail,
+        }
+
+        return total_fail, fail_dict
+
     # ── check 1: NaN / Inf ────────────────────────────────────────────────────
 
-    def _check_nan_inf(self) -> None:
+    def _check_nan_inf(self) -> bool:
+        fail = True
         print("\n  [1] NaN / Inf in design vector")
         x_arr = np.asarray(self.x[:], dtype=float)
         bad = ~np.isfinite(x_arr)
         n_bad = int(bad.sum())
         if n_bad == 0:
             print(f"      [OK]   No NaN/Inf ({x_arr.size} entries checked)")
+            fail = False
         else:
             print(f"      [FAIL] {n_bad} non-finite entries")
             for idx in np.where(bad)[0][: self._MAX_VIOLATIONS_SHOWN]:
                 name = self._idx_to_name.get(int(idx), f"idx={idx}")
                 print(f"             {name:40s}  val={x_arr[idx]}")
 
+        return fail
+
     # ── check 2: bounds ───────────────────────────────────────────────────────
 
-    def _check_bounds(self) -> None:
+    def _check_bounds(self) -> bool:
+        fail = False
         print("\n  [2] Bounds analysis")
 
         x_arr = np.asarray(self.x[:], dtype=float)
@@ -164,6 +175,7 @@ class Diagnostics:
             if lo_n == 0 and hi_n == 0:
                 print("      [OK]   All variables within supplied bounds")
             else:
+                fail = True
                 print(f"      [FAIL] Bounds violations: {lo_n} lower, {hi_n} upper")
                 self._print_violations(
                     "lower", lo_viol_mask, lo_arr - x_arr, lo_arr, x_arr
@@ -178,7 +190,9 @@ class Diagnostics:
             print("      [SKIP] No user bound vectors supplied")
 
         # --- meta-declared bounds vs user vector ---
-        self._check_meta_bounds(x_arr)
+        meta_fail = self._check_meta_bounds(x_arr)
+
+        return fail or meta_fail
 
     def _print_violations(
         self,
@@ -212,13 +226,15 @@ class Diagnostics:
                 f"x={xval:.4g}  bound={bval:.4g}{note}{meta_note}"
             )
 
-    def _check_meta_bounds(self, x_arr: np.ndarray) -> None:
+    def _check_meta_bounds(self, x_arr: np.ndarray) -> bool:
         """Warn about *input* variables where the component declared a finite,
         non-zero bound but the user's bound vector has 0 (never set).
 
         Constraint variables are skipped — their meta upper=0 is intentional
         (Amigo enforces equality constraints as c(x)=0).
         """
+        fail = False
+
         if self.upper is None or self.lower is None:
             return
 
@@ -255,6 +271,7 @@ class Diagnostics:
                         )
 
         if issues:
+            fail = True
             print(
                 "      [WARN] Component-declared bounds not reflected in user vectors:"
             )
@@ -265,9 +282,12 @@ class Diagnostics:
         else:
             print("      [OK]   Component meta bounds are consistent with user vectors")
 
+        return fail
+
     # ── check 3: connectivity ─────────────────────────────────────────────────
 
-    def _check_connectivity(self) -> None:
+    def _check_connectivity(self) -> bool:
+        fail = False
         print("\n  [3] Connectivity (potentially missing model.link() calls)")
 
         inputs, _, _, _ = self.model.get_names()
@@ -310,6 +330,7 @@ class Diagnostics:
                 )
 
         if warnings:
+            fail = True
             for w in warnings:
                 print(w)
         else:
@@ -332,25 +353,24 @@ class Diagnostics:
             if len(isolated) > self._MAX_VIOLATIONS_SHOWN:
                 print(f"             ... ({len(isolated)} total)")
 
-    # ── check 4: user-supplied constraint evaluators ──────────────────────────
+        return fail
 
-    def _check_evaluators(self, evaluators: dict) -> None:
-        print("\n  [4] Constraint residuals (user-supplied evaluators)")
+    # ── check 4: constraint residuals via model.eval_constraints ─────────────
 
-        if not evaluators:
-            print(
-                "      [SKIP] No evaluators provided.\n"
-                "             Pass evaluators={name: callable(x)->array} to check\n"
-                "             constraint residuals and estimate inf_pr."
-            )
-            return
+    def _check_constraints(self) -> bool:
+        fail = False
+        print("\n  [4] Constraint residuals (model.eval_constraints)")
+        try:
+            residuals = self.model.eval_constraints(self.x)
+        except Exception as exc:
+            print(f"      [ERR]  eval_constraints failed: {exc}")
+            fail = True
+            return fail
 
         all_max: list[float] = []
-        for name, fn in evaluators.items():
-            try:
-                arr = np.asarray(fn(self.x), dtype=float).flatten()
-            except Exception as exc:
-                print(f"      [ERR]  {name}: evaluator raised {exc}")
+        for name, arr in residuals.items():
+            arr = np.asarray(arr, dtype=float).flatten()
+            if arr.size == 0:
                 continue
             max_r = float(np.max(np.abs(arr)))
             mean_r = float(np.mean(np.abs(arr)))
@@ -365,10 +385,15 @@ class Diagnostics:
                 f"\n      {tag} inf_pr estimate = {inf_pr:.4e}"
                 f"  (should match optimizer iter-0 inf_pr)"
             )
+            if inf_pr > 1.0:
+                fail = True
+
+        return fail
 
     # ── check 5: spotlight constraints ───────────────────────────────────────
 
-    def _check_spotlights(self, spotlights: dict, tol: float) -> None:
+    def _check_spotlights(self, spotlights: dict, tol: float) -> bool:
+        fail = False
         print("\n  [5] Spotlight constraints (read from x)")
 
         if not spotlights:
@@ -380,11 +405,16 @@ class Diagnostics:
                 vals = np.asarray(self.x[cons_name], dtype=float).flatten()
             except Exception as exc:
                 print(f"      [ERR]  {cons_name}: {exc}")
+                fail = True
                 continue
             print(f"      {cons_name}:")
             for label, v in zip(labels, vals):
                 tag = "[OK]  " if abs(v) < tol else "[FAIL]"
                 print(f"        {tag} {label:14s}  val={v:.4e}")
+                if abs(v) < tol:
+                    fail = True
+
+        return fail
 
     # ── internal helpers ──────────────────────────────────────────────────────
 
