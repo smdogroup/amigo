@@ -19,6 +19,24 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+# ------------------------------------------------
+# Determine build type
+# ------------------------------------------------
+set(AMIGO_DEFAULT_BUILD_TYPE "Release")
+option(AMIGO_ENABLE_SANITIZERS
+       "Enable Address / Undefined Behavior sanitizers" OFF)
+if( NOT CMAKE_CONFIGURATION_TYPES AND 
+      (NOT DEFINED CMAKE_BUILD_TYPE OR CMAKE_BUILD_TYPE STREQUAL "") )
+  message(STATUS "No build type selected, defaulting to ${AMIGO_DEFAULT_BUILD_TYPE}")
+
+  set(CMAKE_BUILD_TYPE "${AMIGO_DEFAULT_BUILD_TYPE}"
+      CACHE STRING "Choose the type of build" )
+  
+  set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS
+                "Debug" "Release" "RelWithDebInfo")
+endif()
+message(STATUS "Amigo build type: ${CMAKE_BUILD_TYPE}")
+
 # Set the CUDSS directory
 set(CUDSS_HOME "$ENV{CUDSS_HOME}" CACHE PATH "Path to cuDSS installation")
 
@@ -151,6 +169,24 @@ pybind11_add_module(amigo MODULE
   ${CMAKE_CURRENT_SOURCE_DIR}/amigo/amigo.cpp
 )
 
+# ------------------------------------------------------------------------------
+# Compiler flags per build type (Debug support)
+# ------------------------------------------------------------------------------
+target_compile_options(amigo PRIVATE
+  $<$<CONFIG:Debug>:-O0 -g>
+  $<$<CONFIG:RelWithDebInfo>:-O2 -g>
+  $<$<CONFIG:Release>:-O3>
+)
+if(AMIGO_ENABLE_SANITIZERS)
+  target_compile_options(amigo PRIVATE
+    -fsanitize=address,undefined
+    -fno-omit-frame-pointer
+  )
+  target_link_options(amigo PRIVATE
+    -fsanitize=address,undefined
+  )
+endif()
+
 # Install amigo headers
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/
     DESTINATION "${AMIGO_PY_PACKAGE_DIR}/include"
@@ -178,6 +214,11 @@ if(AMIGO_ENABLE_CUDA)
     src/csr_matrix_backend.cu
     src/optimizer_backend.cu
     src/vector_distribute.cu)
+  target_compile_options(backend PRIVATE
+    $<$<CONFIG:Debug>:-O0 -g>
+    $<$<CONFIG:RelWithDebInfo>:-O2 -g>
+    $<$<CONFIG:Release>:-O3>
+  )
   target_link_libraries(backend PUBLIC 
     CUDA::cudart CUDA::cublas CUDA::cublasLt 
     CUDA::cusolver CUDA::cusparse MPI::MPI_CXX)

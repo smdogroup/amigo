@@ -9,6 +9,9 @@ include/amigo_include_paths.h
 *.lib
 *.exp
 *.dll
+/_build_debug
+/amigo/amigo.cpython*
+/**/_amigo_build
 
 # Compiled Python
 **/__pycache__
@@ -37,6 +40,7 @@ include/amigo_include_paths.h
 # IDE and editor
 .vscode/
 .idea/
+.claude/
 *.swp
 *.swo
 *~
@@ -63,6 +67,19 @@ env/
 /examples/**/*.inp
 /examples/**/*.tex
 /examples/**/*.tikz
+/examples/raceproject/
+/examples/river_crossing/
+*.gif
+*.out
+*.md
+!README.md
+!website/**/*.md
+
+# External dependencies
+extern/
+
+# Docs build
+docs/
 
 # OpenMDAO output
 .openmdao_out

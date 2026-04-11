@@ -32,5 +32,5 @@ if args.build:
 
 model.initialize()
 
-opt = am.Optimizer(model)
+opt = am.Optimizer(model, solver="mumps")
 opt.optimize({"max_iterations": 50})

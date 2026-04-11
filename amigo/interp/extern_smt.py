@@ -15,6 +15,26 @@ class ExternalSMTComponent:
             con[i] = SMT(inputs[i, :]) - outputs[i] = 0
         """
 
+        if not isinstance(num_points, int) or num_points <= 0:
+            raise ValueError(
+                f"num_points must be a positive integer, got {num_points!r}"
+            )
+        if not isinstance(num_inputs, int) or num_inputs <= 0:
+            raise ValueError(
+                f"num_inputs must be a positive integer, got {num_inputs!r}"
+            )
+        if not callable(getattr(smt_model, "predict_values", None)):
+            raise TypeError(
+                f"smt_model must have a callable 'predict_values' method, "
+                f"got {type(smt_model).__name__}"
+            )
+        if not callable(getattr(smt_model, "predict_derivatives", None)):
+            raise TypeError(
+                f"smt_model must have a callable 'predict_derivatives' method, "
+                f"got {type(smt_model).__name__}. "
+                f"Not all SMT model types support derivative evaluation."
+            )
+
         self.num_points = num_points
         self.num_inputs = num_inputs
         self.smt = smt_model
@@ -58,11 +78,12 @@ class ExternalSMTComponent:
 
         # Evaluate the interpolation constraint
         predict = self.smt.predict_values(inputs)
-        con[:] = predict - outputs
+        con[:] = predict.flatten() - outputs
 
         # Compute the interpolation constraint Jacobian
         for i in range(self.num_inputs):
-            jac[i :: self.num_inputs + 1] = self.smt.predict_derivatives(inputs, i)
+            dpdx = self.smt.predict_derivatives(inputs, i)
+            jac[i :: self.num_inputs + 1] = dpdx.flatten()
         jac[self.num_inputs :: self.num_inputs + 1] = -1
 
         fobj = 0

@@ -317,7 +317,7 @@ class Mesh:
         """
         return self.parser.get_quadrature(etype)
 
-    def get_nodes_in_domain(self, name, etype=None):
+    def get_nodes_in_domain(self, name):
         """
         Get nodes in the specified domain for all element types (if etype == None),
         or a specific element type.

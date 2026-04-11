@@ -1,0 +1,57 @@
+name: pytest
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - name: Checkout amigo
+        uses: actions/checkout@v4
+
+      - name: Checkout a2d
+        run: git clone --depth 1 https://github.com/smdogroup/a2d.git ../a2d
+
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake libopenmpi-dev libopenblas-dev
+
+      - name: Install system dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install cmake open-mpi openblas
+
+      - name: Install system dependencies (Windows)
+        if: runner.os == 'Windows'
+        uses: mpi4py/setup-mpi@v1
+        with:
+          mpi: msmpi
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install BLAS (Windows)
+        if: runner.os == 'Windows'
+        run: pip install mkl mkl-devel
+
+      - name: Install amigo
+        run: |
+          pip install scikit-build-core pybind11 mpi4py numpy scipy matplotlib
+          pip install -e .
+
+      - name: Install test dependencies
+        run: pip install pytest smt
+
+      - name: Run tests
+        run: pytest tests/ -v

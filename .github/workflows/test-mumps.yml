@@ -1,0 +1,91 @@
+name: Test MUMPS (ThirdParty-Mumps)
+
+on:
+  push:
+    branches: [fix-mumps-struct]
+  workflow_dispatch:
+
+jobs:
+  mac-mumps:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout amigo
+        uses: actions/checkout@v4
+
+      - name: Checkout a2d
+        run: git clone --depth 1 https://github.com/smdogroup/a2d.git ../a2d
+
+      - name: Install brew dependencies
+        run: |
+          brew install cmake gcc open-mpi openblas
+          echo "/opt/homebrew/bin" >> $GITHUB_PATH
+          echo "/usr/local/bin" >> $GITHUB_PATH
+          GFC=$(find /opt/homebrew/bin /usr/local/bin -name 'gfortran-*' 2>/dev/null | head -1)
+          sudo ln -sf "$GFC" /usr/local/bin/gfortran
+          gfortran --version
+
+      - name: Build ThirdParty-Mumps
+        run: |
+          git clone https://github.com/coin-or-tools/ThirdParty-Mumps.git
+          cd ThirdParty-Mumps
+          ./get.Mumps
+          ./configure --prefix=$HOME/mumps-coinor FC=/usr/local/bin/gfortran F77=/usr/local/bin/gfortran
+          make -j$(sysctl -n hw.ncpu)
+          make install
+          echo "MUMPS_LIB_DIR=$HOME/mumps-coinor/lib" >> $GITHUB_ENV
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install amigo
+        run: |
+          pip install scikit-build-core pybind11 mpi4py numpy scipy matplotlib
+          pip install .
+
+      - name: Run rosenbrock example
+        run: |
+          cd examples/rosenbrock
+          python rosenbrock.py --build
+          python rosenbrock.py
+
+  linux-mumps:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout amigo
+        uses: actions/checkout@v4
+
+      - name: Checkout a2d
+        run: git clone --depth 1 https://github.com/smdogroup/a2d.git ../a2d
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake gfortran libopenmpi-dev libopenblas-dev
+
+      - name: Build ThirdParty-Mumps
+        run: |
+          git clone https://github.com/coin-or-tools/ThirdParty-Mumps.git
+          cd ThirdParty-Mumps
+          ./get.Mumps
+          ./configure --prefix=$HOME/mumps-coinor
+          make -j$(nproc)
+          make install
+          echo "MUMPS_LIB_DIR=$HOME/mumps-coinor/lib" >> $GITHUB_ENV
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install amigo
+        run: |
+          pip install scikit-build-core pybind11 mpi4py numpy scipy matplotlib
+          pip install .
+
+      - name: Run rosenbrock example
+        run: |
+          cd examples/rosenbrock
+          python rosenbrock.py --build
+          python rosenbrock.py

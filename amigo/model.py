@@ -412,6 +412,12 @@ class Model:
             module_name (str): Name of the module that contains the component classes
         """
         self.module_name = module_name
+        if module_name is not None and not module_name.isidentifier():
+            raise ValueError(
+                f"module_name '{module_name}' is not a valid identifier. "
+                f"Use only letters, digits, and underscores, starting with a letter or underscore."
+            )
+        self._built = False
         self.comp = {}
         self.external_comp = {}
         self.index_pool = GlobalIndexPool()
@@ -449,6 +455,11 @@ class Model:
         if name in self.comp:
             raise ValueError(f"Cannot add two components with the same name")
 
+        if not callable(getattr(comp_obj, "compute", None)):
+            raise TypeError(
+                f"add_component '{name}': comp_obj must have a callable 'compute' method"
+            )
+
         vs = comp_obj.get_var_shapes()
         var_shapes = self._get_group_shapes(size, vs)
         ds = comp_obj.get_data_shapes()
@@ -480,6 +491,39 @@ class Model:
             inputs (List of str): List of strings of the input names
             constraints (List of str): List of strings of the constraint names
         """
+
+        if not isinstance(inputs, list):
+            raise TypeError(
+                f"add_external_component '{name}': inputs must be a list of strings, "
+                f"got {type(inputs).__name__}"
+            )
+        if not isinstance(constraints, list):
+            raise TypeError(
+                f"add_external_component '{name}': constraints must be a list of strings, "
+                f"got {type(constraints).__name__}"
+            )
+        for i, inp in enumerate(inputs):
+            if not isinstance(inp, str):
+                raise TypeError(
+                    f"add_external_component '{name}': inputs[{i}] must be a string, "
+                    f"got {type(inp).__name__!r}"
+                )
+        for i, con in enumerate(constraints):
+            if not isinstance(con, str):
+                raise TypeError(
+                    f"add_external_component '{name}': constraints[{i}] must be a string, "
+                    f"got {type(con).__name__!r}"
+                )
+
+        if not callable(getattr(comp_obj, "evaluate", None)):
+            raise TypeError(
+                f"add_external_component '{name}': comp_obj must have a callable 'evaluate' method"
+            )
+        if not callable(getattr(comp_obj, "get_constraint_jacobian_csr", None)):
+            raise TypeError(
+                f"add_external_component '{name}': comp_obj must have a callable "
+                f"'get_constraint_jacobian_csr' method"
+            )
 
         self.external_comp[name] = ExternalComponent(
             name, comp_obj, inputs, constraints
@@ -522,10 +566,10 @@ class Model:
             sub_group = model.external_comp[comp_name]
             sub_obj = sub_group.comp_obj
 
-            for iname in enumerate(sub_group.inputs):
+            for iname in sub_group.inputs:
                 sub_inputs.append(name + "." + iname)
 
-            for iname in enumerate(sub_group.constraints):
+            for iname in sub_group.constraints:
                 sub_constraints.append(name + "." + iname)
 
             self.add_external_component(sub_name, sub_obj, sub_inputs, sub_constraints)
@@ -777,6 +821,12 @@ class Model:
         resulting KKT system is a 2x2 augmented system (eq. 13).
         """
 
+        if self.module_name is not None and not self._built:
+            raise Warning(
+                f"Call model.build_module() before model.initialize(). "
+                f"Module '{self.module_name}' has not been compiled in this session."
+            )
+
         self.num_variables = self._init_indices(
             self.links, self.index_pool, vtype="vars"
         )
@@ -867,17 +917,40 @@ class Model:
         comp_name = ".".join(path[:-1])
         var_name = path[-1]
 
-        if var_name in self.comp[comp_name].get_input_names():
+        if comp_name not in self.comp:
+            registered = list(self.comp.keys())
+            hints = [
+                c
+                for c in registered
+                if c.startswith(comp_name + ".") or c.endswith("." + comp_name)
+            ]
+            msg = (
+                f"Component '{comp_name}' not found when resolving '{name}'. "
+                f"Registered components: {registered}"
+            )
+            if hints:
+                msg += f". Did you mean one of: {hints}?"
+            raise ValueError(msg)
+
+        group = self.comp[comp_name]
+        if var_name in group.get_input_names():
             return "input"
-        elif var_name in self.comp[comp_name].get_constraint_names():
+        elif var_name in group.get_constraint_names():
             return "constraint"
-        elif var_name in self.comp[comp_name].get_data_names():
+        elif var_name in group.get_data_names():
             return "data"
-        elif var_name in self.comp[comp_name].get_output_names():
+        elif var_name in group.get_output_names():
             return "output"
         else:
+            available = (
+                list(group.get_input_names())
+                + list(group.get_constraint_names())
+                + list(group.get_data_names())
+                + list(group.get_output_names())
+            )
             raise ValueError(
-                f"Name {comp_name}.{var_name} is neither an input, constraint, output or data"
+                f"'{var_name}' not found in component '{comp_name}'. "
+                f"Available variables: {available}"
             )
 
     def get_indices(self, name: str | List[str]):
@@ -1058,6 +1131,8 @@ class Model:
                 fixed_vars.append(self.get_indices(expr))
             else:
                 fixed_vars.append(self.get_indices(expr)[indices])
+        if fixed_vars:
+            fixed_vars = np.concatenate(fixed_vars)
         fixed_vars = np.unique(fixed_vars)
         fixed = VectorInt(len(fixed_vars))
         fixed.get_array()[:] = fixed_vars
@@ -1197,9 +1272,29 @@ class Model:
         comm=COMM_WORLD,
         source_dir: str | Path | None = None,
         build_dir: str | Path | None = None,
+        debug: bool = False,
     ):
         """
-        Generate the model code and build it. Additional compile, link arguments and macros can be added here.
+        Generate the model code and build it.
+
+        Args:
+            comm: MPI communicator (e.g. ``mpi4py.MPI.COMM_WORLD``). When provided,
+                only rank 0 generates and compiles the C++ module; all ranks then
+                synchronize at a barrier before returning. Pass ``None`` for
+                single-process runs.
+            source_dir (str | Path | None): Directory that contains the amigo
+                C++ source and CMakeLists.txt. If ``None``, the directory is
+                inferred automatically from the current working directory or the
+                location of the calling script.
+            build_dir (str | Path | None): Directory where CMake will write its
+                build artefacts and the compiled ``.so``. If ``None``, a
+                subdirectory named ``_amigo_build`` is created inside
+                ``source_dir``.
+            debug (bool): Build with debug symbols and no optimization
+                (``CMAKE_BUILD_TYPE=Debug``). Useful for getting meaningful stack
+                traces when the module crashes. The debug ``.so`` is placed in a
+                separate ``_amigo_build_debug`` directory so it does not overwrite
+                a Release build.
         """
 
         comm_rank = 0
@@ -1211,11 +1306,12 @@ class Model:
                 source_dir = self._guess_source_dir()
 
             self.generate_cpp()
-            self._build_module(source_dir=source_dir, build_dir=build_dir)
+            self._build_module(source_dir=source_dir, build_dir=build_dir, debug=debug)
 
         if comm is not None:
             comm.Barrier()
 
+        self._built = True
         return
 
     def generate_cpp(self):
@@ -1289,20 +1385,28 @@ class Model:
         return
 
     def _build_module(
-        self, source_dir: str | Path, build_dir: str | Path | None = None
+        self,
+        source_dir: str | Path,
+        build_dir: str | Path | None = None,
+        debug: bool = False,
     ):
         """
         Build an extension module, utilizing the specified source and build directories.
-        If no build directory is specified, place it in source_dir/_amigo_build.
+        If no build directory is specified, place it in source_dir/_amigo_build (Release)
+        or source_dir/_amigo_build_debug (Debug).
 
         Args:
             source_dir (str or Path): Location of the source for the module
             build_dir (str, Path or None): Location of the build directory
+            debug (bool): Build with CMAKE_BUILD_TYPE=Debug
         """
+
+        build_type = "Debug" if debug else "Release"
 
         source_dir = Path(source_dir).resolve()
         if build_dir is None:
-            build_dir = source_dir / "_amigo_build"
+            suffix = "_debug" if debug else ""
+            build_dir = source_dir / f"_amigo_build{suffix}"
 
         build_dir = build_dir.resolve()
         build_dir.mkdir(parents=True, exist_ok=True)
@@ -1341,8 +1445,9 @@ amigo_add_python_module(
             f"-DCMAKE_PREFIX_PATH={amigo_cmake_dir}",
             f"-DPython3_EXECUTABLE={sys.executable}",
             f"-Dpybind11_DIR={cmake_pybind11_dir}",
+            f"-DCMAKE_BUILD_TYPE={build_type}",
         ]
-        build_cmd = ["cmake", "--build", str(build_dir), "--config", "Release"]
+        build_cmd = ["cmake", "--build", str(build_dir), "--config", build_type]
 
         print("Running CMake commands from amigo")
         print(" ".join(cmake_cmd))
