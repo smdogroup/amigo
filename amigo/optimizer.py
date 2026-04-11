@@ -3510,7 +3510,7 @@ class Optimizer:
         watchdog_shortened_iter = 0
         watchdog_trial_iter = 0
         watchdog_iterate = None  # saved solution array
-        watchdog_delta = None  # saved search direction
+        watchdog_update_backup = self.optimizer.create_opt_vector()
         watchdog_px = None  # saved px
         watchdog_alpha_primal_test = 0.0
         watchdog_theta = 0.0
@@ -3917,7 +3917,6 @@ class Optimizer:
                 watchdog_shortened_iter = 0
                 watchdog_trial_iter = 0
                 watchdog_iterate = None
-                watchdog_delta = None
                 watchdog_px = None
                 # Reset filter reset counter for new subproblem
                 count_successive_filter_rejections = 0
@@ -4023,7 +4022,7 @@ class Optimizer:
                     # StopWatchDog: restore saved iterate
                     self.vars.get_solution().get_array()[:] = watchdog_iterate
                     self.vars.get_solution().copy_host_to_device()
-                    self.update.get_array()[:] = watchdog_delta
+                    self.update.copy(watchdog_update_backup)
                     self.update.copy_host_to_device()
                     self.px.get_array()[:] = watchdog_px
                     self.px.copy_host_to_device()
@@ -4042,7 +4041,7 @@ class Optimizer:
                     and watchdog_shortened_iter >= watchdog_trigger
                 ):
                     watchdog_iterate = self.vars.get_solution().get_array().copy()
-                    watchdog_delta = self.update.get_array().copy()
+                    watchdog_update_backup.copy(self.update)
                     watchdog_px = self.px.get_array().copy()
                     watchdog_alpha_primal_test = alpha_x
                     watchdog_theta = self._compute_filter_theta()
@@ -4112,7 +4111,7 @@ class Optimizer:
                                     :
                                 ] = watchdog_iterate
                                 self.vars.get_solution().copy_host_to_device()
-                                self.update.get_array()[:] = watchdog_delta
+                                self.update.copy(watchdog_update_backup)
                                 self.update.copy_host_to_device()
                                 self.px.get_array()[:] = watchdog_px
                                 self.px.copy_host_to_device()
