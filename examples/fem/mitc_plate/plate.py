@@ -166,7 +166,6 @@ model.eval_hessian(x, mat)
 # Solve the equations
 print("Solving...")
 
-start_time = time.perf_counter()
 
 if args.solver == "cholesky" or args.solver == "ldl":
     stype = am.SolverType.CHOLESKY
@@ -174,7 +173,9 @@ if args.solver == "cholesky" or args.solver == "ldl":
         stype = am.SolverType.LDL
 
     ldl = am.SparseLDL(mat, stype, ustab=0.01)
+    start_time = time.perf_counter()
     flag = ldl.factor()
+    end_time = time.perf_counter()
     if flag != 0:
         print(f"LDL factor flag {flag}")
 
@@ -184,7 +185,9 @@ if args.solver == "cholesky" or args.solver == "ldl":
         print("Inertia: ", ldl.get_inertia())
 elif args.solver == "cholesky_left":
     chol = am.SparseCholesky(mat)
+    start_time = time.perf_counter()
     flag = chol.factor()
+    end_time = time.perf_counter()
     if flag != 0:
         print(f"Cholesky factor flag {flag}")
 
@@ -192,9 +195,12 @@ elif args.solver == "cholesky_left":
     chol.solve(x.get_vector())
 elif args.solver == "scipy":
     csr = am.tocsr(mat)
-    x[:] = spsolve(csr, g[:])
 
-end_time = time.perf_counter()
+    # This isn't a completely fair comparison
+    start_time = time.perf_counter()
+    x[:] = spsolve(csr, g[:])
+    end_time = time.perf_counter()
+
 print(f"Solve time... {end_time - start_time:.6f} seconds")
 
 print("Plotting...")

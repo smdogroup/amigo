@@ -1128,11 +1128,9 @@ class SparseLDL {
     // F[npiv:, npiv:] -= F[npiv:, :npiv] @ F[:npiv, npiv:]
     int ndim = front_size - num_pivots;
     int kdim = num_pivots;
-    T alpha = -1.0;
-    T beta = 1.0;
-    blas_gemm<T>("N", "N", &ndim, &ndim, &kdim, &alpha, &F[num_pivots], &ldf,
-                 &F[ldf * num_pivots], &ldf, &beta, &F[(ldf + 1) * num_pivots],
-                 &ldf);
+    frontal_trailing_update(ndim, kdim, &F[num_pivots], ldf,
+                            &F[ldf * num_pivots], ldf,
+                            &F[(ldf + 1) * num_pivots], ldf);
 
     // The number of delayed pivots is the difference between the fully summed
     // candidates we started from and the pivots that were successful
@@ -1148,6 +1146,51 @@ class SparseLDL {
                       front_size - fully_summed, F);
 
     return 0;
+  }
+
+  /**
+   * @brief Perform the trailing update for the matrix
+   *
+   * C = C - A * B
+   *
+   * @param ndim Number of rows of C and A and number of columns of C and B
+   * @param kdim Number of columns of A and number of rows of B
+   * @param A Pointer to the A entries
+   * @param lda Leading dimension of A
+   * @param B Pointer to the B entries
+   * @param ldb Leading dimension of B
+   * @param C Pointer to the C entries
+   * @param ldc leading dimension of C
+   */
+  void frontal_trailing_update(int ndim, int kdim, const T* A, int lda,
+                               const T* B, int ldb, T* C, int ldc) const {
+    T alpha = -1.0;
+    T beta = 1.0;
+
+    // Apply the regular update
+    if (ndim < 128) {
+      blas_gemm<T>("N", "N", &ndim, &ndim, &kdim, &alpha, A, &lda, B, &ldb,
+                   &beta, C, &ldc);
+    } else {
+      //
+      // [ C11  0   ] -= [ A11 ] [ B11  B12 ]
+      // [ C21  C22 ]    [ A21 ]
+
+      // Try just splitting this into 3 blocks to see the performance
+      int n1 = ndim / 2;
+      int n2 = ndim - n1;
+
+      // Compute C21 = C21 - A21 * B11
+      blas_gemm<T>("N", "N", &n2, &n1, &kdim, &alpha, &A[n1], &lda, B, &ldb,
+                   &beta, &C[n1], &ldc);
+
+      // Compute C11 = C11 - A11 * B11
+      frontal_trailing_update(n1, kdim, A, lda, B, ldb, C, ldc);
+
+      // Compute C22 = C22 - A21 * B12
+      frontal_trailing_update(n2, kdim, &A[n1], lda, &B[n1 * ldb], ldb,
+                              &C[n1 * (ldc + 1)], ldc);
+    }
   }
 
   /**
@@ -1408,6 +1451,13 @@ class SparseLDL {
     delete[] temp;
   }
 
+  /**
+   * @brief Add the inertia from the pivot block associated with the supernode
+   *
+   * @param ks The super node index
+   * @param npos Pointer where to add the positive number of eigenvalues
+   * @param nneg Pointer where to add the negative number of eigenvalues
+   */
   void add_pivot_inertia(int ks, int* npos, int* nneg) const {
     // Get the pointers to the factor data
     int num_pivots, num_delayed;
