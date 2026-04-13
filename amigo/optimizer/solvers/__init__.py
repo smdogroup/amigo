@@ -5,3 +5,4 @@ from .mumps_solver import MumpsSolver
 from .pardiso_solver import PardisoSolver
 from .petsc_solver import DirectPetscSolver
 from .scipy_solver import DirectScipySolver
+from .amigo_solver import AmigoSolver

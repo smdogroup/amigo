@@ -7,4 +7,5 @@ from .solvers import (
     PardisoSolver,
     DirectPetscSolver,
     DirectScipySolver,
+    AmigoSolver,
 )

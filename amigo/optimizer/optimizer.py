@@ -17,6 +17,7 @@ from .solvers import (
     PardisoSolver,
     DirectPetscSolver,
     DirectScipySolver,
+    AmigoSolver,
 )
 
 try:
@@ -570,6 +571,8 @@ class Optimizer:
                 self.solver = PardisoSolver(self.problem)
             elif solver_pref == "mumps":
                 self.solver = MumpsSolver(self.problem)
+            elif solver_pref == "amigo":
+                self.solver = AmigoSolver(self.problem)
         elif solver is not None:
             self.solver = solver
         else:
