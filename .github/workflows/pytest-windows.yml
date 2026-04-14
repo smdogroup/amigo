@@ -1,0 +1,39 @@
+name: pytest (Windows)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout amigo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Checkout a2d
+        run: git clone --depth 1 https://github.com/smdogroup/a2d.git ../a2d
+
+      - name: Install amigo
+        # MUMPS_LIB_DIR is intentionally not set: amigo is built without Mumps support
+        # because the Fortran toolchain required to build ThirdParty-Mumps is not
+        # available on Windows runners.
+        run: |
+          pip install scikit-build-core pybind11 mpi4py numpy scipy matplotlib
+          pip install -e .
+
+      - name: Install test dependencies
+        run: pip install pytest smt
+
+      - name: Run tests
+        # tests/interp is excluded because it contains Mumps-dependent tests that
+        # require the ThirdParty-Mumps library, which cannot be built on Windows
+        # runners due to the absence of a Fortran toolchain (gfortran).
+        run: pytest tests/ -v --ignore=tests/interp

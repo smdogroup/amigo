@@ -1,4 +1,4 @@
-name: pytest
+name: pytest (Linux)
 
 on:
   push:
@@ -7,7 +7,6 @@ on:
 
 jobs:
   test:
-    # Windows/macOS excluded: ThirdParty-Mumps build requires Fortran toolchain
     runs-on: ubuntu-latest
 
     steps:
@@ -30,6 +29,7 @@ jobs:
           ./configure --prefix=$HOME/mumps-coinor
           make -j$(nproc)
           make install
+          echo "MUMPS_LIB_DIR=$HOME/mumps-coinor/lib" >> $GITHUB_ENV
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -38,7 +38,7 @@ jobs:
 
       - name: Install amigo
         env:
-          MUMPS_LIB_DIR: /home/runner/mumps-coinor/lib
+          MUMPS_LIB_DIR: ${{ env.MUMPS_LIB_DIR }}
         run: |
           pip install scikit-build-core pybind11 mpi4py numpy scipy matplotlib
           pip install -e .
@@ -48,6 +48,5 @@ jobs:
 
       - name: Run tests
         env:
-          MUMPS_LIB_DIR: /home/runner/mumps-coinor/lib
-          LD_LIBRARY_PATH: /home/runner/mumps-coinor/lib
+          LD_LIBRARY_PATH: ${{ env.MUMPS_LIB_DIR }}
         run: pytest tests/ -v
