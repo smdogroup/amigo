@@ -15,6 +15,7 @@ Test areas:
   - Expr.serialize() / Expr.deserialize(): round-trip fidelity for all node types
   - _normalize_shape(): shape normalisation and validation
 """
+
 import pytest
 from amigo.expressions import (
     Expr,
@@ -30,6 +31,7 @@ from amigo.expressions import (
 # ---------------------------------------------------------------------------
 # is_zero() — zero-value detection on each node type
 # ---------------------------------------------------------------------------
+
 
 class TestIsZero:
     def test_const_zero_int(self):
@@ -60,6 +62,7 @@ class TestIsZero:
 # is_active() — active/passive flag for each node type
 # ---------------------------------------------------------------------------
 
+
 class TestIsActive:
     def test_const_is_never_active(self):
         assert ConstNode(value=1.0).is_active() is False
@@ -87,6 +90,7 @@ class TestIsActive:
 # ---------------------------------------------------------------------------
 # compute_cost() — operation cost increments for each node type
 # ---------------------------------------------------------------------------
+
 
 class TestComputeCost:
     def test_const_cost_is_zero(self):
@@ -144,6 +148,7 @@ class TestComputeCost:
 # ---------------------------------------------------------------------------
 # to_cpp() — C++ code generation strings for each node type
 # ---------------------------------------------------------------------------
+
 
 class TestToCpp:
     def test_const_named(self):
@@ -222,6 +227,7 @@ class TestToCpp:
 # All other combinations produce the expected BinaryNode or UnaryNode tree.
 # ---------------------------------------------------------------------------
 
+
 class TestExprArithmetic:
     """Zero-propagation shortcuts and operator overloads on the Expr wrapper class."""
 
@@ -265,7 +271,7 @@ class TestExprArithmetic:
 
     def test_e_pow_zero_int_is_one(self):
         """e ** 0 (integer 0) → result.is_zero() is False and to_cpp() == '1.0'."""
-        result = self.e ** 0
+        result = self.e**0
         assert result.is_zero() is False
         assert result.to_cpp() == "1.0"
 
@@ -356,6 +362,7 @@ class TestExprArithmetic:
 # Deserialization reconstructs the tree. The round-trip property requires
 # that deserialize(serialize(e)).serialize() == serialize(e) for any Expr e.
 # ---------------------------------------------------------------------------
+
 
 class TestExprRoundTrip:
     """Expr serialize/deserialize round-trip: all node types and edge cases."""

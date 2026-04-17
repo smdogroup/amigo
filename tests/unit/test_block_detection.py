@@ -32,6 +32,7 @@ from amigo.block_detection import (
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def make_linear_chain_csr(n):
     """Build CSR arrays for a symmetric linear chain of n nodes."""
     rowp = [0]
@@ -55,8 +56,10 @@ def make_linear_chain_csr(n):
 # neighbour set, so their degree is always 0.
 # ---------------------------------------------------------------------------
 
+
 class TestComputeDegrees:
     """_compute_degrees: multiplier rows have degree 0; primal degrees are correct."""
+
     def test_multiplier_row_has_zero_degree(self):
         """Multiplier (dual) rows must always have degree 0."""
         # 3-node graph: node 0 is a multiplier, nodes 1 and 2 are primal
@@ -90,8 +93,10 @@ class TestComputeDegrees:
 # Returns a list of components, each a list of variable indices.
 # ---------------------------------------------------------------------------
 
+
 class TestFindConnectedComponents:
     """_find_connected_components: single component and multi-component graphs."""
+
     def test_single_component_triangle(self):
         """Fully connected triangle → exactly one component with all 3 nodes."""
         rowp = np.array([0, 2, 4, 6])
@@ -138,8 +143,10 @@ class TestFindConnectedComponents:
 # that control when a component is treated as a chain vs. small blocks.
 # ---------------------------------------------------------------------------
 
+
 class TestDetectBfsLevelBlocks:
     """detect_bfs_level_blocks: isolated nodes, disconnected components, and chain overflow."""
+
     def test_single_isolated_primal_variable(self):
         """Single isolated primal node → one small block, no chains."""
         rowp = np.array([0, 0])
@@ -181,7 +188,7 @@ class TestDetectBfsLevelBlocks:
             rowp,
             cols,
             mult_ind,
-            max_block_size=0,   # any level size > 0 triggers conversion
+            max_block_size=0,  # any level size > 0 triggers conversion
             max_eigendecomp_size=20,
         )
 

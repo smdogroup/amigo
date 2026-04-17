@@ -13,6 +13,7 @@ Test areas:
   - _parse_attribute_path(): converts an AST Attribute node into an ordered
     list of name segments.
 """
+
 import ast
 import pytest
 import numpy as np
@@ -28,8 +29,10 @@ from amigo.model import GlobalIndexPool, _parse_var_expr, _parse_attribute_path
 # by the total number of elements allocated.
 # ---------------------------------------------------------------------------
 
+
 class TestGlobalIndexPool:
     """GlobalIndexPool: shape, values, non-overlapping ranges, and counter."""
+
     def test_first_allocate_shape_and_values(self):
         """First allocate((3,)) returns array of shape (3,) with values [0, 1, 2]."""
         pool = GlobalIndexPool()
@@ -70,8 +73,10 @@ class TestGlobalIndexPool:
 # list of name segments (e.g. "a.b" → ["a", "b"]).
 # ---------------------------------------------------------------------------
 
+
 class TestParseVarExpr:
     """_parse_var_expr: dotted paths, slice notation, and invalid input handling."""
+
     def test_simple_attribute_path(self):
         """'model.group.var' returns (['model', 'group', 'var'], None)."""
         path, indices = _parse_var_expr("model.group.var")
@@ -98,6 +103,7 @@ class TestParseVarExpr:
 
 class TestParseAttributePath:
     """_parse_attribute_path: reconstructs ordered name segments from an AST node."""
+
     def test_two_part_path(self):
         """Parsing AST of 'a.b' and calling _parse_attribute_path returns ['a', 'b']."""
         node = ast.parse("a.b", mode="eval").body

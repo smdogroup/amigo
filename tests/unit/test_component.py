@@ -15,6 +15,7 @@ Test areas:
     shapes are rejected.
   - DataSet: add() stores an inactive VarNode Expr with the correct shape.
 """
+
 import pytest
 from amigo.component import Meta, InputSet, ConstantSet, DataSet
 from amigo.expressions import VarNode, ConstNode, Expr
@@ -26,6 +27,7 @@ from amigo.expressions import VarNode, ConstNode, Expr
 # Meta stores name, var_type, bounds, value, type, scale, units, and label
 # for a component variable. It validates inputs at construction time.
 # ---------------------------------------------------------------------------
+
 
 class TestMetaValidation:
     """Meta construction: validation rules and serialize/deserialize round-trip."""
@@ -94,6 +96,7 @@ class TestMetaValidation:
 # to declare the design variables of a Component.
 # ---------------------------------------------------------------------------
 
+
 class TestInputSet:
     """InputSet: add(), __getitem__, and missing-key error behaviour."""
 
@@ -121,6 +124,7 @@ class TestInputSet:
 # ConstantSet — named scalar constant container
 # DataSet — named passive (non-differentiable) data container
 # ---------------------------------------------------------------------------
+
 
 class TestConstantSet:
     """ConstantSet: stores scalar ConstNode values; rejects non-scalar shapes."""
