@@ -176,11 +176,11 @@ class SparseLDL {
       int tmp_top = top_idx;
 
       for (int k = 0; k < nchildren; k++) {
-        int delayed_pivots = idx[tmp_top - 2];
+        int num_delayed_pivots = idx[tmp_top - 2];
         int contrib_size = idx[tmp_top - 1];
         int* vars = &idx[tmp_top - 2 - contrib_size];
 
-        for (int j = 0; j < delayed_pivots; j++) {
+        for (int j = 0; j < num_delayed_pivots; j++) {
           int delayed = vars[j];
           if (front_indices[delayed] == -1) {
             front_indices[delayed] = fully_summed;
@@ -230,16 +230,16 @@ class SparseLDL {
       top_idx += 2;
 
       // Check the size of the contribution block
-      int block_size = contrib_size * contrib_size;
+      int block_size = contrib_size * (contrib_size + 1) / 2;
       if (top_work + block_size > work.size()) {
         work.resize(int(top_work + block_size + 0.5 * work.size()));
       }
 
       // Copy the values into the data array
       T* ptr = &work[top_work];
-      for (int j = num_pivots, k = 0; j < front_size; j++) {
-        for (int i = num_pivots; i < front_size; i++, k++) {
-          ptr[k] = F[i + front_size * j];
+      for (int j = num_pivots; j < front_size; j++) {
+        for (int i = j; i < front_size; i++, ptr++) {
+          ptr[0] = F[i + front_size * j];
         }
       }
       top_work += block_size;
@@ -248,20 +248,21 @@ class SparseLDL {
     /**
      * @brief Pop a contribution block from the top of the stack
      *
-     * @param delayed_pivots Number of delayed pivots
+     * @param num_delayed_pivots Number of delayed pivots
      * @param contrib_size Contribution block size
      * @param vars Indices for the contribution block
      * @param C The contribution block values
      */
-    void pop(int* delayed_pivots, int* contrib_size, int* vars[], T* C[]) {
-      *delayed_pivots = idx[top_idx - 2];
+    void pop(int* num_delayed_pivots, int* contrib_size, int* vars[], T* C[]) {
+      *num_delayed_pivots = idx[top_idx - 2];
       int cb_size = idx[top_idx - 1];
       *contrib_size = cb_size;
       *vars = &idx[top_idx - 2 - cb_size];
       top_idx -= (2 + cb_size);
 
-      *C = &work[top_work - cb_size * cb_size];
-      top_work -= cb_size * cb_size;
+      int block_size = cb_size * (cb_size + 1) / 2;
+      *C = &work[top_work - block_size];
+      top_work -= block_size;
     }
 
    private:
@@ -412,13 +413,12 @@ class SparseLDL {
       // Check the integer space needed
       int new_int_size = 2 * num_pivots;
       if (int_size + new_int_size > int_data.size()) {
-        int_data.resize(int(int_size + new_int_size + 0.5 * int_data.size()));
+        int_data.resize(int(int_size + new_int_size));
       }
 
       // Check if we need to to resize the factor data vector
       if (factor_size + block_size > factor_data.size()) {
-        factor_data.resize(
-            int(factor_size + block_size + 0.5 * factor_data.size()));
+        factor_data.resize(int(factor_size + block_size));
       }
 
       // Increase the size of the offsets
@@ -574,8 +574,13 @@ class SparseLDL {
     int* front_vars = &temp[ncols];  // Variables in the front
 
     // Compute proper size for the frontal matrix
+    const int nblock = 64;
     int fdim = int(delay_growth * max_frontal_mat_dimension);
     std::vector<T> F(fdim * fdim);
+    std::vector<T> W;
+    if constexpr (stype == SolverType::LDL) {
+      W.resize(fdim * nblock);
+    }
 
     // Use estimates of the contribution stack sizes
     int int_estimate = int(delay_growth * stack_int_estimate);
@@ -600,10 +605,12 @@ class SparseLDL {
       get_frontal_vars(ks, k, ns, nchildren, stack, front_indices, front_vars,
                        &fully_summed, &front_size);
 
-      // Resize the frontal matrix if needed
+      // Resize the frontal matrix if needed (this will only happen if stype ==
+      // SolverType::LDL)
       if (front_size > fdim) {
         fdim = front_size;
         F.resize(fdim * fdim);
+        W.resize(fdim * nblock);
       }
 
       // Get the underlying array
@@ -624,9 +631,11 @@ class SparseLDL {
                                             front_vars, Fptr, stack, fact);
       } else {
         if (fully_summed < front_size) {
-          info = factor_front_matrix(ks, fully_summed, front_size, front_vars,
-                                     Fptr, stack, fact);
-        } else {  // fully_summed = front_size
+          T* Wptr = W.data();
+          info = factor_front_matrix_block(ks, fully_summed, front_size,
+                                           front_vars, Fptr, nblock, Wptr,
+                                           stack, fact);
+        } else {
           info =
               factor_root_matrix(ks, front_size, front_vars, Fptr, stack, fact);
         }
@@ -682,20 +691,20 @@ class SparseLDL {
     }
 
     // Add the additional contributions from the delayed pivots
-    int f_summed =
+    int full_sum =
         stack.add_delayed_pivots(nchildren, ns, front_indices, front_vars);
 
     // Get the entries predicted from Cholesky
     int start = contrib_ptr[ks];
-    int cbsize = contrib_ptr[ks + 1] - start;
-    for (int j = 0, *row = &contrib_rows[start]; j < cbsize; j++, row++) {
-      front_indices[*row] = f_summed + j;
-      front_vars[f_summed + j] = *row;
+    int contrib_size = contrib_ptr[ks + 1] - start;
+    for (int j = 0, *row = &contrib_rows[start]; j < contrib_size; j++, row++) {
+      front_indices[*row] = full_sum + j;
+      front_vars[full_sum + j] = *row;
     }
 
     // Get the size of the front
-    *fully_summed = f_summed;
-    *front_size = f_summed + cbsize;
+    *fully_summed = full_sum;
+    *front_size = full_sum + contrib_size;
   }
 
   /**
@@ -729,58 +738,72 @@ class SparseLDL {
       for (int ip = colp[var]; ip < colp[var + 1]; ip++) {
         // Get the
         int i = rows[ip];
+        if (i >= var) {
+          // Get the front index
+          int ifront = front_indices[i];
 
-        // Get the front index
-        int ifront = front_indices[i];
-
-        // Add the contribution to the frontal matrix
-        if (ifront >= 0) {
-          Fj[ifront] += data[ip];
+          // Add the contribution to the frontal matrix
+          if (ifront >= 0) {
+            Fj[ifront] += data[ip];
+          }
         }
       }
     }
 
-    // Add the contributions
+    // Add the contributions from the children
     for (int child = 0; child < nchildren; child++) {
-      int delayed_pivots;
+      int num_delayed_pivots;
       int contrib_size;
       int* contrib_indices;
       T* C;
-      stack.pop(&delayed_pivots, &contrib_size, &contrib_indices, &C);
+      stack.pop(&num_delayed_pivots, &contrib_size, &contrib_indices, &C);
 
+      // Get the indices of the contribution indices, so we don't have to
+      // reference these again
       for (int i = 0; i < contrib_size; i++) {
         contrib_indices[i] = front_indices[contrib_indices[i]];
       }
 
-      // Columns from the delayed pivots
-      for (int j = 0; j < delayed_pivots; j++) {
+      // The delayed pivots may be ordered in any way because of the pivoting
+      for (int j = 0; j < num_delayed_pivots; j++) {
         const int jfront = contrib_indices[j];
-        T* Fj = &F[front_size * jfront];
-        const T* Cj = &C[contrib_size * j];
 
-        for (int i = 0; i < contrib_size; i++) {
+        // Set the offset into the contribution block. The diagonal C element
+        // for column j is at index n * j - j * (j - 1)/2, but we subtract j
+        // from this since the row index begins at i = j. This accounts for
+        // indexing Cj using i directly.
+        const int cjindex = j * contrib_size - j * (j + 1) / 2;
+        const T* Cj = &C[cjindex];
+
+        // Set the column and row pointers into the frontal matrix
+        T* Fj = &F[front_size * jfront];
+        T* Fi = &F[jfront];
+
+        // Make sure that the contributions go into the lower part of F
+        for (int i = j; i < contrib_size; i++) {
           const int ifront = contrib_indices[i];
           if (ifront >= jfront) {
             Fj[ifront] += Cj[i];
+          } else {
+            Fi[front_size * ifront] += Cj[i];
           }
         }
       }
 
-      // Columns that are sorted
-      for (int j = delayed_pivots; j < contrib_size; j++) {
+      // The remaining contributions are sorted, so we don't have to check if
+      // these contributions - they are from the lower block
+      for (int j = num_delayed_pivots; j < contrib_size; j++) {
         const int jfront = contrib_indices[j];
+
+        // Set the offset into the contribution block. This accounts for
+        // indexing Cj using i directly
+        const int cjindex = j * contrib_size - j * (j + 1) / 2;
+        const T* Cj = &C[cjindex];
+
+        // Set the column pointer into the frontal matrix
         T* Fj = &F[front_size * jfront];
-        const T* Cj = &C[contrib_size * j];
 
-        // Unsorted rows from the delayed pivots
-        for (int i = 0; i < delayed_pivots; i++) {
-          const int ifront = contrib_indices[i];
-          if (ifront >= jfront) {
-            Fj[ifront] += Cj[i];
-          }
-        }
-
-        // Sorted rows (no check needed)
+        // Add contributions to the lower part of F
         for (int i = j; i < contrib_size; i++) {
           const int ifront = contrib_indices[i];
           Fj[ifront] += Cj[i];
@@ -790,406 +813,9 @@ class SparseLDL {
   }
 
   /**
-   * @brief Get the absolute max value in the column of F and within the fully
-   * summed rows
-   *
-   * Note that k < npc < ldf must hold on input
-   *
-   * @param F The entries of the frontal matrix
-   * @param ldf The leading dimension of the frontal matrix
-   * @param npc The number of pivot candidates remaining
-   * @param k The current column of the matrix
-   * @param amax The maximum absolute value of the sub-diagonal elements
-   * @param r Row index for the max absolute pivot candidate
-   * @param i_pc The index of the maximum pivot candidate
-   */
-  void get_max_subdiagonal(const T F[], int ldf, int npc, int k, double* amax,
-                           double* amaxr, int* r) const {
-    // Dimension of the remaining pivot candidates
-    int nsub_pc = npc - (k + 1);
-
-    // Find the max value below the diagonal but before npc
-    double rval = 0.0;
-    int row = -1;
-    if (nsub_pc > 0) {
-      int one = 1;
-      row = k + 1 + blas_imax<T>(&nsub_pc, &F[k + 1 + ldf * k], &one);
-      rval = std::abs(F[row + ldf * k]);
-    }
-    if (r) {
-      *r = row;
-    }
-    if (amaxr) {
-      *amaxr = rval;
-    }
-
-    // Find the max value below npc
-    int nsub = ldf - npc;
-    double sval = 0.0;
-    if (nsub > 0) {
-      int one = 1;
-      int subrow = npc + blas_imax<T>(&nsub, &F[npc + ldf * k], &one);
-      sval = std::abs(F[subrow + ldf * k]);
-    }
-
-    if (sval > rval) {
-      *amax = sval;
-    } else {
-      *amax = rval;
-    }
-  }
-
-  /**
-   * @brief Check if the k-th column of the frontal matrix satisfies the
-   * 1x1 pivot stability condition
-   *
-   * @param F The frontal matrix
-   * @param ldf The leading dimension of the frontal matrix
-   * @param npc The current number of pivot candidates
-   * @param k The current column in the frontal factorization
-   * @param r The row index for the max absolute value from pivot candidates
-   * @return true The pivot is acceptable
-   * @return false The pivot is not acceptable
-   */
-  bool check_1x1_column(const T F[], int ldf, int npc, int k, int* r) const {
-    // fkk = abs(F[k, k])
-    double fkk = std::abs(F[k * (ldf + 1)]);
-
-    // Find the max sub-diagonal entry
-    double frk;
-    get_max_subdiagonal(F, ldf, npc, k, &frk, nullptr, r);
-
-    // The diagonal pivot is below the tolerance, we can't use it
-    if (fkk < pivot_tol) {
-      return false;
-    }
-
-    // Perform the pivot stability check
-    if (fkk >= ustab * frk) {
-      return true;
-    }
-
-    return false;
-  }
-
-  /**
-   * @brief Get the max absolute value in a candidate row/column swap in the new
-   * hypothetical column that lies below the diagonal
-   *
-   * Note that on input k < c < ldf
-   *
-   *          k     c
-   *   [*                     ]
-   *   [   *                  ]
-   * k [      *               ]
-   *   [         *            ]
-   * c [      .  .  *         ]
-   *   [            .  *      ]
-   *   [            .     *   ]
-   *   [            .        *]
-   *
-   * Dots indicate candidate row/column entries that would be below the new
-   * diagonal. The F[c, c] entry would be the new diagonal entry.
-   *
-   * @param F The entries in the front matrix
-   * @param ldf The row/column dimension of F
-   * @param k The current column index that is factored in F
-   * @param c The candidate row/column to swap
-   * @param amax The computed max absolute value
-   * @param p The row containing the absolute max from the pivot entries
-   * @return int The row index corresponding to the max value
-   */
-  void get_max_candidate(const T F[], int ldf, int npc, int k, int c,
-                         double* amax, int* p) const {
-    // Search the candidate row c starting from k
-    int ncols = c - k;
-    double p1val = 0.0;
-    int p1 = -1;
-    if (ncols > 0) {
-      int p1 = k + blas_imax<T>(&ncols, &F[c + ldf * k], &ldf);
-      p1val = std::abs(F[p1 + ldf * k]);
-    }
-
-    // Test the sub diagonal from c
-    double sval, p2val;
-    int p2;
-    get_max_subdiagonal(F, ldf, npc, c, &sval, &p2val, &p2);
-
-    if (p1val > sval) {
-      *p = p1;
-      *amax = p1val;
-    } else {
-      *p = p2;
-      *amax = sval;
-    }
-  }
-
-  /**
-   * @brief Check whether the pivot candidate will satisfy the 1x1 pivot test
-   *
-   * @param F The frontal matrix
-   * @param ldf The leading dimension of the frontal matrix
-   * @param npc The current number of pivot candidates
-   * @param k The current column in the frontal factorization
-   * @param c The candidate pivot
-   * @param p The index of the max entry in the pivot row
-   * @return true The pivot is acceptable
-   * @return false The pivot is not acceptable
-   */
-  bool check_1x1_candidate(const T F[], int ldf, int npc, int k, int c,
-                           int* p) const {
-    // Check if fcc is
-    double fcc = std::abs(F[c * (ldf + 1)]);
-
-    // Find the max sub-diagonal entry
-    double frc;
-    get_max_candidate(F, ldf, npc, k, c, &frc, p);
-
-    // The diagonal pivot is below the tolerance, we can't use it
-    if (fcc < pivot_tol) {
-      return false;
-    }
-
-    // Perform the pivot stability check
-    if (fcc >= ustab * frc) {
-      return true;
-    }
-
-    return false;
-  }
-
-  /**
-   * @brief Check if the candidate obtained by the candidate satisfies the
-   * stability test
-   *
-   * @param F The frontal matrix
-   * @param ldf The leading dimension of the frontal matrix
-   * @param npc The current number of pivot candidates
-   * @param k The current column in the frontal factorization
-   * @param c The candidate pivot
-   * @param p The index of the max entry in the pivot row
-   * @return true The 2x2 pivot is acceptable
-   * @return false The 2x2 pivot is not acceptable
-   */
-  bool check_2x2_candidate(const T F[], int ldf, int npc, int k, int c,
-                           int p) const {
-    return false;
-  }
-
-  /**
-   * @brief Perform a symmetric swap of the entries within the frontal matrix.
-   *
-   * This code assumes k != c.
-   *
-   * This performs the swap operation on the variables and numerical entries in
-   * F. The variables are swapped using
-   *
-   * vars[[k, c]] = vars[[c, k]]
-   *
-   * The numerical values in F are swapped using
-   *
-   * F[[k, c], :] = F[[c, k], :] and F[:, [k, c]] = F[:, [c, k]]
-   *
-   * @param vars The variable numbers
-   * @param F The entries of the frontal matrix
-   * @param ldf The leading dimension of the frontal factorization
-   * @param k The current column in the frontal factorization
-   * @param c The pivot to swap with
-   */
-  void symm_swap(int vars[], T F[], int ldf, int k, int c) const {
-    // Swap the variable indices
-    int t = vars[k];
-    vars[k] = vars[c];
-    vars[c] = t;
-
-    T tmp;
-
-    // Swap entries [k, 0:k - 1] with [c, 0:k - 1]
-    for (int j = 0; j < k; j++) {
-      tmp = F[k + j * ldf];
-      F[k + j * ldf] = F[c + j * ldf];
-      F[c + j * ldf] = tmp;
-    }
-
-    // Swap diagonal entries
-    tmp = F[k + k * ldf];
-    F[k + k * ldf] = F[c + c * ldf];
-    F[c + c * ldf] = tmp;
-
-    // Swap [j, k] <-> [c, j] for k < j < c
-    for (int j = k + 1; j < c; j++) {
-      tmp = F[j + k * ldf];
-      F[j + k * ldf] = F[c + j * ldf];
-      F[c + j * ldf] = tmp;
-    }
-
-    // Swap entries below both rows/cols: [j, k] <-> [j, c] for j > c
-    for (int j = c + 1; j < ldf; j++) {
-      tmp = F[j + k * ldf];
-      F[j + k * ldf] = F[j + c * ldf];
-      F[j + c * ldf] = tmp;
-    }
-  }
-
-  /**
-   * @brief Factor the frontal matrix and add the results to the stack and
-   * matrix factor.
-   *
-   * Since this is a frontal matrix we will always have strictly that the number
-   * of fully summed variables will be less than the front size. So that
-   * fully_summed < front_size. (The root factorization takes care of any roots
-   * in the elimination tree separately.)
-   *
-   * After factorization, the contribution blocks are pushed on the stack and we
-   * store the pivots and factorization pieces
-   *
-   * @param ks The index of the super node
-   * @param fully_summed The number of fully summed equations
-   * @param front_size The front size
-   * @param front_vars The front variables
-   * @param F The frontal matrix itself
-   * @param stack The stack for the contribution blocks
-   * @param factor The factor contributions
-   */
-  int factor_front_matrix(const int ks, const int fully_summed,
-                          const int front_size, int front_vars[], T F[],
-                          ContributionStack& stack, MatrixFactor& factor) {
-    int ldf = front_size;
-    int num_candidates = fully_summed;
-    int contrib_size = front_size - fully_summed;
-
-    // Loop until there are no candidates or k == num_candidates
-    for (int k = 0; k < num_candidates;) {
-      // Default to pivot not accepted (s = 0)
-      int s = 0;
-
-      // The index and maximum value of the pivot candidate
-      int r = 0, p = 0;
-      if (check_1x1_column(F, ldf, num_candidates, k, &r)) {
-        s = 1;  // This column is okay, and no swapping required
-      } else if (k < num_candidates - 1 &&
-                 check_1x1_candidate(F, ldf, num_candidates, k, r, &p)) {
-        symm_swap(front_vars, F, ldf, k, r);
-        s = 1;
-      } else if (k < num_candidates - 2 &&
-                 check_2x2_candidate(F, ldf, num_candidates, k, r, p)) {
-        symm_swap(front_vars, F, ldf, k, r);
-        if (k + 1 != p) {
-          symm_swap(front_vars, F, ldf, k + 1, p);
-        }
-
-        // Indicate the 2x2 swap
-        front_vars[k] = -(front_vars[k] + 1);
-        front_vars[k + 1] = -(front_vars[k + 1] + 1);
-        s = 2;
-      }
-
-      // No acceptable pivots found, we have to delay this variable
-      if (s == 0) {
-        symm_swap(front_vars, F, ldf, k, num_candidates - 1);
-        num_candidates -= 1;
-
-        // No need to continue this iteration of the loop.
-        // k remains the same the next loop, but the number of candidates
-        // has decreased.
-        continue;
-      }
-
-      // Apply the update
-      if (s == 1) {
-        // Copy the column of F[k + 1:, k] to the row F[k, k + 1:] for
-        // later usage
-        int n = ldf - (k + 1);
-        int one = 1;
-        blas_copy<T>(&n, &F[(ldf + 1) * k + 1], &one, &F[k + (k + 1) * ldf],
-                     &ldf);
-
-        // Find the inverse of the 1x1 pivot
-        T d11inv = 1.0 / F[k * (ldf + 1)];
-
-        // Update the column below the diagonal
-        T* f = &F[k * (ldf + 1) + 1];
-        for (int j = k + 1; j < ldf; j++, f++) {
-          f[0] *= d11inv;
-        }
-      } else if (s == 2) {
-        // Copy the columns F[k + 2:, k:k + 2] -> F[k:k + 2, k + 2:].T
-        int n = ldf - (k + 2);
-        int one = 1;
-        blas_copy<T>(&n, &F[k + 2 + ldf * k], &one, &F[k + (k + 2) * ldf],
-                     &ldf);
-        blas_copy<T>(&n, &F[k + 2 + ldf * (k + 1)], &one,
-                     &F[k + 1 + (k + 2) * ldf], &ldf);
-
-        // Find the inverse of the 2x2 pivot
-        T d11 = F[k * (ldf + 1)];
-        T d21 = F[k * (ldf + 1) + 1];
-        T d22 = F[(k + 1) * (ldf + 1)];
-
-        T inv = 1.0 / (d11 * d22 - d21 * d21);
-        T d11inv = d22 * inv;
-        T d21inv = -d21 * inv;
-        T d22inv = d11 * inv;
-
-        // Update the column below the block diagonal
-        T* f = &F[k * (ldf + 1) + 2];
-        for (int j = k + 2; j < ldf; j++, f++) {
-          T f1 = f[0];
-          T f2 = f[ldf];
-
-          f[0] = d11inv * f1 + d21inv * f2;
-          f[ldf] = d21inv * f1 + d22inv * f2;
-        }
-      }
-
-      // Apply the update to the remaining candidate columns
-      if (s > 0) {
-        int mdim = (ldf - (k + s));             // number of rows
-        int ndim = (num_candidates - (k + s));  // number of columns
-        int kdim = s;
-        T alpha = -1.0;
-        T beta = 1.0;
-
-        blas_gemm<T>("N", "N", &mdim, &ndim, &kdim, &alpha,
-                     &F[(k + s) + k * ldf], &ldf, &F[k + (k + s) * ldf], &ldf,
-                     &beta, &F[(k + s) + (k + s) * ldf], &ldf);
-      }
-
-      // Increment the
-      k += s;
-    }
-
-    // The candidates have now been reduced to the number of pivots
-    int num_pivots = num_candidates;
-
-    // Apply the trailing update (where npiv = num_pivots)
-    // F[npiv:, npiv:] -= F[npiv:, :npiv] @ F[:npiv, npiv:]
-    int ndim = front_size - num_pivots;
-    int kdim = num_pivots;
-    frontal_trailing_update(ndim, kdim, &F[num_pivots], ldf,
-                            &F[ldf * num_pivots], ldf,
-                            &F[(ldf + 1) * num_pivots], ldf);
-
-    // The number of delayed pivots is the difference between the fully summed
-    // candidates we started from and the pivots that were successful
-    int num_delayed = fully_summed - num_pivots;
-
-    // Push this onto the stack
-    stack.push(num_pivots, num_delayed, front_size, front_vars, F);
-
-    // Push the factored matrix onto the stack
-    const int* pivots = front_vars;
-    const int* delayed = &front_vars[num_pivots];
-    factor.add_factor(ks, num_pivots, pivots, num_delayed, delayed,
-                      front_size - fully_summed, F);
-
-    return 0;
-  }
-
-  /**
    * @brief Perform the trailing update for the matrix
    *
-   * C = C - A * B
+   * C = C - A * B^{T}
    *
    * @param ndim Number of rows of C and A and number of columns of C and B
    * @param kdim Number of columns of A and number of rows of B
@@ -1202,15 +828,11 @@ class SparseLDL {
    */
   void frontal_trailing_update(int ndim, int kdim, const T* A, int lda,
                                const T* B, int ldb, T* C, int ldc) const {
-    T alpha = -1.0;
-    T beta = 1.0;
-
     // Apply the regular update
     if (ndim < 32) {
-      blas_gemm<T>("N", "N", &ndim, &ndim, &kdim, &alpha, A, &lda, B, &ldb,
-                   &beta, C, &ldc);
+      blas_gemm<T>("N", "T", ndim, ndim, kdim, -1.0, A, lda, B, ldb, 1.0, C,
+                   ldc);
     } else {
-      //
       // [ C11  0   ] -= [ A11 ] [ B11  B12 ]
       // [ C21  C22 ]    [ A21 ]
 
@@ -1218,15 +840,15 @@ class SparseLDL {
       int n1 = ndim / 2;
       int n2 = ndim - n1;
 
-      // Compute C21 = C21 - A21 * B11
-      blas_gemm<T>("N", "N", &n2, &n1, &kdim, &alpha, &A[n1], &lda, B, &ldb,
-                   &beta, &C[n1], &ldc);
+      // Compute C21 = C21 - A21 * B11^{T}
+      blas_gemm<T>("N", "T", n2, n1, kdim, -1.0, &A[n1], lda, B, ldb, 1.0,
+                   &C[n1], ldc);
 
       // Compute C11 = C11 - A11 * B11
       frontal_trailing_update(n1, kdim, A, lda, B, ldb, C, ldc);
 
       // Compute C22 = C22 - A21 * B12
-      frontal_trailing_update(n2, kdim, &A[n1], lda, &B[n1 * ldb], ldb,
+      frontal_trailing_update(n2, kdim, &A[n1], lda, &B[n1], ldb,
                               &C[n1 * (ldc + 1)], ldc);
     }
   }
@@ -1257,13 +879,320 @@ class SparseLDL {
 
     // Factor the matrix
     int info;
-    lapack_sytrf<T>("L", &n, F, &n, ipiv, L, &lwork, &info);
+    lapack_sytrf<T>("L", n, F, n, ipiv, work, lwork, &info);
 
     // Copy the data into the factorization storage
     std::copy(front_vars, front_vars + n, vars);
     std::copy(F, F + n * n, L);
 
     return info;
+  }
+
+  /**
+   * @brief Perform a symmetric swap of the entries within the frontal matrix.
+   *
+   * This code assumes k < c!
+   *
+   * This performs the swap operation on the variables and numerical entries in
+   * F. The variables are swapped using
+   *
+   * vars[[k, c]] = vars[[c, k]]
+   *
+   * The numerical values in F are swapped using
+   *
+   * F[[k, c], :] = F[[c, k], :] and F[:, [k, c]] = F[:, [c, k]]
+   *
+   * @param vars The variable numbers
+   * @param F The entries of the frontal matrix
+   * @param ldf The leading dimension of the frontal factorization
+   * @param k The current column in the frontal factorization
+   * @param c The pivot to swap with
+   */
+  void symm_swap(int vars[], T F[], int ldf, int k, int c) const {
+    // Swap the variable indices
+    int t = vars[k];
+    vars[k] = vars[c];
+    vars[c] = t;
+
+    // Swap entries F[k, 0:k] with F[c, 0:k]
+    blas_swap<T>(k, &F[k], ldf, &F[c], ldf);
+
+    // Swap diagonal entries
+    T tmp = F[k + k * ldf];
+    F[k + k * ldf] = F[c + c * ldf];
+    F[c + c * ldf] = tmp;
+
+    // Swap F[j, k] <-> F[c, j] for k < j < c
+    if (c > k + 1) {
+      blas_swap<T>(c - (k + 1), &F[k + 1 + k * ldf], 1, &F[c + (k + 1) * ldf],
+                   ldf);
+    }
+
+    // Swap entries below both rows/cols: F[j, k] <-> F[j, c] for j > c
+    blas_swap<T>(ldf - (c + 1), &F[c + 1 + k * ldf], 1, &F[c + 1 + c * ldf], 1);
+  }
+
+  /**
+   * @brief Factor the frontal matrix and add the results to the stack and
+   * matrix factor.
+   *
+   * Since this is a frontal matrix we will always have strictly that the number
+   * of fully summed variables will be less than the front size. So that
+   * fully_summed < front_size. (The root factorization takes care of any roots
+   * in the elimination tree separately.)
+   *
+   * After factorization, the contribution blocks are pushed on the stack and we
+   * store the pivots and factorization pieces
+   *
+   * @param ks The index of the super node
+   * @param fully_summed The number of fully summed equations
+   * @param front_size The front size
+   * @param front_vars The front variables
+   * @param F The frontal matrix itself
+   * @param nblock The block size for the panel
+   * @param W The work array dimension (front_size x nblock)
+   * @param stack The stack for the contribution blocks
+   * @param factor The factor contributions
+   */
+  int factor_front_matrix_block(const int ks, const int fully_summed,
+                                const int front_size, int front_vars[], T F[],
+                                const int nblock, T W[],
+                                ContributionStack& stack,
+                                MatrixFactor& factor) {
+    const int ldf = front_size;
+    const int ldw = front_size;
+    const int n = front_size;
+    int num_candidates = fully_summed;
+    int contrib_size = front_size - fully_summed;
+
+    for (int k = 0; k < num_candidates;) {
+      int kstart = k;  // When we entered the panel factorization
+      int kw = 0;      // Block index within the panel
+
+      // Assemble a panel for factorization. We loop over the panel with
+      // kw < nblock - 1 in case there are 2x2 pivots encountered
+      for (; kw < nblock - 1 && k < num_candidates;) {
+        int step = 0;
+        int kpiv = -1;  // No pivot selected yet
+
+        // Copy W[:, kw] = F[:, k]
+        blas_copy<T>(n - k, &F[k * (ldf + 1)], 1, &W[k + kw * ldw], 1);
+
+        // Compute W[k:, kw] -= F[k:, kstart:k] @ W[k, :kw]
+        if (kw > 0) {
+          blas_gemv<T>("N", n - k, kw, -1.0, &F[k + kstart * ldf], ldf, &W[k],
+                       ldw, 1.0, &W[k + kw * ldw], 1);
+        }
+
+        // Get the absolute value of the diagonal element
+        double abswkk = std::abs(W[k + kw * ldw]);
+
+        // Find the row entry in column k with the maximum absolute value.
+        // Distinguish between the maximum over max(|W[k:nc, kw]|) and
+        // max(|W[nc:n, kw]|).
+        const int nc = num_candidates;
+
+        double abswik = 0.0;
+        int imax = 0;
+        if (k + 1 < nc) {
+          // Get the location of the maximum absolute entry within the candidate
+          // set of pivots
+          imax = k + 1 + blas_imax<T>(nc - (k + 1), &W[k + 1 + kw * ldw], 1);
+
+          // This will be the off-diagonal of a 2x2 pivot candidate for columns
+          // k and k + 1 in W
+          abswik = std::abs(W[imax + kw * ldw]);
+        }
+
+        // Number of fully summed candidate is always strictly less than n
+        int ismax = nc + blas_imax<T>(n - nc, &W[nc + kw * ldw], 1);
+
+        // Maximum absolute value of any entry in the column
+        double colmax = std::max(abswik, std::abs(W[ismax + kw * ldw]));
+
+        // Check if this pivot is large enough and satisfies the stability
+        // criterion. If so, we don't need to do any more work
+        if (abswkk >= pivot_tol && abswkk >= ustab * colmax) {
+          step = 1;
+          kpiv = k;
+        } else if (k + 1 < nc) {
+          // Note that we have to have k + 1 < nc since otherwise there are no
+          // candidate pivots remaining
+
+          // The initial pivot criterion failed. Try a different pivot. To
+          // construct the candidate pivot, copy the column/row imax which
+          // is the max absolute value below the diagonal but within the
+          // candidate pivot block into the temporary column W[k:, kw + 1]
+
+          // First part of the column W[k:imax, k+1] comes from
+          // F[imax, k:imax]
+          blas_copy<T>(imax - k, &F[imax + k * ldf], ldf,
+                       &W[k + (kw + 1) * ldw], 1);
+
+          // Second part of the column W[imax + 1:, k + 1] = F[imax + 1:, imax]
+          blas_copy<T>(n - imax, &F[imax + imax * ldf], 1,
+                       &W[imax + (kw + 1) * ldw], 1);
+
+          // Compute the update for the column W[k:, k + 1]
+          // Compute W[k:, kw + 1] -= F[k:, kstart:k] @ W[k, :kw]
+          if (kw > 0) {
+            blas_gemv<T>("N", n - k, kw, -1.0, &F[k + kstart * ldf], ldf,
+                         &W[imax], ldw, 1.0, &W[k + (kw + 1) * ldw], 1);
+          }
+
+          // Compute the maximum entry in the candidate column (excluding the
+          // pivot imax) Look at the max absolute value over W[k:imax, k + 1]
+          int jmax = k + blas_imax<T>(imax - k, &W[k + (kw + 1) * ldw], 1);
+          double rowmax = std::abs(W[jmax + (kw + 1) * ldw]);
+
+          // Look at the max absolute value over W[imax+1:n, k + 1]
+          if (imax + 1 < n) {
+            jmax =
+                imax + 1 +
+                blas_imax<T>(n - (imax + 1), &W[imax + 1 + (kw + 1) * ldw], 1);
+            rowmax = std::max(rowmax, std::abs(W[jmax + (kw + 1) * ldw]));
+          }
+
+          // The absolute value of the candidate pivot stored in the assembled
+          // column W[k:, k + 1]
+          double abswii = std::abs(W[imax + (kw + 1) * ldw]);
+
+          // Check if we can use imax as a regular pivot
+          if (abswii >= pivot_tol && abswii >= ustab * rowmax) {
+            // Copy W[k:, kw] = W[k:, kw + 1]
+            blas_copy<T>(n - k, &W[k + (kw + 1) * ldw], 1, &W[k + kw * ldw], 1);
+
+            step = 1;
+            kpiv = imax;
+          } else {
+            // A candidate 2x2 pivot is the matrix is
+            // [ W[k, kw],                  ]
+            // [ W[imax, kw], W[imax, imax] ]
+            // Note that the column for imax is currently stored
+            // in W[:, kw + 1]
+            double wkk = W[k + kw * ldw];
+            double wik = W[imax + kw * ldw];
+            double wii = W[imax + (kw + 1) * ldw];
+            double det = std::abs(wkk * wii - wik * wik);
+
+            if (det < pivot_tol) {
+              // We can't use this as a pivot because the determinant is too
+              // small, delay factoring either column
+              step = 0;
+            } else {
+              // Check if this works as a 2x2 pivot
+              double delta = det / std::max(abswii + abswik, abswkk + abswik);
+
+              if (delta >= ustab * colmax && delta >= ustab * rowmax) {
+                // This 2x2 pivot passes the test
+                step = 2;
+                kpiv = imax;
+              } else {
+                // These steps have failed. We need to postpone this pivot
+                step = 0;
+              }
+            }
+          }
+        }
+
+        // No acceptable pivots. Delay this pivot candidate
+        if (step == 0) {
+          // Pivot k to the end
+          if (k < num_candidates - 1) {
+            symm_swap(front_vars, F, ldf, k, num_candidates - 1);
+
+            // Swap the rows of the corresponding entries in W
+            blas_swap<T>(kw, &W[k], ldw, &W[num_candidates - 1], ldw);
+          }
+
+          num_candidates -= 1;
+          continue;
+        }
+
+        // We're taking a pivot from this k location
+        int ksrc = k + step - 1;
+
+        // Pivot to place the entries in the correct location
+        if (kpiv != ksrc) {
+          // Swap the rows and columns of F
+          symm_swap(front_vars, F, ldf, ksrc, kpiv);
+
+          // Swap the rows of the corresponding entries in W
+          blas_swap<T>(kw + step, &W[ksrc], ldw, &W[kpiv], ldw);
+        }
+
+        // Now, since we've pivoted, the inverse and determinant are well
+        // defined. Compute the update F[k + step:, k:k + step] =
+        // W[k + step:, k: k + step] * D^{-1} and store F[k:step, k:step] = D.
+        if (step == 1) {
+          // 1x1 pivot
+          // Copy F[k:, k] = W[k:, kw]
+          blas_copy<T>(n - k, &W[k + kw * ldw], 1, &F[k * (ldf + 1)], 1);
+
+          // Compute the inverse of the diagonal
+          T dinv = 1.0 / F[k * (ldf + 1)];
+
+          // Scale the column of F[k + 1:, k] *= dinv
+          blas_scal<T>(n - k - 1, dinv, &F[1 + k * (ldf + 1)], 1);
+        } else if (step == 2) {
+          // TODO: Implement this with blas_gemm
+          // Extract the entries of the D matrix
+          T d11 = W[k + kw * ldw];
+          T d21 = W[k + 1 + kw * ldw];
+          T d22 = W[k + 1 + (kw + 1) * ldw];
+
+          // Set the values into F
+          F[k * (ldf + 1)] = d11;
+          F[k * (ldf + 1) + 1] = d21;
+          F[(k + 1) * (ldf + 1)] = d22;
+
+          T detinv = 1.0 / (d11 * d22 - d21 * d21);
+          T d11inv = d22 * detinv;
+          T d21inv = -d21 * detinv;
+          T d22inv = d11 * detinv;
+
+          // Compute the entries in the column of F[k+2:, k:k + 2]
+          T* fk1 = &F[k + 2 + ldf * k];
+          T* fk2 = &F[k + 2 + ldf * (k + 1)];
+          T* wk1 = &W[k + 2 + ldw * kw];
+          T* wk2 = &W[k + 2 + ldw * (kw + 1)];
+          const T* fk1end = &F[n + ldf * k];
+
+          for (; fk1 < fk1end; fk1++, fk2++, wk1++, wk2++) {
+            fk1[0] = d11inv * wk1[0] + d21inv * wk2[0];
+            fk2[0] = d21inv * wk1[0] + d22inv * wk2[0];
+          }
+        }
+
+        k += step;
+        kw += step;
+      }
+
+      // Apply the trailing update
+      // F[k:, k:] -= F[k:, kstart:kstart + kdim] @ W[k:, :kdim]^{T}
+      int ndim = front_size - k;
+      int kdim = kw;
+      frontal_trailing_update(ndim, kdim, &F[k + kstart * ldf], ldf, &W[k], ldw,
+                              &F[k * (ldf + 1)], ldf);
+    }
+
+    // The candidates have now been reduced to the number of pivots
+    int num_pivots = num_candidates;
+
+    // The number of delayed pivots is the difference between the fully summed
+    // candidates we started from and the pivots that were successful
+    int num_delayed = fully_summed - num_pivots;
+
+    // Push this onto the stack
+    stack.push(num_pivots, num_delayed, front_size, front_vars, F);
+
+    // Push the factored matrix onto the stack
+    const int* pivots = front_vars;
+    const int* delayed = &front_vars[num_pivots];
+    factor.add_factor(ks, num_pivots, pivots, num_delayed, delayed,
+                      contrib_size, F);
+
+    return 0;
   }
 
   /**
@@ -1394,7 +1323,7 @@ class SparseLDL {
       if (ipiv) {
         int nrhs = 1;
         int info;
-        lapack_sytrs("L", &ldl, &nrhs, L, &ldl, ipiv, temp, &ldl, &info);
+        lapack_sytrs("L", ldl, nrhs, L, ldl, ipiv, temp, ldl, &info);
       } else {
         // Find the solution t1 = L11^{-1} * t1, overwriting temp
         // with the solution
@@ -1403,10 +1332,8 @@ class SparseLDL {
         // Compute the matrix-vector t2 = L21 * t1 and add the contributions
         // to the lower block
         int size = num_delayed + num_contrib;
-        T alpha = 1.0, beta = 0.0;
-        int inc = 1;
-        blas_gemv<T>("N", &size, &num_pivots, &alpha, &L[num_pivots], &ldl,
-                     temp, &inc, &beta, &temp[num_pivots], &inc);
+        blas_gemv<T>("N", size, num_pivots, 1.0, &L[num_pivots], ldl, temp, 1,
+                     0.0, &temp[num_pivots], 1);
 
         // Add the contributions
         for (int j = 0, jj = num_pivots; j < num_delayed; j++, jj++) {
@@ -1467,10 +1394,8 @@ class SparseLDL {
 
         // Compute the matrix-vector product
         int size = num_delayed + num_contrib;
-        T alpha = -1.0, beta = 1.0;
-        int inc = 1;
-        blas_gemv<T>("T", &size, &num_pivots, &alpha, &L[num_pivots], &ldl,
-                     &temp[num_pivots], &inc, &beta, temp, &inc);
+        blas_gemv<T>("T", size, num_pivots, -1.0, &L[num_pivots], ldl,
+                     &temp[num_pivots], 1, 1.0, temp, 1);
 
         // Solve L11^{T} * x = temp
         solve_pivot_transpose(num_pivots, pivots, L, ldl, temp);
@@ -1583,19 +1508,16 @@ class SparseLDL {
     // Positive definite matrix factorization of L11 * L11^{T} = F11
     int ldf = front_size;
     int info;
-    lapack_potrf<T>("L", &num_pivots, F, &ldf, &info);
+    lapack_potrf<T>("L", num_pivots, F, ldf, &info);
 
     // Compute L21 = F21 * L^{-T}
-    T alpha = 1.0;
-    blas_trsm<T>("R", "L", "T", "N", &contrib_size, &num_pivots, &alpha, F,
-                 &ldf, &F[num_pivots], &ldf);
+    blas_trsm<T>("R", "L", "T", "N", contrib_size, num_pivots, 1.0, F, ldf,
+                 &F[num_pivots], ldf);
 
     // Compute the trailing update for the lower part of the matrix
     // F22 = F22 - L21 * L21^{T}
-    alpha = -1.0;
-    T beta = 1.0;
-    blas_syrk<T>("L", "N", &contrib_size, &num_pivots, &alpha, &F[num_pivots],
-                 &ldf, &beta, &F[num_pivots * (ldf + 1)], &ldf);
+    blas_syrk<T>("L", "N", contrib_size, num_pivots, -1.0, &F[num_pivots], ldf,
+                 1.0, &F[num_pivots * (ldf + 1)], ldf);
 
     // Push the update to F22 onto the stack
     stack.push(num_pivots, num_delayed, front_size, front_vars, F);
@@ -1642,9 +1564,8 @@ class SparseLDL {
 
       // Compute the solution of L11 * t1 = t1
       int nrhs = 1;
-      T alph = 1.0;
-      blas_trsm<T>("L", "L", "N", "N", &num_pivots, &nrhs, &alph, L, &ldl, temp,
-                   &num_pivots);
+      blas_trsm<T>("L", "L", "N", "N", num_pivots, nrhs, 1.0, L, ldl, temp,
+                   num_pivots);
 
       // Assign the t1 entries back into the x vector
       for (int j = 0; j < num_pivots; j++) {
@@ -1653,10 +1574,8 @@ class SparseLDL {
 
       // Compute the matrix-vector product t2 = L21 * t1
       int size = num_delayed + num_contrib;
-      T alpha = 1.0, beta = 0.0;
-      int inc = 1;
-      blas_gemv<T>("N", &size, &num_pivots, &alpha, &L[num_pivots], &ldl, temp,
-                   &inc, &beta, &temp[num_pivots], &inc);
+      blas_gemv<T>("N", size, num_pivots, 1, &L[num_pivots], ldl, temp, 1, 0.0,
+                   &temp[num_pivots], 1);
 
       // Add the contributions x -= t2
       for (int j = 0, jj = num_pivots; j < num_delayed; j++, jj++) {
@@ -1696,16 +1615,13 @@ class SparseLDL {
 
       // Compute the matrix-vector product t1 = t1 - L21 * t2
       int size = num_delayed + num_contrib;
-      T alpha = -1.0, beta = 1.0;
-      int inc = 1;
-      blas_gemv<T>("T", &size, &num_pivots, &alpha, &L[num_pivots], &ldl,
-                   &temp[num_pivots], &inc, &beta, temp, &inc);
+      blas_gemv<T>("T", size, num_pivots, -1.0, &L[num_pivots], ldl,
+                   &temp[num_pivots], 1, 1.0, temp, 1);
 
       // Compute the solution x1 = L11^{-T} * t1
       int nrhs = 1;
-      T alph = 1.0;
-      blas_trsm<T>("L", "L", "T", "N", &num_pivots, &nrhs, &alph, L, &ldl, temp,
-                   &num_pivots);
+      blas_trsm<T>("L", "L", "T", "N", num_pivots, nrhs, 1.0, L, ldl, temp,
+                   num_pivots);
 
       // Assign the t1 entries back to x
       for (int j = 0; j < num_pivots; j++) {
@@ -2166,7 +2082,7 @@ class SparseLDL {
 
       // Push this contribution on to the stack
       work[top] = 2 + contrib_size;
-      work[top + 1] = contrib_size * contrib_size;
+      work[top + 1] = contrib_size * (contrib_size + 1) / 2;
       top += 2;
     }
 

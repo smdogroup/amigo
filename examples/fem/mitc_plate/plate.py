@@ -166,13 +166,12 @@ model.eval_hessian(x, mat)
 # Solve the equations
 print("Solving...")
 
-
 if args.solver == "cholesky" or args.solver == "ldl":
     stype = am.SolverType.CHOLESKY
     if args.solver == "ldl":
         stype = am.SolverType.LDL
 
-    ldl = am.SparseLDL(mat, stype, ustab=0.01)
+    ldl = am.SparseLDL(mat, stype, ustab=0.05)
     start_time = time.perf_counter()
     flag = ldl.factor()
     end_time = time.perf_counter()

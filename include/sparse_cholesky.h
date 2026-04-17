@@ -592,8 +592,7 @@ class SparseCholesky {
     // Compute L * L^{T}
     int n = nlrows;
     int k = lsize;
-    T alpha = 1.0, beta = 0.0;
-    blas_syrk<T>("L", "T", &n, &k, &alpha, L, &k, &beta, work, &n);
+    blas_syrk<T>("L", "T", n, k, 1.0, L, k, 0.0, work, n);
 
     // Add D <- D - L * L^{T}
     for (int jj = 0; jj < nlrows; jj++) {
@@ -618,8 +617,7 @@ class SparseCholesky {
     // Compute L * L^{T}
     int n = nlrows;
     int k = lsize;
-    T alpha = 1.0, beta = 0.0;
-    blas_syrk<T>("L", "T", &n, &k, &alpha, L, &k, &beta, work, &n);
+    blas_syrk<T>("L", "T", n, k, 1.0, L, k, 0.0, work, n);
 
     // Add D <- D - L * L^{T}
     for (int jj = 0; jj < nlrows; jj++) {
@@ -661,9 +659,8 @@ class SparseCholesky {
     // dimension of Tmp^{T} is n21rows X n32rows
     // dimension of L21 is n21rows X lwidth
     // dimension of L31^{T} is lwidth X n31rows
-    T alpha = 1.0, beta = 0.0;
-    blas_gemm<T>("T", "N", &n21rows, &n31rows, &lwidth, &alpha, L21, &lwidth,
-                 L31, &lwidth, &beta, Tmp, &n21rows);
+    blas_gemm<T>("T", "N", n21rows, n31rows, lwidth, 1.0, L21, lwidth, L31,
+                 lwidth, 0.0, Tmp, n21rows);
   }
 
   /**
@@ -737,7 +734,7 @@ class SparseCholesky {
    */
   int factor_diag(const int diag_size, T* D) {
     int n = diag_size, info;
-    lapack_pptrf<T>("U", &n, D, &info);
+    lapack_pptrf<T>("U", n, D, &info);
     return info;
   }
 
@@ -746,7 +743,7 @@ class SparseCholesky {
    */
   int solve_diag(int diag_size, T* L, int nrhs, T* x) {
     int info = 0;
-    blas_tptrs<T>("U", "T", "N", &diag_size, &nrhs, L, x, &diag_size, &info);
+    blas_tptrs<T>("U", "T", "N", diag_size, nrhs, L, x, diag_size, &info);
     return info;
   }
 
@@ -755,7 +752,7 @@ class SparseCholesky {
    */
   int solve_diag_transpose(int diag_size, T* L, int nrhs, T* x) {
     int info = 0;
-    blas_tptrs<T>("U", "N", "N", &diag_size, &nrhs, L, x, &diag_size, &info);
+    blas_tptrs<T>("U", "N", "N", diag_size, nrhs, L, x, diag_size, &info);
     return info;
   }
 
