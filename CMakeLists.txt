@@ -156,15 +156,15 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/
     DESTINATION "${AMIGO_PY_PACKAGE_DIR}/include"
 )
 
-# Install a2d headers alongside (adjust if you want a different layout)
-install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../a2d/include/
+# Install a2d headers alongside (vendored under extern/a2d for AE6310 students)
+install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/extern/a2d/include/
     DESTINATION "${AMIGO_PY_PACKAGE_DIR}/a2d/include"
 )
 
 target_include_directories(headers INTERFACE
   # When building this project
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../a2d/include>
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/extern/a2d/include>
 
   # When consumed via find_package(Amigo)
   $<INSTALL_INTERFACE:amigo/include>
