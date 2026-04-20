@@ -1519,7 +1519,7 @@ class Optimizer:
             "filter_reset_trigger": 5,  # Consecutive filter rejections before reset
             "max_filter_resets": 5,  # Maximum number of filter resets per subproblem
             # Watchdog procedure
-            "watchdog_shortened_iter_trigger": 10,  # 0 = disable watchdog
+            "watchdog_shortened_iter_trigger": 0,  # 0 = disable watchdog (disabled pending get_array bug fix)
             "watchdog_trial_iter_max": 3,  # Max trial iterations in watchdog
             # Acceptable convergence
             "acceptable_tol": 1e-6,
