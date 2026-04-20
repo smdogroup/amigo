@@ -2,7 +2,6 @@ import json
 import amigo as am
 from pathlib import Path
 
-
 source_dir = Path(__file__).resolve().parent
 
 # Set the filenames

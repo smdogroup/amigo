@@ -3,7 +3,6 @@ import matplotlib.pylab as plt
 from matplotlib import font_manager
 import niceplots
 
-
 available_fonts = {f.name for f in font_manager.fontManager.ttflist}
 
 

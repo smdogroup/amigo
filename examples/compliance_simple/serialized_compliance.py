@@ -2,7 +2,6 @@ import json
 import amigo as am
 from pathlib import Path
 
-
 # Set the filenames
 filename = "compliance_model.json"
 vecfile = "compliance_vectors.json"
