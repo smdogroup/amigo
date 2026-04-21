@@ -17,13 +17,8 @@ class AmigoSolver(DirectSparseSolver):
     supports_inertia = True
 
     def __init__(self, problem, ustab=0.01, pivot_tol=1e-14):
-        self.problem = problem
-        loc = MemoryLocation.HOST_AND_DEVICE
-        self.hess = self.problem.create_matrix(loc)
-        self.nrows, self.ncols, self.nnz, self.rowp, self.cols = (
-            self.hess.get_nonzero_structure()
-        )
-        self._diag_indices = self._find_diag_indices(self.rowp, self.cols, self.nrows)
+
+        self._init_sparse_structure(problem)
 
         stype = SolverType.LDL
         self.ldl = SparseLDL(self.hess, stype, ustab, pivot_tol)

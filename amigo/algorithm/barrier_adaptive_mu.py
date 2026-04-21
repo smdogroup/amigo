@@ -18,6 +18,9 @@ class BarrierAdaptiveMu:
 
         Uses 2-norm-squared scaled by element counts (default).
         """
+        # TODO: move to backend - the KKT-error scaling, centrality,
+        # and balancing terms should combine in C++ into a single
+        # backend.kkt_quality(options) that returns the scalar qf.
         dual_sq, primal_sq, comp_sq = self.optimizer.compute_kkt_error(
             self.vars, self.grad
         )

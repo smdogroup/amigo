@@ -24,12 +24,8 @@ class PardisoSolver(DirectSparseSolver):
     def __init__(self, problem):
         from pypardiso import PyPardisoSolver
 
-        self.problem = problem
-        loc = MemoryLocation.HOST_AND_DEVICE
-        self.hess = self.problem.create_matrix(loc)
-        self.nrows, self.ncols, self.nnz, self.rowp, self.cols = (
-            self.hess.get_nonzero_structure()
-        )
+        self._init_sparse_structure(problem)
+
         # mtype=-2: real symmetric indefinite
         self.pardiso = PyPardisoSolver(mtype=-2)
 

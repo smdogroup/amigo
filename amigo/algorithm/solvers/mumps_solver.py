@@ -92,13 +92,7 @@ class MumpsSolver(DirectSparseSolver):
         self._dmumps_c = self._libmumps.dmumps_c
         self._dmumps_c.restype = None
 
-        self.problem = problem
-        loc = MemoryLocation.HOST_AND_DEVICE
-        self.hess = self.problem.create_matrix(loc)
-        self.nrows, self.ncols, self.nnz, self.rowp, self.cols = (
-            self.hess.get_nonzero_structure()
-        )
-        self._diag_indices = self._find_diag_indices(self.rowp, self.cols, self.nrows)
+        self._init_sparse_structure(problem)
 
         # Build COO triplet arrays from CSR (MUMPS uses 1-based COO)
         # Only store lower triangle for sym=2 (symmetric indefinite)

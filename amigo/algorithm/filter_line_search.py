@@ -21,6 +21,9 @@ class FilterLineSearch:
 
         f(x) is obtained by evaluating L(x, lam=0) = alpha * f(x).
         """
+        # TODO: move to backend - the zero-multipliers-evaluate-restore
+        # dance around problem.lagrangian should be a single
+        # backend.barrier_objective(mu, vars) call.
         problem = self.mpi_problem if self.distribute else self.problem
         x_vec = vars.get_solution()
         x_arr = x_vec.get_array()

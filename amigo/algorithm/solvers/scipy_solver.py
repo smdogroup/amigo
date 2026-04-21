@@ -9,13 +9,8 @@ class DirectScipySolver(DirectSparseSolver):
     supports_inertia = False
 
     def __init__(self, problem):
-        self.problem = problem
-        loc = MemoryLocation.HOST_AND_DEVICE
-        self.hess = self.problem.create_matrix(loc)
-        self.nrows, self.ncols, self.nnz, self.rowp, self.cols = (
-            self.hess.get_nonzero_structure()
-        )
-        self._diag_indices = self._find_diag_indices(self.rowp, self.cols, self.nrows)
+
+        self._init_sparse_structure(problem)
         self.lu = None
 
     def add_diagonal_and_factor(self, diag):

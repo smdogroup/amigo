@@ -38,6 +38,20 @@ class DirectSparseSolver(LinearSolver):
 
     """
 
+    def _init_sparse_structure(self, problem, loc=None):
+        """Alocate the KKT matrix and cache CSR structure."""
+
+        from amigo import MemoryLocation
+
+        self.problem = problem
+        self.hess = problem.create_matrix(
+            loc if loc is not None else MemoryLocation.HOST_AND_DEVICE
+        )
+        self.nrows, self.ncols, self.nnz, self.rowp, self.cols = (
+            self.hess.get_nonzero_structure()
+        )
+        self._diag_indices = self._find_diag_indices(self.rowp, self.cols, self.nrows)
+
     def assemble_hessian(self, alpha, x):
         """Assemble Lagrangian Hessian and return its diagonal.
 
