@@ -20,7 +20,6 @@ import numpy as np
 
 from amigo.model import GlobalIndexPool, _parse_var_expr, _parse_attribute_path
 
-
 # ---------------------------------------------------------------------------
 # GlobalIndexPool — contiguous, non-overlapping index allocation
 #

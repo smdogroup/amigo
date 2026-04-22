@@ -3,6 +3,7 @@
 
 #include "blas_interface.h"
 #include "csr_matrix.h"
+#include "ordering_utils.h"
 
 namespace amigo {
 
@@ -26,6 +27,21 @@ class SparseLDL {
    *
    * |F[k + 1, :]| / |F[k, k]| <= 1 / ustab
    *
+   * Similarly, the 2x2 pivots selected in the factorization phase satisfy a
+   * criterion where delta is defined as
+   *
+   * 1 / delta =   || [F[k, k],     sym            ]^{-1} ||
+   *               || [F[k + 1, k]  F[k + 1, k + 1]]      ||_{1}
+   *
+   * As a result
+   *
+   * delta = | det | / max(|F[k, k]| + |F[k+1, k]|, |F[k+1, k+1]| + |F[k+1, k]|)
+   *
+   * and then subsequently the criterion for acceptance is
+   *
+   * delta >= ustab * max |F[k + 2:, k]|
+   * delta >= ustab * max |F[k + 2:, k + 1]|
+   *
    * @param mat The CSR matrix (treated as symmetric)
    * @param solver_type The type of solver (Cholesky or LDL)
    * @param ustab Stability parameter for 1x1 and 2x2 pivots for the LDL
@@ -35,12 +51,14 @@ class SparseLDL {
    */
   SparseLDL(std::shared_ptr<CSRMat<T>> mat,
             SolverType solver_type = SolverType::LDL, double ustab = 0.01,
-            double pivot_tol = 1e-14, double delay_growth = 2.0)
+            double pivot_tol = 1e-14, double delay_growth = 2.0,
+            OrderingType order = OrderingType::NATURAL)
       : mat(mat),
         solver_type(solver_type),
         ustab(ustab),
         pivot_tol(pivot_tol),
-        delay_growth(delay_growth) {
+        delay_growth(delay_growth),
+        order(order) {
     // Bound the stability factor between [0, 0.5]
     if (ustab > 0.5) {
       ustab = 0.5;
@@ -68,8 +86,8 @@ class SparseLDL {
     cholesky_int_nnz = 0;
     cholesky_factor_nnz = 0;
     num_snodes = 0;
+    invperm = nullptr;
     snode_size = nullptr;
-    var_to_snode = nullptr;
     snode_to_var = nullptr;
     num_children = nullptr;
     max_contrib = 0;
@@ -82,11 +100,13 @@ class SparseLDL {
     mat->get_data(&nrows, nullptr, nullptr, &rowp, &cols, nullptr);
 
     // Perform the symbolic anallysis based on the input pattern
-    symbolic_analysis(nrows, rowp, cols);
+    symbolic_analysis(order, nrows, rowp, cols);
   }
   ~SparseLDL() {
+    if (invperm) {
+      delete[] invperm;
+    }
     delete[] snode_size;
-    delete[] var_to_snode;
     delete[] snode_to_var;
     delete[] num_children;
     delete[] contrib_ptr;
@@ -722,21 +742,45 @@ class SparseLDL {
                              T F[]) {
     std::fill(F, F + front_size * front_size, 0.0);
 
-    // Assemble the contributions into F from the matrix
-    for (int j = 0; j < ns; j++) {
-      // Get the column variable associated with the snode
-      int var = snode_to_var[k + j];
-      T* Fj = &F[front_size * j];
+    if (order == OrderingType::NATURAL) {
+      // Assemble the contributions into F from the matrix. Since the ordering
+      // is natural, it's straightforward to assemble only the entries below the
+      // diagonal of F that are required
+      for (int j = 0; j < ns; j++) {
+        // Get the column variable associated with the snode
+        int var = snode_to_var[k + j];
+        T* Fj = &F[front_size * j];
 
-      for (int ip = colp[var]; ip < colp[var + 1]; ip++) {
-        // Get the
-        int i = rows[ip];
-        if (i >= var) {
+        for (int ip = colp[var]; ip < colp[var + 1]; ip++) {
+          // Get the original row index
+          int i = rows[ip];
+          if (i >= var) {
+            // Get the front index
+            int ifront = front_indices[i];
+
+            // Add the contribution to the frontal matrix
+            Fj[ifront] += data[ip];
+          }
+        }
+      }
+    } else {
+      // Assemble the contributions into F from the matrix. Since the ordering
+      // is permuted, we assemble the lower and upper part of F.
+      for (int j = 0; j < ns; j++) {
+        // Get the column variable associated with the snode
+        int var = snode_to_var[k + j];
+        int pj = invperm[var];
+        T* Fj = &F[front_size * j];
+
+        for (int ip = colp[var]; ip < colp[var + 1]; ip++) {
+          // Get the original row index
+          int i = rows[ip];
+          int pi = invperm[i];
+
           // Get the front index
           int ifront = front_indices[i];
-
-          // Add the contribution to the frontal matrix
-          if (ifront >= 0) {
+          if (ifront >= 0 && pi >= pj) {
+            // Add the contribution to the frontal matrix
             Fj[ifront] += data[ip];
           }
         }
@@ -1265,7 +1309,7 @@ class SparseLDL {
         }
         i -= 1;
       } else {
-        for (int j = i + 2; j < n; j++) {
+        for (int j = i + 1; j < n; j++) {
           x[i - 1] -= L[j + ldl * (i - 1)] * x[j];
           x[i] -= L[j + ldl * i] * x[j];
         }
@@ -1628,25 +1672,47 @@ class SparseLDL {
    * nodes based on the post-ordering and performs a count of the numbers of
    * non-zero entries in the matrices.
    *
+   * @param order The ordering type to use
    * @param ncols Number of columns (equal to number of rows) in the matrix
    * @param colp Pointer into each column of the matrix
    * @param rows Row indices within each column of the matrix
    */
-  void symbolic_analysis(const int ncols, const int colp[], const int rows[]) {
+
+  void symbolic_analysis(OrderingType order, const int ncols, const int colp[],
+                         const int rows[]) {
+    // Compute the ordering
+    int* perm = nullptr;
+    int* iperm = nullptr;
+
+    // If the ordering type is natural, we don't create a permutation of the
+    // original matrix
+    if (order != OrderingType::NATURAL) {
+      int* colp_copy = nullptr;
+      int* rows_copy = nullptr;
+      OrderingUtils::copy_for_reorder(order, ncols, colp, rows, &colp_copy,
+                                      &rows_copy);
+      OrderingUtils::reorder(order, ncols, colp_copy, rows_copy, &perm, &iperm);
+
+      // Free the copied matrix data
+      delete[] colp_copy;
+      delete[] rows_copy;
+    }
+
     // Allocate storage that we'll need
     int* work = new int[3 * ncols];
 
     // Compute the elimination tree
     int* parent = new int[ncols];
-    compute_etree(ncols, colp, rows, parent, work);
+    compute_etree(ncols, colp, rows, perm, iperm, parent, work);
 
     // Find the post-ordering for the elimination tree
     int* ipost = new int[ncols];
-    post_order_etree(ncols, colp, rows, parent, ipost, work);
+    post_order_etree(ncols, parent, ipost, work);
 
     // Count the column non-zeros in the post-ordering
     int* Lnz = new int[ncols];
-    count_column_nonzeros(ncols, colp, rows, ipost, parent, Lnz, work);
+    count_column_nonzeros(ncols, colp, rows, perm, iperm, ipost, parent, Lnz,
+                          work);
 
     // Use the work array as a temporary here
     int* post = work;
@@ -1654,8 +1720,11 @@ class SparseLDL {
       post[ipost[i]] = i;
     }
 
-    // Initialize the super nodes
-    var_to_snode = new int[ncols];
+    // Initialize the super nodes. snode_to_var points from the
+    // supernode to the variables in the permuted order. After initializing the
+    // the non-zero pattern in the matrix, we set snode_to_var so that it points
+    // to the variables in their original order.
+    int* var_to_snode = new int[ncols];
     snode_to_var = new int[ncols];
     num_snodes =
         init_super_nodes(ncols, post, parent, Lnz, var_to_snode, snode_to_var);
@@ -1696,9 +1765,27 @@ class SparseLDL {
 
     // Fill in the rows in the contribution blocks
     contrib_rows = new int[contrib_ptr[num_snodes]];
-    build_nonzero_pattern(ncols, colp, rows, parent, num_snodes, snode_size,
-                          var_to_snode, snode_to_var, contrib_ptr, contrib_rows,
-                          work);
+    build_nonzero_pattern(ncols, colp, rows, perm, iperm, parent, num_snodes,
+                          snode_size, var_to_snode, snode_to_var, contrib_ptr,
+                          contrib_rows, work);
+
+    // Permute the snode_to_var variables so that each snode_to_var block points
+    // to the the original matrix ordering
+    if (perm) {
+      for (int i = 0; i < ncols; i++) {
+        snode_to_var[i] = perm[snode_to_var[i]];
+      }
+
+      // For now, sort the contribution rows - is there a way to build the
+      // non-zero pattern automatically with sorted column indices like the
+      // non-permuted case?
+      for (int is = 0; is < num_snodes; is++) {
+        int start = contrib_ptr[is];
+        int end = contrib_ptr[is + 1];
+
+        std::sort(contrib_rows + start, contrib_rows + end);
+      }
+    }
 
     estimate_cholesky_nonzeros(work);
 
@@ -1711,6 +1798,14 @@ class SparseLDL {
     delete[] parent;
     delete[] ipost;
     delete[] Lnz;
+    delete[] var_to_snode;
+
+    if (perm) {
+      delete[] perm;
+    }
+
+    // Set the inverse permutation
+    invperm = iperm;
   }
 
   /**
@@ -1719,36 +1814,73 @@ class SparseLDL {
    * @param ncols Number of columns
    * @param colp Pointer into each column
    * @param rows Row indices in each column
+   * @param perm The permutation array (or nullptr)
+   * @param iperm The inverse permultation array (or nullptr)
    * @param parent The etree parent child array
    * @param ancestor Largest ancestor of each node
    */
   void compute_etree(const int ncols, const int colp[], const int rows[],
-                     int parent[], int ancestor[]) {
+                     const int perm[], const int iperm[], int parent[],
+                     int ancestor[]) {
     // Initialize the parent and ancestor arrays
     std::fill(parent, parent + ncols, -1);
     std::fill(ancestor, ancestor + ncols, -1);
 
-    for (int k = 0; k < ncols; k++) {
-      // Loop over the column of k
-      int start = colp[k];
-      int end = colp[k + 1];
-      for (int ip = start; ip < end; ip++) {
-        int i = rows[ip];
+    if (perm && iperm) {
+      for (int k = 0; k < ncols; k++) {
+        // Get the original column index for the matrix
+        int ka = perm[k];
 
-        while (i < k) {
-          int tmp = ancestor[i];
+        // Loop over the column of k
+        int start = colp[ka];
+        int end = colp[ka + 1];
+        for (int ip = start; ip < end; ip++) {
+          // Get the original row index
+          int ia = rows[ip];
 
-          // Update the largest ancestor of i
-          ancestor[i] = k;
+          // Get the new row index
+          int i = iperm[ia];
 
-          // We've reached the root of the previous tree,
-          // set the parent of i to k
-          if (tmp == -1) {
-            parent[i] = k;
-            break;
+          while (i < k) {
+            int tmp = ancestor[i];
+
+            // Update the largest ancestor of i
+            ancestor[i] = k;
+
+            // We've reached the root of the previous tree,
+            // set the parent of i to k
+            if (tmp == -1) {
+              parent[i] = k;
+              break;
+            }
+
+            i = tmp;
           }
+        }
+      }
+    } else {
+      for (int k = 0; k < ncols; k++) {
+        // Loop over the column of k
+        int start = colp[k];
+        int end = colp[k + 1];
+        for (int ip = start; ip < end; ip++) {
+          int i = rows[ip];
 
-          i = tmp;
+          while (i < k) {
+            int tmp = ancestor[i];
+
+            // Update the largest ancestor of i
+            ancestor[i] = k;
+
+            // We've reached the root of the previous tree,
+            // set the parent of i to k
+            if (tmp == -1) {
+              parent[i] = k;
+              break;
+            }
+
+            i = tmp;
+          }
         }
       }
     }
@@ -1763,14 +1895,12 @@ class SparseLDL {
    * post-ordered tree
    *
    * @param ncols Number of columns
-   * @param colp Pointer into each column
-   * @param rows Row indices in each column
    * @param parent The etree parent child array
    * @param ipost The computed post order
    * @param work Work array of size 3 * ncols
    */
-  void post_order_etree(const int ncols, const int colp[], const int rows[],
-                        const int parent[], int ipost[], int work[]) {
+  void post_order_etree(const int ncols, const int parent[], int ipost[],
+                        int work[]) {
     int* head = work;
     int* next = &work[ncols];
     int* stack = &work[2 * ncols];
@@ -1846,29 +1976,56 @@ class SparseLDL {
    * @param work Work array of size ncols
    */
   void count_column_nonzeros(const int ncols, const int colp[],
-                             const int rows[], const int ipost[],
+                             const int rows[], const int perm[],
+                             const int iperm[], const int ipost[],
                              const int parent[], int Lnz[], int work[]) {
     int* flag = work;
     std::fill(Lnz, Lnz + ncols, 0);
     std::fill(flag, flag + ncols, -1);
 
-    // Loop over the original ordering of the matrix
-    for (int k = 0; k < ncols; k++) {
-      flag[k] = k;
+    if (perm && iperm) {
+      // Loop over the permuted columns of the matrix
+      for (int k = 0; k < ncols; k++) {
+        flag[k] = k;
+        int ka = perm[k];  // Original column in A
 
-      // Loop over the k-th column of the original matrix
-      int ip_end = colp[k + 1];
-      for (int ip = colp[k]; ip < ip_end; ip++) {
-        int i = rows[ip];
+        // Loop over the k-th column of the permuted matrix
+        int ip_end = colp[ka + 1];
+        for (int ip = colp[ka]; ip < ip_end; ip++) {
+          int ia = rows[ip];  // Original row in A
+          int i = iperm[ia];  // Row in permuted A
 
-        if (i < k) {
-          // Scan up the etree
-          while (flag[i] != k) {
-            Lnz[i]++;
-            flag[i] = k;
+          if (i < k) {
+            // Scan up the etree
+            while (flag[i] != k) {
+              Lnz[i]++;
+              flag[i] = k;
 
-            // Set the next parent
-            i = parent[i];
+              // Set the next parent
+              i = parent[i];
+            }
+          }
+        }
+      }
+    } else {
+      // Loop over the original ordering of the matrix
+      for (int k = 0; k < ncols; k++) {
+        flag[k] = k;
+
+        // Loop over the k-th column of the original matrix
+        int ip_end = colp[k + 1];
+        for (int ip = colp[k]; ip < ip_end; ip++) {
+          int i = rows[ip];
+
+          if (i < k) {
+            // Scan up the etree
+            while (flag[i] != k) {
+              Lnz[i]++;
+              flag[i] = k;
+
+              // Set the next parent
+              i = parent[i];
+            }
           }
         }
       }
@@ -1976,7 +2133,8 @@ class SparseLDL {
    * @param flag Array of flags (tag must not be contained in flag initially)
    */
   void build_nonzero_pattern(const int ncols, const int colp[],
-                             const int rows[], const int parent[], int sn,
+                             const int rows[], const int perm[],
+                             const int iperm[], const int parent[], int sn,
                              int snsize[], const int vtosn[], const int sntov[],
                              const int cptr[], int cvars[], int work[]) {
     int* Lnz = work;
@@ -1991,35 +2149,73 @@ class SparseLDL {
       snvar[ks] = sntov[k + snsize[ks] - 1];
     }
 
-    // Loop over the original ordering of the matrix
-    for (int k = 0; k < ncols; k++) {
-      flag[k] = k;
+    if (perm && iperm) {
+      // Loop over the permuted columns of the matrix
+      for (int k = 0; k < ncols; k++) {
+        flag[k] = k;
+        int ka = perm[k];  // Original column in A
 
-      // Loop over the k-th column of the original matrix
-      int iptr_end = colp[k + 1];
-      for (int iptr = colp[k]; iptr < iptr_end; iptr++) {
-        int i = rows[iptr];
+        // Loop over the k-th column of the permuted matrix
+        int iptr_end = colp[ka + 1];
+        for (int iptr = colp[ka]; iptr < iptr_end; iptr++) {
+          int ia = rows[iptr];
+          int i = iperm[ia];
 
-        if (i < k) {
-          // Scan up the etree
-          while (flag[i] != k) {
-            // Get the super node from the variable
-            int is = vtosn[i];
+          if (i < k) {
+            // Scan up the etree
+            while (flag[i] != k) {
+              // Get the super node from the variable
+              int is = vtosn[i];
 
-            // Find the last variable in this super node
-            int ivar = snvar[is];
+              // Find the last variable in this super node
+              int ivar = snvar[is];
 
-            // If this is the last variable, add this to the row
-            if (ivar == i) {
-              cvars[cptr[is] + Lnz[is]] = k;
-              Lnz[is]++;
+              // If this is the last variable, add this to the row
+              if (ivar == i) {
+                cvars[cptr[is] + Lnz[is]] = ka;
+                Lnz[is]++;
+              }
+
+              // Flag the node
+              flag[i] = k;
+
+              // Set the next parent
+              i = parent[i];
             }
+          }
+        }
+      }
+    } else {
+      // Loop over the original ordering of the matrix
+      for (int k = 0; k < ncols; k++) {
+        flag[k] = k;
 
-            // Flag the node
-            flag[i] = k;
+        // Loop over the k-th column of the original matrix
+        int iptr_end = colp[k + 1];
+        for (int iptr = colp[k]; iptr < iptr_end; iptr++) {
+          int i = rows[iptr];
 
-            // Set the next parent
-            i = parent[i];
+          if (i < k) {
+            // Scan up the etree
+            while (flag[i] != k) {
+              // Get the super node from the variable
+              int is = vtosn[i];
+
+              // Find the last variable in this super node
+              int ivar = snvar[is];
+
+              // If this is the last variable, add this to the row
+              if (ivar == i) {
+                cvars[cptr[is] + Lnz[is]] = k;
+                Lnz[is]++;
+              }
+
+              // Flag the node
+              flag[i] = k;
+
+              // Set the next parent
+              i = parent[i];
+            }
           }
         }
       }
@@ -2106,6 +2302,9 @@ class SparseLDL {
   // Estimated growth factor for delayed pivots
   double delay_growth;
 
+  // Type of ordering used for the matrix
+  OrderingType order;
+
   // Space required for the frontal matrix for a Cholesky
   int max_frontal_mat_dimension;
 
@@ -2117,6 +2316,9 @@ class SparseLDL {
   int cholesky_int_nnz;
   int cholesky_factor_nnz;
 
+  // Permutation array defined - nullptr if order == NATURAL
+  int* invperm;
+
   // Number of super nodes in the matrix
   int num_snodes;
 
@@ -2124,7 +2326,6 @@ class SparseLDL {
   int* snode_size;
 
   // Go from var to super node or super node to variable
-  int* var_to_snode;
   int* snode_to_var;
 
   // Number of children for each super node

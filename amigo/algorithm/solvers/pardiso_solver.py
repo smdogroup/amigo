@@ -1,10 +1,9 @@
-from . import LinearSolver
+from . import DirectSparseSolver
 import numpy as np
 from scipy.sparse import csr_matrix
-from amigo import MemoryLocation
 
 
-class PardisoSolver(LinearSolver):
+class PardisoSolver(DirectSparseSolver):
     """Sparse LDL^T solver via Intel MKL PARDISO with inertia detection.
 
     Uses symmetric indefinite factorization (mtype=-2) which provides
@@ -20,16 +19,13 @@ class PardisoSolver(LinearSolver):
     """
 
     supports_inertia = True
+    solver_name = "PardisoSolver"
 
     def __init__(self, problem):
         from pypardiso import PyPardisoSolver
 
-        self.problem = problem
-        loc = MemoryLocation.HOST_AND_DEVICE
-        self.hess = self.problem.create_matrix(loc)
-        self.nrows, self.ncols, self.nnz, self.rowp, self.cols = (
-            self.hess.get_nonzero_structure()
-        )
+        self._init_sparse_structure(problem)
+
         # mtype=-2: real symmetric indefinite
         self.pardiso = PyPardisoSolver(mtype=-2)
 
@@ -59,51 +55,9 @@ class PardisoSolver(LinearSolver):
             shape=(self.nrows, self.ncols),
         )
 
-        # Pre-compute diagonal entry indices for fast diagonal extraction
-        self._diag_indices = self._find_diag_indices(self.rowp, self.cols, self.nrows)
-
-    def add_diagonal_and_factor(self, diag):
-        """Add diagonal to the already-assembled Hessian and LDL^T factorize.
-
-        Must be called after assemble_hessian().  Modifies self.hess
-        in-place, so a subsequent retry must use factor() (which
-        re-assembles from scratch).
-        """
-        self.problem.add_diagonal(diag, self.hess)
-        self.hess.copy_data_device_to_host()
-        data = self.hess.get_data()
-        self._matrix.data[:] = data[self._upper_mask]
-        self.pardiso.factorize(self._matrix)
-
-    def factor(self, alpha, x, diag, _debug_inertia=False, post_hessian=None):
-        """Assemble Hessian, add diagonal, and LDL^T factorize (one shot).
-
-        Used for inertia-correction retries where we need a fresh
-        assembly (since add_diagonal_and_factor mutates self.hess).
-        """
-        self.problem.hessian(alpha, x, self.hess)
-        if post_hessian is not None:
-            self.hess.copy_data_device_to_host()
-            post_hessian(self.hess)
-        self.problem.add_diagonal(diag, self.hess)
-        self.hess.copy_data_device_to_host()
-        data = self.hess.get_data()
-        if _debug_inertia:
-            full_diag = data[self._diag_indices]
-            diag_arr = diag.get_array()
-            print(
-                f"    [DEBUG] diag vector: min={diag_arr.min():.2e}, "
-                f"max={diag_arr.max():.2e}, "
-                f"n_positive={np.sum(diag_arr > 0)}, "
-                f"n_large={np.sum(diag_arr > 1e3)}"
-            )
-            print(
-                f"    [DEBUG] CSR diagonal: min={full_diag.min():.2e}, "
-                f"max={full_diag.max():.2e}, "
-                f"n_positive={np.sum(full_diag > 0)}, "
-                f"n_large={np.sum(full_diag > 1e3)}"
-            )
-        self._matrix.data[:] = data[self._upper_mask]
+    def _do_factor(self):
+        """Copy upper triangle into pypardiso's matrix and factorize."""
+        self._matrix.data[:] = self.hess.get_data()[self._upper_mask]
         self.pardiso.factorize(self._matrix)
 
     def get_inertia(self):

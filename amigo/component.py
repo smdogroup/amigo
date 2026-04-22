@@ -3,7 +3,6 @@ import numpy as np
 from .expressions import *
 from .expressions import _normalize_shape, _type_to_str, _str_to_type
 
-
 _cpp_type_map = {int: "int", float: "double", complex: "std::complex<double>"}
 
 

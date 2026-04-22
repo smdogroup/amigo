@@ -1,9 +1,8 @@
 from __future__ import annotations
 from typing import TYPE_CHECKING
 from .model import Model, ModelVector
-from .optimizer import Optimizer
+from .algorithm import Optimizer
 import numpy as np
-
 
 if TYPE_CHECKING:
     import openmdao.api as om

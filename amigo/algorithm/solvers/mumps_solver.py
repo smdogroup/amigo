@@ -1,11 +1,11 @@
-from . import LinearSolver
+from . import DirectSparseSolver
+
 import os
 import sys
 import numpy as np
-from amigo import MemoryLocation
 
 
-class MumpsSolver(LinearSolver):
+class MumpsSolver(DirectSparseSolver):
     """Sparse symmetric indefinite solver via MUMPS (LDL^T with inertia).
 
     Uses the MUMPS C interface (dmumps_c) via ctypes. Provides exact
@@ -18,6 +18,7 @@ class MumpsSolver(LinearSolver):
     """
 
     supports_inertia = True
+    solver_name = "MumpsSolver"
 
     @staticmethod
     def _load_mumps_library():
@@ -91,13 +92,7 @@ class MumpsSolver(LinearSolver):
         self._dmumps_c = self._libmumps.dmumps_c
         self._dmumps_c.restype = None
 
-        self.problem = problem
-        loc = MemoryLocation.HOST_AND_DEVICE
-        self.hess = self.problem.create_matrix(loc)
-        self.nrows, self.ncols, self.nnz, self.rowp, self.cols = (
-            self.hess.get_nonzero_structure()
-        )
-        self._diag_indices = self._find_diag_indices(self.rowp, self.cols, self.nrows)
+        self._init_sparse_structure(problem)
 
         # Build COO triplet arrays from CSR (MUMPS uses 1-based COO)
         # Only store lower triangle for sym=2 (symmetric indefinite)
@@ -297,19 +292,8 @@ class MumpsSolver(LinearSolver):
         data = self.hess.get_data()
         self._a[:] = data[self._data_map]
 
-    def add_diagonal_and_factor(self, diag):
-        self.problem.add_diagonal(diag, self.hess)
-        self.hess.copy_data_device_to_host()
-        self._update_values()
-        self._factorize_current()
-
-    def factor(self, alpha, x, diag, post_hessian=None):
-        self.problem.hessian(alpha, x, self.hess)
-        if post_hessian is not None:
-            self.hess.copy_data_device_to_host()
-            post_hessian(self.hess)
-        self.problem.add_diagonal(diag, self.hess)
-        self.hess.copy_data_device_to_host()
+    def _do_factor(self):
+        """Refresh values from self.hess and run MUMPS analysis + factor."""
         self._update_values()
         self._factorize_current()
 

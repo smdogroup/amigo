@@ -465,7 +465,7 @@ lower["nc.u[:, 0]"] = -delta_max
 upper["nc.u[:, 0]"] = delta_max
 
 # Optimize
-opt = am.Optimizer(model, x, lower=lower, upper=upper)
+opt = am.Optimizer(model, x, lower=lower, upper=upper, solver="amigo")
 print(f"\nOptimizing (V_init={V_init:.0f} m/s, t_est={t_est:.1f} s)...")
 opt_data = opt.optimize(
     {

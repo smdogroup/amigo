@@ -20,7 +20,6 @@ import amigo as am
 from amigo.interp import ExternalSMTComponent
 from smt.surrogate_models import KRG
 
-
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
 

@@ -580,11 +580,12 @@ PYBIND11_MODULE(amigo, mod) {
              std::shared_ptr<amigo::SparseLDL<double>>>(mod, "SparseLDL")
       .def(py::init<std::shared_ptr<amigo::CSRMat<double>>,
                     amigo::SparseLDL<double>::SolverType, double, double,
-                    double>(),
+                    double, amigo::OrderingType>(),
            py::arg("mat"),
            py::arg("solver_type") = amigo::SparseLDL<double>::SolverType::LDL,
            py::arg("ustab") = 0.01, py::arg("pivot_tol") = 1e-14,
-           py::arg("delay_growth") = 2.0)
+           py::arg("delay_growth") = 2.0,
+           py::arg("order") = amigo::OrderingType::NATURAL)
       .def("factor", &amigo::SparseLDL<double>::factor)
       .def("solve", &amigo::SparseLDL<double>::solve)
       .def("get_inertia", [](const amigo::SparseLDL<double>& self) {

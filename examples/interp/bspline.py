@@ -5,7 +5,6 @@ from scipy.sparse.linalg import spsolve
 import matplotlib.pylab as plt
 from scipy.interpolate import BSpline as scipyBSpline
 
-
 num_ctrl_points = 10
 xi_ctrl = np.linspace(0, 1, num_ctrl_points)
 

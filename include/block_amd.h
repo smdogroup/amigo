@@ -12,21 +12,20 @@ namespace amigo {
  */
 class BlockAMD {
  public:
-  static constexpr int FORMAT_ERROR = -1;
-  static constexpr int STATE_ERROR = -2;
+  enum class AMDStatus { SUCCESS, FORMAT_ERROR, STATE_ERROR };
 
-  static std::string error_code_to_string(int code) {
-    if (code == FORMAT_ERROR) {
+  static std::string error_code_to_string(AMDStatus code) {
+    if (code == AMDStatus::FORMAT_ERROR) {
       return std::string("Detected problem with initial data structure\n");
-    } else if (code == STATE_ERROR) {
+    } else if (code == AMDStatus::STATE_ERROR) {
       return std::string(
           "The pivot row should contain only variables, not elements\n");
     }
     return std::string("Success");
   }
 
-  static int amd(int nvars, int* rowp, int* cols, int nmult, int* mult,
-                 int* perm, int use_exact_degree) {
+  static AMDStatus amd(int nvars, int* rowp, int* cols, int nmult, int* mult,
+                       int* perm, int use_exact_degree) {
     int* alen = new int[nvars];  // Number of entries in a row
     int* elen = new int[nvars];  // Number of elements in a row
     int* slen = new int[nvars];  // The length of each supernode
@@ -47,7 +46,16 @@ class BlockAMD {
     }
 
     if (check_format(nvars, rowp, cols, elen, alen) != 0) {
-      return FORMAT_ERROR;
+      // Free data before exiting
+      delete[] alen;
+      delete[] elen;
+      delete[] degree;
+      delete[] elem_degree;
+      delete[] Lp;
+      delete[] state;
+      delete[] slen;
+
+      return AMDStatus::FORMAT_ERROR;
     }
 
     // Find the correct number of multipliers
@@ -228,7 +236,7 @@ class BlockAMD {
         for (int j = rowp[piv]; j < rowp[piv] + alen[piv]; j++) {
           // This row should be entirely variables by definition
           if (state[cols[j]] <= 0) {
-            return STATE_ERROR;
+            return AMDStatus::STATE_ERROR;
           }
 
           lenlp = 0;
@@ -440,7 +448,7 @@ class BlockAMD {
     delete[] slen;
     delete[] is_multiplier;
 
-    return 0;  // Success!
+    return AMDStatus::SUCCESS;
   }
 
  private:
@@ -681,20 +689,23 @@ class BlockAMD {
     MinDegreeList(int size, const int rowp[], const int is_multiplier[])
         : size(size), is_multiplier(is_multiplier) {
       degree = new int[size];
-      first = new int[size];
-      next = new int[size];
-      prev = new int[size];
+      first = new int[size + 1];
+      next = new int[size + 1];
+      prev = new int[size + 1];
+
+      std::fill(first, first + size + 1, -1);
+      std::fill(next, next + size + 1, -1);
+      std::fill(prev, prev + size + 1, -1);
 
       // Set the initial degree for each node
       min_degree = 0;
       for (int i = 0; i < size; i++) {
         degree[i] = rowp[i + 1] - rowp[i];
-        if (degree[i] < min_degree) {
+        if (i == 0) {
+          min_degree = degree[i];
+        } else if (degree[i] < min_degree) {
           min_degree = degree[i];
         }
-        first[i] = -1;
-        next[i] = -1;
-        prev[i] = -1;
       }
 
       // Set the intial data structure
@@ -763,13 +774,13 @@ class BlockAMD {
     // Retrieve the variable with the minimum degree
     int get_min_degree_var(int no_multiplier) {
       if (no_multiplier) {
-        for (int d = min_degree; d < size; d++) {
+        for (int d = min_degree; d <= size; d++) {
           if (first[d] != -1 && !is_multiplier[first[d]]) {
             return first[d];
           }
         }
       } else {
-        for (int d = min_degree; d < size; d++) {
+        for (int d = min_degree; d <= size; d++) {
           if (first[d] != -1) {
             return first[d];
           }

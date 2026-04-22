@@ -14,14 +14,13 @@ set(AMIGO_PY_PACKAGE_DIR "amigo")
 option(AMIGO_ENABLE_OPENMP "Build with OpenMP support" ON)
 option(AMIGO_ENABLE_CUDA "Build with CUDA (nvcc) support" OFF)
 option(AMIGO_ENABLE_CUDSS "Build with CUDSS support" OFF)
+option(AMIGO_ENABLE_METIS "Enable METIS support" ON)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-# ------------------------------------------------
 # Determine build type
-# ------------------------------------------------
 set(AMIGO_DEFAULT_BUILD_TYPE "Release")
 option(AMIGO_ENABLE_SANITIZERS
        "Enable Address / Undefined Behavior sanitizers" OFF)
@@ -128,6 +127,38 @@ if(AMIGO_ENABLE_OPENMP)
   endif()
 endif()
 
+# Try to find METIS
+if(AMIGO_ENABLE_METIS)
+  set(METIS_ROOT "" CACHE PATH "Root directory of METIS installation")
+  set(METIS_INCLUDE_DIR "" CACHE PATH "Path to METIS headers")
+  set(METIS_LIBRARY "" CACHE FILEPATH "Path to libmetis")
+
+  list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/Modules")
+
+  unset(METIS_FOUND)
+
+  if(METIS_INCLUDE_DIR AND METIS_LIBRARY)
+    add_library(METIS::metis UNKNOWN IMPORTED)
+    set_target_properties(METIS::metis PROPERTIES
+      IMPORTED_LOCATION "${METIS_LIBRARY}"
+      INTERFACE_INCLUDE_DIRECTORIES "${METIS_INCLUDE_DIR}"
+    )
+    set(METIS_FOUND TRUE)
+  else()
+    find_package(METIS CONFIG QUIET)
+    if(NOT METIS_FOUND)
+      find_package(METIS QUIET MODULE)
+    endif()
+  endif()
+
+  if(METIS_FOUND)
+    message(STATUS "METIS found: enabling AMIGO_USE_METIS")
+  else()
+    message(STATUS "METIS not found: disabling METIS support")
+    set(AMIGO_ENABLE_METIS OFF)
+  endif()
+endif()
+
 # Python / pybind11 for the extension module
 find_package(pybind11 CONFIG REQUIRED)
 
@@ -153,6 +184,14 @@ target_compile_definitions(headers INTERFACE
   $<$<BOOL:${AMIGO_ENABLE_CUDSS}>:AMIGO_USE_CUDSS>
 )
 
+if(METIS_FOUND)
+  target_compile_definitions(headers INTERFACE
+    $<$<BOOL:${AMIGO_ENABLE_METIS}>:AMIGO_USE_METIS>
+  )
+  target_link_libraries(headers INTERFACE METIS::metis)
+  target_compile_definitions(headers INTERFACE AMIGO_USE_METIS)
+endif()
+
 # MPI / OpenMP linkage for any TU that includes headers and calls MPI/OpenMP
 target_link_libraries(headers INTERFACE MPI::MPI_CXX)
 if(AMIGO_ENABLE_OPENMP AND OpenMP_CXX_FOUND)
@@ -169,9 +208,7 @@ pybind11_add_module(amigo MODULE
   ${CMAKE_CURRENT_SOURCE_DIR}/amigo/amigo.cpp
 )
 
-# ------------------------------------------------------------------------------
 # Compiler flags per build type (Debug support)
-# ------------------------------------------------------------------------------
 target_compile_options(amigo PRIVATE
   $<$<CONFIG:Debug>:-O0 -g>
   $<$<CONFIG:RelWithDebInfo>:-O2 -g>

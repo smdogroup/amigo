@@ -1,4 +1,4 @@
-from .linear_solver import LinearSolver
+from .linear_solver import LinearSolver, DirectSparseSolver
 from .cuda_solver import DirectCudaSolver
 from .lnks_solver import LNKSInexactSolver
 from .mumps_solver import MumpsSolver

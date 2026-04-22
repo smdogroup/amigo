@@ -2,6 +2,7 @@
 #define AMIGO_ORDERING_UTILS_H
 
 #include <algorithm>
+#include <iostream>
 
 #include "block_amd.h"
 
@@ -21,6 +22,19 @@ enum class OrderingType { NESTED_DISSECTION, AMD, MULTI_COLOR, NATURAL };
 
 class OrderingUtils {
  public:
+  /**
+   * @brief Reorder the CSR matrix entries based on the prescribed ordering type
+   *
+   * Note that the CSR data structure is destroyed during the reordering
+   * process.
+   *
+   * @param order The ordering type
+   * @param nrows The number of rows
+   * @param rowp Pointer into each row
+   * @param cols Column indices
+   * @param perm_ Permulation array
+   * @param iperm_ Inverse permutation array
+   */
   static void reorder(OrderingType order, int nrows, int* rowp, int* cols,
                       int** perm_, int** iperm_) {
     if (order == OrderingType::NESTED_DISSECTION) {
@@ -41,6 +55,23 @@ class OrderingUtils {
     }
   }
 
+  /**
+   * @brief Reorder the CSR matrix entries based on the prescribed ordering type
+   * and include the effect of the multipliers so that they are ordered last
+   * among variables
+   *
+   * Note that the CSR data structure is destroyed during the reordering
+   * process.
+   *
+   * @param order The ordering type
+   * @param nrows The number of rows
+   * @param rowp Pointer into each row
+   * @param cols Column indices
+   * @param nmult Number of multipliers
+   * @param mult Multiplier indices
+   * @param perm_ Permulation array
+   * @param iperm_ Inverse permutation array
+   */
   static void reorder_block(OrderingType order, int nrows, int* rowp, int* cols,
                             int nmult, int* mult, int** perm_, int** iperm_) {
     if (order == OrderingType::NESTED_DISSECTION ||
@@ -174,7 +205,12 @@ class OrderingUtils {
     int* iperm = new int[nrows];
 
     int use_exact_degree = 0;
-    BlockAMD::amd(nrows, rowp, cols, nmult, mult, perm, use_exact_degree);
+    BlockAMD::AMDStatus flag =
+        BlockAMD::amd(nrows, rowp, cols, nmult, mult, perm, use_exact_degree);
+
+    if (flag != BlockAMD::AMDStatus::SUCCESS) {
+      std::cerr << BlockAMD::error_code_to_string(flag) << std::endl;
+    }
 
     for (int i = 0; i < nrows; i++) {
       iperm[perm[i]] = i;
@@ -259,6 +295,68 @@ class OrderingUtils {
 
     *iperm_ = iperm;
     *perm_ = perm;
+  }
+
+  /**
+   * @brief Copy the CSR data for subsequent reordering.
+   *
+   * For Metis reordering, we have to eliminate the diagonal entries. For AMD
+   * ordering, we have to add the diagonal.
+   *
+   * @param order The ordering type
+   * @param nrows Number of rows
+   * @param rowp Pointer into the rows
+   * @param cols Column indices for each row
+   * @param rowp_copy_ Copied/modified rowp pointer
+   * @param cols_copy_ Copied/modified column indices
+   */
+  static void copy_for_reorder(OrderingType order, int nrows, const int rowp[],
+                               const int cols[], int* rowp_copy_[],
+                               int* cols_copy_[]) {
+    int* rowp_copy = nullptr;
+    int* cols_copy = nullptr;
+    if (order == OrderingType::NESTED_DISSECTION) {
+      rowp_copy = new int[nrows + 1];
+      cols_copy = new int[rowp[nrows]];
+
+      int ptr = 0;
+      rowp_copy[0] = 0;
+      for (int i = 0; i < nrows; i++) {
+        for (int jp = rowp[i]; jp < rowp[i + 1]; jp++) {
+          int j = cols[jp];
+          if (i != j) {
+            cols_copy[ptr] = j;
+            ptr++;
+          }
+        }
+        rowp_copy[i + 1] = ptr;
+      }
+    } else {
+      rowp_copy = new int[nrows + 1];
+      cols_copy = new int[rowp[nrows] + nrows];
+
+      int ptr = 0;
+      rowp_copy[0] = 0;
+      for (int i = 0; i < nrows; i++) {
+        // Add the diagonal
+        cols_copy[ptr] = i;
+        ptr++;
+
+        // Copy the remainder of the row
+        for (int jp = rowp[i]; jp < rowp[i + 1]; jp++) {
+          int j = cols[jp];
+          cols_copy[ptr] = j;
+          ptr++;
+        }
+        rowp_copy[i + 1] = ptr;
+      }
+    }
+
+    // Sort the rows and uniquify
+    sort_and_uniquify_csr(nrows, rowp_copy, cols_copy);
+
+    *rowp_copy_ = rowp_copy;
+    *cols_copy_ = cols_copy;
   }
 
   /**

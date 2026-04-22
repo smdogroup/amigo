@@ -442,8 +442,7 @@ elif args.order_type == "natural":
     order_type = am.OrderingType.NATURAL
 
 # Initialize the problem
-order_for_block = args.order_for_block
-model.initialize(order_type=order_type, order_for_block=order_for_block)
+model.initialize(order_type=order_type)
 prob = model.get_problem()
 
 end = time.perf_counter()
@@ -504,7 +503,7 @@ prob.gradient(1.0, x.get_vector(), grad)
 end = time.perf_counter()
 print(f"Residual computation time:  {end - start:.6f} seconds")
 
-solver = None
+solver = "amigo"
 if args.use_lnks:
     problem = model.get_problem()
 

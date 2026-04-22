@@ -2,6 +2,7 @@ import numpy as np
 from scipy.sparse.linalg import splu
 from amigo import MemoryLocation
 from amigo.utils import tocsr
+from . import LinearSolver
 
 
 def gmres(mult, precon, b, x, msub=20, rtol=1e-2, atol=1e-30):
@@ -92,7 +93,7 @@ def gmres(mult, precon, b, x, msub=20, rtol=1e-2, atol=1e-30):
     return
 
 
-class LNKSInexactSolver:
+class LNKSInexactSolver(LinearSolver):
     def __init__(
         self,
         problem,

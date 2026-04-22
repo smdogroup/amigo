@@ -20,7 +20,6 @@ import pytest
 from amigo.component import Meta, InputSet, ConstantSet, DataSet
 from amigo.expressions import VarNode, ConstNode, Expr
 
-
 # ---------------------------------------------------------------------------
 # Meta — construction validation
 #

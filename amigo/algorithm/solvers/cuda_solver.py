@@ -1,5 +1,7 @@
 from amigo import MemoryLocation
 
+from . import LinearSolver
+
 # TODO: Current GPU solver path (CSRMatFactorCuda):
 #   - No inertia query: cannot drive the IPM inertia-correction (IC) step,
 #     so supports_inertia must stay False and we fall back to a heuristic
@@ -15,7 +17,7 @@ from amigo import MemoryLocation
 #   - GPU-resident only.
 
 
-class DirectCudaSolver:
+class DirectCudaSolver(LinearSolver):
     def __init__(self, problem, pivot_eps=1e-12):
         self.problem = problem
 
