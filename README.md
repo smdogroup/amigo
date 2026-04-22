@@ -45,6 +45,18 @@ Note that you cannot enable both CUDA and OpenMP at the same time.
 
 Amigo model modules inherit the build options that are selected during the install phase.
 
+Installing Metis is recommended. Metis can be enabled through the command line via
+
+```
+pip install -e . -v \
+    -Ccmake.args="-DCMAKE_CXX_COMPILER=mpicxx" \
+    -Ccmake.args="-DAMIGO_ENABLE_OPENMP=ON" \
+    -Ccmake.args="-DAMIGO_ENABLE_CUDA=OFF" \
+    -Ccmake.args="-DAMIGO_ENABLE_METIS=ON" \
+    -Ccmake.define.METIS_INCLUDE_DIR=/path/to/metis/include/ \
+    -Ccmake.define.METIS_LIBRARY=/path/to/metis/compiled/library/libmetis.a
+```
+
 ## MUMPS sparse solver
 
 Amigo's interior-point optimizer requires [MUMPS](https://mumps-solver.org/) for symmetric indefinite factorization of the KKT system. MUMPS is loaded at runtime, so it is not needed at build time. It must be built with [METIS](http://glaros.dtc.umn.edu/gkhome/metis/metis/overview) and [Scotch](https://www.labri.fr/perso/pelegrin/scotch/) for correct pivot ordering and matrix scaling. We use [coin-or/ThirdParty-Mumps](https://github.com/coin-or-tools/ThirdParty-Mumps) to build from source on all platforms.
