@@ -14,7 +14,7 @@ Run with:
 """
 
 import numpy as np
-import pytest, os
+import pytest, os, sys
 
 import amigo as am
 from amigo.interp import ExternalSMTComponent
@@ -72,7 +72,19 @@ def opt_result(request, trained_krg):
         inputs=["src.x", "src.y"],
         constraints=["smt_con.res"],
     )
-    model.build_module()
+    # Build and initialize — always run build_module from the test file's
+    # own directory so generate_cpp() writes the .cpp there and CMake finds
+    # it. Then ensure that directory is on sys.path so importlib can find
+    # the compiled .so regardless of where pytest is invoked from.
+    _test_dir = os.path.dirname(os.path.abspath(__file__))
+    _orig_dir = os.getcwd()
+    os.chdir(_test_dir)
+    try:
+        model.build_module()
+    finally:
+        os.chdir(_orig_dir)
+    if _test_dir not in sys.path:
+        sys.path.insert(0, _test_dir)
     model.initialize()
 
     xvec = model.create_vector()
