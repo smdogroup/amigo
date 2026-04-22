@@ -1676,7 +1676,6 @@ class SparseLDL {
    * @param colp Pointer into each column of the matrix
    * @param rows Row indices within each column of the matrix
    */
-
   void symbolic_analysis(OrderingType order, const int ncols, const int colp[],
                          const int rows[]) {
     // Compute the ordering
@@ -1761,21 +1760,11 @@ class SparseLDL {
                           snode_size, var_to_snode, snode_to_var, contrib_ptr,
                           contrib_rows, work);
 
-    // Permute the snode_to_var variables so that each snode_to_var block points
+    // Permute the snode_to_var variables so that each snode_to_var points
     // to the the original matrix ordering
     if (perm) {
       for (int i = 0; i < ncols; i++) {
         snode_to_var[i] = perm[snode_to_var[i]];
-      }
-
-      // For now, sort the contribution rows - is there a way to build the
-      // non-zero pattern automatically with sorted column indices like the
-      // non-permuted case?
-      for (int is = 0; is < num_snodes; is++) {
-        int start = contrib_ptr[is];
-        int end = contrib_ptr[is + 1];
-
-        std::sort(contrib_rows + start, contrib_rows + end);
       }
     }
 
@@ -1801,7 +1790,11 @@ class SparseLDL {
   }
 
   /**
-   * @brief Compute the elimination tree
+   * @brief Compute the elimination tree with the permuted ordering
+   *
+   * parent[i] = j
+   *
+   * Variable i (in the permuted ordering) is a child of j.
    *
    * @param ncols Number of columns
    * @param colp Pointer into each column
@@ -2042,9 +2035,9 @@ class SparseLDL {
     // First find the supernodes
     int snode = 0;
 
-    // Loop over subsequent numbers in the post-ordering
+    // Loop over subsequent numbers in the post-ordering of the permuted matrix
     for (int i = 0; i < ncols;) {
-      int var = post[i];  // Get the original variable number
+      int var = post[i];
 
       // Set the super node
       vtosn[var] = snode;
@@ -2057,8 +2050,8 @@ class SparseLDL {
       }
       while (i < ncols && parent[var] == next_var &&
              (Lnz[next_var] == Lnz[var] - 1)) {
-        vtosn[next_var] = snode;
         var = next_var;
+        vtosn[var] = snode;
         sntov[i] = var;
         i++;
         if (i < ncols) {
@@ -2129,7 +2122,7 @@ class SparseLDL {
    */
   void build_nonzero_pattern(const int ncols, const int colp[],
                              const int rows[], const int perm[],
-                             const int iperm[], const int parent[], int sn,
+                             const int iperm[], const int parent[], int ns,
                              int snsize[], const int vtosn[], const int sntov[],
                              const int cptr[], int cvars[], int work[]) {
     int* Lnz = work;
@@ -2140,7 +2133,7 @@ class SparseLDL {
     std::fill(flag, flag + ncols, -1);
 
     // Find the last variable in each super node
-    for (int ks = 0, k = 0; ks < sn; k += snsize[ks], ks++) {
+    for (int ks = 0, k = 0; ks < ns; k += snsize[ks], ks++) {
       snvar[ks] = sntov[k + snsize[ks] - 1];
     }
 
