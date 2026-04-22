@@ -110,7 +110,7 @@ class BlockAMD {
         }
       }
 
-      // Sort and remove any duplicates from the list Lp
+      // Remove any duplicates from the list Lp
       lenlp = remove_duplicates(lenlp, Lp);
 
       // Update the non-zero pattern in cols

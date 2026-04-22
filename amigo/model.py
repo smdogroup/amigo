@@ -808,7 +808,7 @@ class Model:
         return np.nonzero(temp)[0]
 
     def initialize(
-        self, comm=COMM_WORLD, order_type=OrderingType.AMD, order_for_block=False
+        self, comm=COMM_WORLD, order_type=OrderingType.DEFAULT, order_for_block=False
     ):
         """
         Initialize the variable indices for each component and resolve all links.

@@ -185,9 +185,6 @@ target_compile_definitions(headers INTERFACE
 )
 
 if(METIS_FOUND)
-  target_compile_definitions(headers INTERFACE
-    $<$<BOOL:${AMIGO_ENABLE_METIS}>:AMIGO_USE_METIS>
-  )
   target_link_libraries(headers INTERFACE METIS::metis)
   target_compile_definitions(headers INTERFACE AMIGO_USE_METIS)
 endif()
@@ -334,4 +331,9 @@ install(FILES
   ${CMAKE_CURRENT_BINARY_DIR}/amigoConfig.cmake
   ${CMAKE_CURRENT_SOURCE_DIR}/cmake/amigoAddModule.cmake
   DESTINATION "${AMIGO_PY_PACKAGE_DIR}/cmake/amigo"
+)
+
+install(FILES
+  ${CMAKE_CURRENT_SOURCE_DIR}/cmake/Modules/FindMETIS.cmake
+  DESTINATION "${AMIGO_PY_PACKAGE_DIR}/cmake/amigo/Modules"
 )

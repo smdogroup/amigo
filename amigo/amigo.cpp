@@ -282,6 +282,11 @@ PYBIND11_MODULE(amigo, mod) {
       .value("AMD", amigo::OrderingType::AMD)
       .value("MULTI_COLOR", amigo::OrderingType::MULTI_COLOR)
       .value("NATURAL", amigo::OrderingType::NATURAL)
+#ifdef AMIGO_USE_METIS
+      .value("DEFAULT", amigo::OrderingType::NESTED_DISSECTION)
+#else
+      .value("DEFAULT", amigo::OrderingType::AMD)
+#endif
       .export_values();
 
   py::enum_<amigo::MemoryLocation>(mod, "MemoryLocation")

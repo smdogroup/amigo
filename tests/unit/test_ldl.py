@@ -105,6 +105,9 @@ def get_poisson_2d(n):
     A = (kron(I, T) + kron(T, I)) / h**2
     mat = A.tocsr()
 
+    perm = np.random.permutation(m**2)
+    mat = mat[perm, :][:, perm]
+
     # Now create matrix, the solution and the right-hand-side
     nrows = m**2
     x = np.ones(nrows)
@@ -123,7 +126,10 @@ def test_sparse_ldl():
         xvec[:] = rhs
 
         ldl = am.SparseLDL(
-            csr, solver_type=am.SolverType.LDL, ustab=0.4, order=am.OrderingType.NATURAL
+            csr,
+            solver_type=am.SolverType.LDL,
+            ustab=0.4,
+            order=am.OrderingType.NATURAL,
         )
         ldl.factor()
 
@@ -146,7 +152,10 @@ def test_sparse_ldl_amd():
         xvec[:] = rhs
 
         ldl = am.SparseLDL(
-            csr, solver_type=am.SolverType.LDL, ustab=0.4, order=am.OrderingType.AMD
+            csr,
+            solver_type=am.SolverType.LDL,
+            ustab=0.4,
+            order=am.OrderingType.AMD,
         )
         ldl.factor()
 
@@ -163,12 +172,16 @@ def test_sparse_ldl_amd():
 
 def test_sparse_poisson():
     for n in [10, 20, 50]:
+        np.random.seed(0)
         csr, xsoln, rhs, inertia = get_poisson_2d(n)
         xvec = am.Vector(len(xsoln))
         xvec[:] = rhs
 
         ldl = am.SparseLDL(
-            csr, solver_type=am.SolverType.LDL, ustab=0.4, order=am.OrderingType.NATURAL
+            csr,
+            solver_type=am.SolverType.LDL,
+            ustab=0.4,
+            order=am.OrderingType.NATURAL,
         )
         ldl.factor()
 
@@ -185,6 +198,7 @@ def test_sparse_poisson():
 
 def test_sparse_poisson_amd():
     for n in [10, 20, 50]:
+        np.random.seed(0)
         csr, xsoln, rhs, inertia = get_poisson_2d(n)
         xvec = am.Vector(len(xsoln))
         xvec[:] = rhs

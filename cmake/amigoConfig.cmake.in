@@ -1,17 +1,116 @@
 @PACKAGE_INIT@
 
-# Expose the options used when Amigo was built
+include(CMakeFindDependencyMacro)
+
+# --------------------------------------------------------------------
+# Build options recorded from the Amigo build
+# --------------------------------------------------------------------
 set(AMIGO_ENABLE_CUDA   @AMIGO_ENABLE_CUDA@)
 set(AMIGO_ENABLE_OPENMP @AMIGO_ENABLE_OPENMP@)
 set(AMIGO_ENABLE_CUDSS  @AMIGO_ENABLE_CUDSS@)
-set(CUDSS_INCLUDE_DIR   @CUDSS_INCLUDE_DIR@)
-set(CUDSS_LIBRARY       @CUDSS_LIBRARY@)
+set(AMIGO_ENABLE_METIS  @AMIGO_ENABLE_METIS@)
 
-# Optionally expose the CUDA architecture as a package variable
+# Persisted dependency hints from the build
+set(CUDSS_INCLUDE_DIR "@CUDSS_INCLUDE_DIR@")
+set(CUDSS_LIBRARY     "@CUDSS_LIBRARY@")
+
+set(METIS_ROOT        "@METIS_ROOT@")
+set(METIS_INCLUDE_DIR "@METIS_INCLUDE_DIR@")
+set(METIS_LIBRARY     "@METIS_LIBRARY@")
+
+# Optional CUDA architecture hint
 if(AMIGO_ENABLE_CUDA)
-  set(CMAKE_CUDA_ARCHITECTURES @CMAKE_CUDA_ARCHITECTURES@)
+  set(AMIGO_CUDA_ARCHITECTURES "@CMAKE_CUDA_ARCHITECTURES@")
 endif()
 
+# --------------------------------------------------------------------
+# Core dependencies required by exported targets
+# --------------------------------------------------------------------
+find_dependency(Python3 REQUIRED COMPONENTS Development.Module)
+find_dependency(pybind11 REQUIRED CONFIG)
+find_dependency(BLAS REQUIRED)
+find_dependency(LAPACK REQUIRED)
+find_dependency(MPI REQUIRED COMPONENTS CXX)
+
+if(AMIGO_ENABLE_OPENMP)
+  find_dependency(OpenMP)
+endif()
+
+if(AMIGO_ENABLE_CUDA)
+  enable_language(CUDA)
+  find_dependency(CUDAToolkit REQUIRED)
+
+  # Propagate the build-time CUDA arch hint if the consumer hasn't set one
+  if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES AND DEFINED AMIGO_CUDA_ARCHITECTURES)
+    set(CMAKE_CUDA_ARCHITECTURES "${AMIGO_CUDA_ARCHITECTURES}")
+  endif()
+endif()
+
+# --------------------------------------------------------------------
+# METIS
+#
+# amigo::headers may link METIS::metis transitively when METIS support
+# was enabled during the Amigo build, so that target must exist before
+# amigoTargets.cmake is included.
+# --------------------------------------------------------------------
+if(AMIGO_ENABLE_METIS)
+  if(METIS_ROOT)
+    list(APPEND CMAKE_PREFIX_PATH "${METIS_ROOT}")
+  endif()
+
+  # Try config package first
+  find_package(METIS CONFIG QUIET)
+
+  # Fall back to module mode
+  if(NOT TARGET METIS::metis)
+    find_package(METIS QUIET MODULE)
+  endif()
+
+  # Final fallback: rebuild imported target from saved paths
+  if(NOT TARGET METIS::metis AND METIS_INCLUDE_DIR AND METIS_LIBRARY)
+    add_library(METIS::metis UNKNOWN IMPORTED)
+    set_target_properties(METIS::metis PROPERTIES
+      IMPORTED_LOCATION "${METIS_LIBRARY}"
+      INTERFACE_INCLUDE_DIRECTORIES "${METIS_INCLUDE_DIR}"
+    )
+  endif()
+
+  if(NOT TARGET METIS::metis)
+    message(FATAL_ERROR
+      "amigo was built with METIS enabled, but METIS::metis could not be found "
+      "or reconstructed. Set METIS_ROOT, METIS_INCLUDE_DIR, and METIS_LIBRARY, "
+      "or make a METIS package/module discoverable.")
+  endif()
+endif()
+
+# --------------------------------------------------------------------
+# cuDSS
+#
+# amigo::backend may link cudss::cudss transitively when cuDSS support
+# was enabled during the Amigo build.
+# --------------------------------------------------------------------
+if(AMIGO_ENABLE_CUDSS)
+  if(NOT TARGET cudss::cudss AND CUDSS_INCLUDE_DIR AND CUDSS_LIBRARY)
+    add_library(cudss::cudss UNKNOWN IMPORTED)
+    set_target_properties(cudss::cudss PROPERTIES
+      IMPORTED_LOCATION "${CUDSS_LIBRARY}"
+      INTERFACE_INCLUDE_DIRECTORIES "${CUDSS_INCLUDE_DIR}"
+    )
+  endif()
+
+  if(NOT TARGET cudss::cudss)
+    message(FATAL_ERROR
+      "amigo was built with cuDSS enabled, but cudss::cudss could not be "
+      "reconstructed. Set CUDSS_INCLUDE_DIR and CUDSS_LIBRARY.")
+  endif()
+endif()
+
+# --------------------------------------------------------------------
+# Load exported Amigo targets and helper function
+# --------------------------------------------------------------------
 get_filename_component(_AMIGO_CONFIG_DIR "${CMAKE_CURRENT_LIST_FILE}" PATH)
+
 include("${_AMIGO_CONFIG_DIR}/amigoTargets.cmake")
 include("${_AMIGO_CONFIG_DIR}/amigoAddModule.cmake")
+
+check_required_components(amigo)

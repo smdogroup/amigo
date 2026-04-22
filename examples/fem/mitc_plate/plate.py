@@ -150,7 +150,7 @@ model = problem.create_model("plate")
 if args.build:
     model.build_module()
 
-model.initialize()
+model.initialize(order_type=am.OrderingType.NESTED_DISSECTION)
 
 print("Number of variables... ", model.num_variables)
 

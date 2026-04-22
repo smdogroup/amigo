@@ -1330,7 +1330,6 @@ class SparseLDL {
     int max_delayed = fact.get_max_delayed();
     T* temp = new T[max_pivots + max_delayed + max_contrib];
 
-    int ns = 0;
     for (int ks = 0; ks < num_snodes; ks++) {
       // Get the pointers to the factor data
       int num_pivots, num_delayed, num_ipiv;
@@ -1706,19 +1705,12 @@ class SparseLDL {
     compute_etree(ncols, colp, rows, perm, iperm, parent, work);
 
     // Find the post-ordering for the elimination tree
-    int* ipost = new int[ncols];
-    post_order_etree(ncols, parent, ipost, work);
+    int* post = new int[ncols];
+    post_order_etree(ncols, parent, post, work);
 
     // Count the column non-zeros in the post-ordering
     int* Lnz = new int[ncols];
-    count_column_nonzeros(ncols, colp, rows, perm, iperm, ipost, parent, Lnz,
-                          work);
-
-    // Use the work array as a temporary here
-    int* post = work;
-    for (int i = 0; i < ncols; i++) {
-      post[ipost[i]] = i;
-    }
+    count_column_nonzeros(ncols, colp, rows, perm, iperm, parent, Lnz, work);
 
     // Initialize the super nodes. snode_to_var points from the
     // supernode to the variables in the permuted order. After initializing the
@@ -1796,7 +1788,7 @@ class SparseLDL {
 
     delete[] work;
     delete[] parent;
-    delete[] ipost;
+    delete[] post;
     delete[] Lnz;
     delete[] var_to_snode;
 
@@ -1889,17 +1881,17 @@ class SparseLDL {
   /**
    * @brief Post-order the elimination tree
    *
-   * ipost[i] = j
+   * post[i] = j
    *
-   * means that node i of the original tree is the j-th node of the
+   * means that node j of the original tree is the i-th node of the
    * post-ordered tree
    *
    * @param ncols Number of columns
    * @param parent The etree parent child array
-   * @param ipost The computed post order
+   * @param post The computed post order
    * @param work Work array of size 3 * ncols
    */
-  void post_order_etree(const int ncols, const int parent[], int ipost[],
+  void post_order_etree(const int ncols, const int parent[], int post[],
                         int work[]) {
     int* head = work;
     int* next = &work[ncols];
@@ -1920,7 +1912,7 @@ class SparseLDL {
       if (parent[j] == -1) {
         // Perform a depth first search starting from j which is a root
         // in the etree
-        k = depth_first_search(j, k, head, next, ipost, stack);
+        k = depth_first_search(j, k, head, next, post, stack);
       }
     }
   }
@@ -1932,12 +1924,12 @@ class SparseLDL {
    * @param k The post-order index
    * @param head The head of each linked list
    * @param next The next child in the linked lists
-   * @param ipost The post order ipost[origin node i] = post node j
+   * @param post The post order post[post node i] = origin node j
    * @param stack The stack for the depth first search
    * @return int The final post-order index
    */
-  int depth_first_search(int j, int k, int head[], const int next[],
-                         int ipost[], int stack[]) {
+  int depth_first_search(int j, int k, int head[], const int next[], int post[],
+                         int stack[]) {
     int last = 0;     // Last position on the tack
     stack[last] = j;  // Put node j on the stack
 
@@ -1949,7 +1941,7 @@ class SparseLDL {
 
       if (i == -1) {
         // No unordered children of p left in the list
-        ipost[p] = k;
+        post[k] = p;
         k++;
         last--;
       } else {
@@ -1977,8 +1969,8 @@ class SparseLDL {
    */
   void count_column_nonzeros(const int ncols, const int colp[],
                              const int rows[], const int perm[],
-                             const int iperm[], const int ipost[],
-                             const int parent[], int Lnz[], int work[]) {
+                             const int iperm[], const int parent[], int Lnz[],
+                             int work[]) {
     int* flag = work;
     std::fill(Lnz, Lnz + ncols, 0);
     std::fill(flag, flag + ncols, -1);
@@ -2059,7 +2051,10 @@ class SparseLDL {
       sntov[i] = var;
       i++;
 
-      int next_var = post[i];
+      int next_var = ncols;
+      if (i < ncols) {
+        next_var = post[i];
+      }
       while (i < ncols && parent[var] == next_var &&
              (Lnz[next_var] == Lnz[var] - 1)) {
         vtosn[next_var] = snode;
