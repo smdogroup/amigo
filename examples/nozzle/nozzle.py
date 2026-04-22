@@ -672,7 +672,7 @@ if args.build:
     source_dir = Path(__file__).resolve().parent
     model.build_module(source_dir=source_dir)
 
-model.initialize(order_type=am.OrderingType.NATURAL)
+model.initialize()
 
 # Get the data and set the target pressure distribution
 data = model.get_data_vector()
@@ -683,7 +683,7 @@ eta = xi_cell_center / length
 # Compute the target area distribution
 A_target = compute_area_target(eta)
 
-solver = None
+solver = "amigo"
 if args.use_lnks:
     problem = model.get_problem()
 
@@ -767,11 +767,11 @@ res.get_vector().copy_device_to_host()
 
 print("Variable summary")
 for name in inputs:
-    print(f"{name:<30} {np.linalg.norm(x[name])}")
+    print(f"{name:<40} {np.linalg.norm(x[name])}")
 
 print("Residual summary")
 for name in inputs:
-    print(f"{name:<30} {np.linalg.norm(res[name])}")
+    print(f"{name:<40} {np.linalg.norm(res[name])}")
 
 # Plot the solution
 rho = x["nozzle.Q[:, 0]"]

@@ -399,8 +399,7 @@ elif args.order_type == "natural":
     order_type = am.OrderingType.NATURAL
 
 # Initialize the problem
-order_for_block = args.order_for_block
-model.initialize(order_type=order_type, order_for_block=order_for_block)
+model.initialize(order_type=am.OrderingType.AMD)
 prob = model.get_problem()
 
 end = time.perf_counter()
@@ -454,7 +453,7 @@ prob.gradient(1.0, x.get_vector(), grad)
 end = time.perf_counter()
 print(f"Residual computation time:  {end - start:.6f} seconds")
 
-solver = None
+solver = "amigo"
 if args.use_lnks:
     problem = model.get_problem()
 
@@ -470,13 +469,13 @@ if args.use_lnks:
     )
 
 # Serialize the model
-with open("compliance_model.json", "w") as fp:
-    json.dump(model.serialize(), fp, indent=2)
+# with open("compliance_model.json", "w") as fp:
+#     json.dump(model.serialize(), fp, indent=2)
 
 # Serialize the vectors
-vecs = {"data": data, "x": x, "lower": lower, "upper": upper}
-with open("compliance_vectors.json", "w") as fp:
-    json.dump(model.serialize_vectors(vecs), fp, indent=2)
+# vecs = {"data": data, "x": x, "lower": lower, "upper": upper}
+# with open("compliance_vectors.json", "w") as fp:
+#     json.dump(model.serialize_vectors(vecs), fp, indent=2)
 
 opt = am.Optimizer(model, x=x, lower=lower, upper=upper, solver=solver)
 
