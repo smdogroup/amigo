@@ -236,7 +236,7 @@ class SparseLDL {
               const int vars[], const T F[]) {
       // Check the size of the integer storage on the stack
       int contrib_size = front_size - num_pivots;
-      if (top_idx + 2 + contrib_size > idx.size()) {
+      if (top_idx + 2 + contrib_size > int(idx.size())) {
         idx.resize(int(top_idx + 2 + contrib_size + 0.5 * idx.size()));
       }
 
@@ -251,7 +251,7 @@ class SparseLDL {
 
       // Check the size of the contribution block
       int block_size = contrib_size * (contrib_size + 1) / 2;
-      if (top_work + block_size > work.size()) {
+      if (top_work + block_size > int(work.size())) {
         work.resize(int(top_work + block_size + 0.5 * work.size()));
       }
 
@@ -377,7 +377,7 @@ class SparseLDL {
 
       // Check if we need to resize the vector
       int new_int_size = num_pivots + num_delayed + num_ipiv;
-      if (int_size + new_int_size > int_data.size()) {
+      if (int_size + new_int_size > int(int_data.size())) {
         int_data.resize(int(int_size + new_int_size + 0.5 * int_data.size()));
       }
 
@@ -391,7 +391,7 @@ class SparseLDL {
       int_size += num_ipiv;
 
       // Check if we need to to resize the factor data vector
-      if (factor_size + block_size > factor_data.size()) {
+      if (factor_size + block_size > int(factor_data.size())) {
         factor_data.resize(
             int(factor_size + block_size + 0.5 * factor_data.size()));
       }
@@ -432,12 +432,12 @@ class SparseLDL {
 
       // Check the integer space needed
       int new_int_size = 2 * num_pivots;
-      if (int_size + new_int_size > int_data.size()) {
+      if (int_size + new_int_size > int(int_data.size())) {
         int_data.resize(int(int_size + new_int_size));
       }
 
       // Check if we need to to resize the factor data vector
-      if (factor_size + block_size > factor_data.size()) {
+      if (factor_size + block_size > int(factor_data.size())) {
         factor_data.resize(int(factor_size + block_size));
       }
 
@@ -650,8 +650,7 @@ class SparseLDL {
                                            front_vars, Fptr, nblock, Wptr,
                                            stack, fact);
         } else {
-          info =
-              factor_root_matrix(ks, front_size, front_vars, Fptr, stack, fact);
+          info = factor_root_matrix(ks, front_size, front_vars, Fptr, fact);
         }
       }
 
@@ -897,12 +896,10 @@ class SparseLDL {
    * @param front_size The front size
    * @param front_vars The front variables
    * @param F The final frontier matrix (or one of several)
-   * @param stack Stack here for the memories
    * @param factor The factor
    */
   int factor_root_matrix(const int ks, const int front_size,
-                         const int front_vars[], T F[],
-                         ContributionStack& stack, MatrixFactor& factor) {
+                         const int front_vars[], T F[], MatrixFactor& factor) {
     int n = front_size;
 
     // Get space to fill in
@@ -1576,7 +1573,6 @@ class SparseLDL {
     int max_delayed = fact.get_max_delayed();
     T* temp = new T[max_pivots + max_delayed + max_contrib];
 
-    int ns = 0;
     for (int ks = 0; ks < num_snodes; ks++) {
       // Get the pointers to the factor data
       int num_pivots, num_delayed;
@@ -1710,6 +1706,12 @@ class SparseLDL {
     // Count the column non-zeros in the post-ordering
     int* Lnz = new int[ncols];
     count_column_nonzeros(ncols, colp, rows, perm, iperm, parent, Lnz, work);
+
+    // Use the work array as a temporary here
+    int* post = work;
+    for (int i = 0; i < ncols; i++) {
+      post[ipost[i]] = i;
+    }
 
     // Initialize the super nodes. snode_to_var points from the
     // supernode to the variables in the permuted order. After initializing the
@@ -1956,6 +1958,8 @@ class SparseLDL {
    * @param ncols The number of columns in the matrix
    * @param colp The pointer into each column
    * @param rows The row indices for each matrix entry
+   * @param perm The permutation array
+   * @param iperm The inverse permutation array
    * @param parent The elimination tree/forest
    * @param Lnz The number of non-zeros in each column
    * @param work Work array of size ncols
