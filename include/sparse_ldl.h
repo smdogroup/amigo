@@ -594,7 +594,7 @@ class SparseLDL {
     int* front_vars = &temp[ncols];  // Variables in the front
 
     // Compute proper size for the frontal matrix
-    const int nblock = 64;
+    const int nblock = 64;  // TODO: Optimize this block size?
     int fdim = int(delay_growth * max_frontal_mat_dimension);
     std::vector<T> F(fdim * fdim);
     std::vector<T> W;
@@ -1693,7 +1693,7 @@ class SparseLDL {
     }
 
     // Allocate storage that we'll need
-    int* work = new int[3 * ncols];
+    int* work = new int[4 * ncols];
 
     // Compute the elimination tree
     int* parent = new int[ncols];
@@ -1703,9 +1703,16 @@ class SparseLDL {
     int* post = new int[ncols];
     post_order_etree(ncols, parent, post, work);
 
-    // Count the column non-zeros in the post-ordering
+    // Count the column non-zeros in the post-ordering, including diagonals
     int* Lnz = new int[ncols];
-    count_column_nonzeros(ncols, colp, rows, perm, iperm, parent, Lnz, work);
+    count_column_nonzeros(ncols, colp, rows, post, perm, iperm, parent, Lnz,
+                          work);
+
+    // Subtract 1, so that Lnz is the number of non-zeros in the strict lower
+    // triangular part of the factorization
+    for (int k = 0; k < ncols; k++) {
+      Lnz[k] -= 1;
+    }
 
     // Initialize the super nodes. snode_to_var points from the
     // supernode to the variables in the permuted order. After initializing the
@@ -1810,14 +1817,14 @@ class SparseLDL {
     if (perm && iperm) {
       for (int k = 0; k < ncols; k++) {
         // Get the original column index for the matrix
-        int ka = perm[k];
+        const int ka = perm[k];
 
         // Loop over the column of k
-        int start = colp[ka];
-        int end = colp[ka + 1];
+        const int start = colp[ka];
+        const int end = colp[ka + 1];
         for (int ip = start; ip < end; ip++) {
           // Get the original row index
-          int ia = rows[ip];
+          const int ia = rows[ip];
 
           // Get the new row index
           int i = iperm[ia];
@@ -1842,8 +1849,8 @@ class SparseLDL {
     } else {
       for (int k = 0; k < ncols; k++) {
         // Loop over the column of k
-        int start = colp[k];
-        int end = colp[k + 1];
+        const int start = colp[k];
+        const int end = colp[k + 1];
         for (int ip = start; ip < end; ip++) {
           int i = rows[ip];
 
@@ -1925,7 +1932,7 @@ class SparseLDL {
     while (last >= 0) {
       // Look at the top of the stack and find the top node p and
       // its child i
-      int p = stack[last];
+      const int p = stack[last];
       int i = head[p];
 
       if (i == -1) {
@@ -1946,71 +1953,184 @@ class SparseLDL {
   }
 
   /**
-   * @brief Build the elimination tree and compute the number of non-zeros in
-   * each column.
+   * @brief Find the root of the row etree
+   *
+   * @param p The given node
+   * @param ancestor Array of ancestors
+   * @return int Root found
+   */
+  int find_root(int p, int ancestor[]) const {
+    int r = p;
+    while (ancestor[r] != r) {
+      r = ancestor[r];
+    }
+
+    // Path compression
+    while (ancestor[p] != p) {
+      int next = ancestor[p];
+      ancestor[p] = r;
+      p = next;
+    }
+
+    return r;
+  }
+
+  /**
+   * @brief Initialize the data required for the column count algorithm
+   *
+   * @param ncols The number of columns in the matrix
+   * @param parent The elimination tree/forest
+   * @param post Post-ordering of the etree
+   * @param first first[k] is the first descendant of node k
+   * @param delta The node weight
+   */
+  void init_column_count_data(const int ncols, const int parent[],
+                              const int post[], int first[],
+                              int delta[]) const {
+    std::fill(first, first + ncols, -1);
+    std::fill(delta, delta + ncols, 0);
+
+    // Propagate minimum postorder index upward through the tree
+    for (int k = 0; k < ncols; k++) {
+      int j = post[k];
+      if (first[j] == -1) {
+        delta[j] = 1;
+      }
+      while (j != -1 && first[j] == -1) {
+        first[j] = k;
+        j = parent[j];
+      }
+    }
+  }
+
+  /**
+   * @brief Count the number of non-zeros in the colums
    *
    * @param ncols The number of columns in the matrix
    * @param colp The pointer into each column
    * @param rows The row indices for each matrix entry
+   * @param post Post-ordering of the matrix
    * @param perm The permutation array
    * @param iperm The inverse permutation array
    * @param parent The elimination tree/forest
-   * @param Lnz The number of non-zeros in each column
-   * @param work Work array of size ncols
+   * @param colcount The number of non-zeros
+   * @param work Work array with size at least 4 times ncols
    */
   void count_column_nonzeros(const int ncols, const int colp[],
-                             const int rows[], const int perm[],
-                             const int iperm[], const int parent[], int Lnz[],
-                             int work[]) {
-    int* flag = work;
-    std::fill(Lnz, Lnz + ncols, 0);
-    std::fill(flag, flag + ncols, -1);
+                             const int rows[], const int post[],
+                             const int perm[], const int iperm[],
+                             const int parent[], int colcount[],
+                             int work[]) const {
+    int* first = &work[0];
+    init_column_count_data(ncols, parent, post, first, colcount);
+
+    // Initialize the remaining data
+    int* prevleaf = &work[ncols];
+    int* maxfirst = &work[2 * ncols];
+    int* ancestor = &work[3 * ncols];
+
+    std::fill(prevleaf, prevleaf + ncols, -1);
+    std::fill(maxfirst, maxfirst + ncols, -1);
+    std::iota(ancestor, ancestor + ncols, 0);
 
     if (perm && iperm) {
-      // Loop over the permuted columns of the matrix
       for (int k = 0; k < ncols; k++) {
-        flag[k] = k;
-        int ka = perm[k];  // Original column in A
+        const int j = post[k];
 
-        // Loop over the k-th column of the permuted matrix
-        int ip_end = colp[ka + 1];
-        for (int ip = colp[ka]; ip < ip_end; ip++) {
-          int ia = rows[ip];  // Original row in A
-          int i = iperm[ia];  // Row in permuted A
+        // Get the original column in the matrix
+        const int ja = perm[j];
 
-          if (i < k) {
-            // Scan up the etree
-            while (flag[i] != k) {
-              Lnz[i]++;
-              flag[i] = k;
+        // If j is not a root node
+        if (parent[j] != -1) {
+          colcount[parent[j]]--;
+        }
 
-              // Set the next parent
-              i = parent[i];
-            }
+        const int start = colp[ja];
+        const int end = colp[ja + 1];
+        for (int ip = start; ip < end; ip++) {
+          // Row in the original matrix
+          const int ia = rows[ip];
+
+          // Row in the new matrix
+          int i = iperm[ia];
+
+          // Only use the sub diagonal part A[i, j], i > j.
+          if (i <= j) {
+            continue;
           }
+
+          // If this column's subtree has already been accounted for in row i,
+          // then j is not a new leaf of row i's pruned row subtree.
+          if (first[j] <= maxfirst[i]) {
+            continue;
+          }
+
+          // Increment the weight by 1
+          colcount[j]++;
+          maxfirst[i] = first[j];
+          const int jprev = prevleaf[i];
+          prevleaf[i] = j;
+
+          if (jprev != -1) {
+            // Subsequent leaf: subtract overlap above the LCA.
+            int q = find_root(jprev, ancestor);
+            colcount[q]--;
+          }
+        }
+
+        if (parent[j] != -1) {
+          ancestor[j] = parent[j];
         }
       }
     } else {
-      // Loop over the original ordering of the matrix
       for (int k = 0; k < ncols; k++) {
-        flag[k] = k;
+        const int j = post[k];
 
-        // Loop over the k-th column of the original matrix
-        int ip_end = colp[k + 1];
-        for (int ip = colp[k]; ip < ip_end; ip++) {
-          int i = rows[ip];
+        // If j is not a root node
+        if (parent[j] != -1) {
+          colcount[parent[j]]--;
+        }
 
-          if (i < k) {
-            // Scan up the etree
-            while (flag[i] != k) {
-              Lnz[i]++;
-              flag[i] = k;
+        const int start = colp[j];
+        const int end = colp[j + 1];
+        for (int ip = start; ip < end; ip++) {
+          const int i = rows[ip];
 
-              // Set the next parent
-              i = parent[i];
-            }
+          // Only use the sub diagonal part A[i, j], i > j.
+          if (i <= j) {
+            continue;
+          }
+
+          // If this column's subtree has already been accounted for in row i,
+          // then j is not a new leaf of row i's pruned row subtree.
+          if (first[j] <= maxfirst[i]) {
+            continue;
+          }
+
+          // Increment the weight by 1
+          colcount[j]++;
+          maxfirst[i] = first[j];
+          const int jprev = prevleaf[i];
+          prevleaf[i] = j;
+
+          if (jprev != -1) {
+            // Subsequent leaf: subtract overlap above the LCA.
+            int q = find_root(jprev, ancestor);
+            colcount[q]--;
           }
         }
+
+        if (parent[j] != -1) {
+          ancestor[j] = parent[j];
+        }
+      }
+    }
+
+    // Accumulate delta up the elimination tree.
+    for (int k = 0; k < ncols; k++) {
+      const int j = post[k];
+      if (parent[j] != -1) {
+        colcount[parent[j]] += colcount[j];
       }
     }
   }
@@ -2069,12 +2189,11 @@ class SparseLDL {
    * @param ns Number of super nodes
    * @param vtosn Variable to super node array
    * @param nchild Number of children (output)
-   * @param work Work array - at least number of super nodes
+   * @param snode_parent Super node parent
    */
   void count_super_node_children(const int ncols, const int parent[],
                                  const int ns, const int vtosn[], int nchild[],
-                                 int work[]) {
-    int* snode_parent = work;
+                                 int snode_parent[]) {
     std::fill(nchild, nchild + ns, 0);
     std::fill(snode_parent, snode_parent + ns, -1);
 
@@ -2106,15 +2225,19 @@ class SparseLDL {
    *
    * Find the non-zero rows below the diagonal in a column of L.
    *
-   * This utilizes the elimination tree
-   *
+   * @param ncols
    * @param colp Column pointer
    * @param rows Rows for each column
-   * @param parent Parent in the elimination tree
-   * @param row_count The number of indices found so far
-   * @param row_indices The array of row indices
-   * @param tag Tag for the visited nodes
-   * @param flag Array of flags (tag must not be contained in flag initially)
+   * @param perm Permutation array
+   * @param iperm Inverse permutation
+   * @param parent Parent array encoding the etree
+   * @param ns Number of super nodes
+   * @param snsize Size of each super node
+   * @param vtosn Supernode index for each variable
+   * @param sntov Variable indices for each super node
+   * @param cptr Pointer into the row indices for each column
+   * @param cvars Row indices for each column
+   * @param work Work array - size 4 * ns
    */
   void build_nonzero_pattern(const int ncols, const int colp[],
                              const int rows[], const int perm[],
@@ -2122,83 +2245,81 @@ class SparseLDL {
                              int snsize[], const int vtosn[], const int sntov[],
                              const int cptr[], int cvars[], int work[]) {
     int* Lnz = work;
-    int* flag = &work[ncols];
-    int* snvar = &work[2 * ncols];
+    int* flag = &work[ns];
+    int* snvar = &work[2 * ns];
+    int* snparent = &work[3 * ns];
 
-    std::fill(Lnz, Lnz + ncols, 0);
-    std::fill(flag, flag + ncols, -1);
+    std::fill(Lnz, Lnz + ns, 0);
+    std::fill(flag, flag + ns, -1);
 
     // Find the last variable in each super node
     for (int ks = 0, k = 0; ks < ns; k += snsize[ks], ks++) {
       snvar[ks] = sntov[k + snsize[ks] - 1];
     }
 
+    // Find the supernode parents
+    for (int is = 0; is < ns; is++) {
+      int last = snvar[is];
+      int p = parent[last];
+      if (p >= 0) {
+        snparent[is] = vtosn[p];
+      } else {
+        snparent[is] = -1;
+      }
+    }
+
     if (perm && iperm) {
-      // Loop over the permuted columns of the matrix
+      // Loop over the rows of the permuted matrix
       for (int k = 0; k < ncols; k++) {
-        flag[k] = k;
+        // Find the super node associated with ks
+        int ks = vtosn[k];
         int ka = perm[k];  // Original column in A
 
-        // Loop over the k-th column of the permuted matrix
-        int iptr_end = colp[ka + 1];
-        for (int iptr = colp[ka]; iptr < iptr_end; iptr++) {
-          int ia = rows[iptr];
+        const int start = colp[ka];
+        const int end = colp[ka + 1];
+        for (int ip = start; ip < end; ip++) {
+          // Get the corresponding row in the original matrix
+          int ia = rows[ip];
+
+          // Get the row in the permuted matrix
           int i = iperm[ia];
 
           if (i < k) {
-            // Scan up the etree
-            while (flag[i] != k) {
-              // Get the super node from the variable
-              int is = vtosn[i];
-
-              // Find the last variable in this super node
-              int ivar = snvar[is];
-
-              // If this is the last variable, add this to the row
-              if (ivar == i) {
-                cvars[cptr[is] + Lnz[is]] = ka;
-                Lnz[is]++;
+            // Loop over the supernode parents
+            for (int is = vtosn[i]; is >= 0 && is != ks; is = snparent[is]) {
+              if (flag[is] == k) {
+                break;
               }
 
-              // Flag the node
-              flag[i] = k;
-
-              // Set the next parent
-              i = parent[i];
+              flag[is] = k;
+              cvars[cptr[is] + Lnz[is]] = ka;
+              Lnz[is]++;
             }
           }
         }
       }
     } else {
-      // Loop over the original ordering of the matrix
+      // Loop over the rows of the original matrix
       for (int k = 0; k < ncols; k++) {
-        flag[k] = k;
+        // Find the super node associated with ks
+        int ks = vtosn[k];
 
-        // Loop over the k-th column of the original matrix
-        int iptr_end = colp[k + 1];
-        for (int iptr = colp[k]; iptr < iptr_end; iptr++) {
-          int i = rows[iptr];
+        const int start = colp[k];
+        const int end = colp[k + 1];
+        for (int ip = start; ip < end; ip++) {
+          // Get the corresponding row
+          int i = rows[ip];
 
           if (i < k) {
-            // Scan up the etree
-            while (flag[i] != k) {
-              // Get the super node from the variable
-              int is = vtosn[i];
-
-              // Find the last variable in this super node
-              int ivar = snvar[is];
-
-              // If this is the last variable, add this to the row
-              if (ivar == i) {
-                cvars[cptr[is] + Lnz[is]] = k;
-                Lnz[is]++;
+            // Loop over the supernode parents
+            for (int is = vtosn[i]; is >= 0 && is != ks; is = snparent[is]) {
+              if (flag[is] == k) {
+                break;
               }
 
-              // Flag the node
-              flag[i] = k;
-
-              // Set the next parent
-              i = parent[i];
+              flag[is] = k;
+              cvars[cptr[is] + Lnz[is]] = k;
+              Lnz[is]++;
             }
           }
         }
