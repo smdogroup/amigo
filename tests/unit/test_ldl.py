@@ -230,7 +230,7 @@ def test_sparse_poisson_rhs():
             csr, xsoln, rhs, inertia = get_poisson_2d(n)
 
             nrhs = 7
-            X = np.zeros((len(xsoln), nrhs))
+            X = np.zeros((len(xsoln), nrhs), order='F')
             for k in range(nrhs):
                 X[:, k] = rhs
 
