@@ -1322,9 +1322,8 @@ class SparseLDL {
     } else if (nrhs >= 2) {
       for (int i = 0; i < n;) {
         if (piv[i] >= 0) {
-          T inv = 1.0 / L[i * (ldl + 1)];
           for (int k = 0; k < nrhs; k++) {
-            x[i + k * ldx] *= inv;
+            x[i + k * ldx] /= L[i * (ldl + 1)];
           }
           i++;
         } else {
@@ -1607,7 +1606,7 @@ class SparseLDL {
           blas_gemv<T>("T", size, num_pivots, -1.0, &L[num_pivots], ldl,
                        &temp[num_pivots], 1, 1.0, temp, 1);
         } else {
-          blas_gemm<T>("T", "N", size, nrhs, num_contrib, -1.0, &L[num_pivots],
+          blas_gemm<T>("T", "N", num_pivots, nrhs, size, -1.0, &L[num_pivots],
                        ldl, &temp[num_pivots], ldl, 1.0, temp, ldl);
         }
 
