@@ -592,7 +592,69 @@ PYBIND11_MODULE(amigo, mod) {
            py::arg("delay_growth") = 2.0,
            py::arg("order") = amigo::OrderingType::NATURAL)
       .def("factor", &amigo::SparseLDL<double>::factor)
-      .def("solve", &amigo::SparseLDL<double>::solve)
+      .def("solve",
+           [](std::shared_ptr<amigo::SparseLDL<double>> self, py::object x) {
+             // Case 1: amigo::Vector<double>
+             if (py::isinstance<amigo::Vector<double>>(x)) {
+               auto& vec = x.cast<amigo::Vector<double>&>();
+               self->solve(&vec);
+               return;
+             }
+
+             // Case 2: NumPy array
+             if (py::isinstance<py::array>(x)) {
+               py::array arr = x.cast<py::array>();
+               if (!py::isinstance<py::array_t<double>>(arr)) {
+                 throw py::type_error("NumPy array must have dtype=float64");
+               }
+
+               auto darr = arr.cast<py::array_t<double>>();
+               if (darr.ndim() != 1 && darr.ndim() != 2) {
+                 throw py::type_error("NumPy array must be 1D or 2D");
+               }
+
+               int n = static_cast<int>(darr.shape(0));
+               int nrhs =
+                   darr.ndim() == 1 ? 1 : static_cast<int>(darr.shape(1));
+
+               if (!darr.writeable()) {
+                 throw py::type_error("NumPy array must be writeable");
+               }
+
+               // Check Fortran layout: leading dimension stride should be
+               // sizeof(double)
+               bool is_fortran =
+                   darr.ndim() == 1 ||
+                   (darr.strides(0) ==
+                        static_cast<py::ssize_t>(sizeof(double)) &&
+                    darr.strides(1) ==
+                        static_cast<py::ssize_t>(n * sizeof(double)));
+
+               if (is_fortran) {
+                 // In-place path: overwrites the original array, if
+                 // dtype/layout matched.
+                 auto info = darr.request();
+                 double* data = static_cast<double*>(info.ptr);
+                 self->solve(nrhs, data, n);
+                 return;
+               } else {
+                 py::array_t<double, py::array::f_style | py::array::forcecast>
+                     farr(arr);
+
+                 auto finfo = farr.request();
+                 double* data = static_cast<double*>(finfo.ptr);
+
+                 self->solve(nrhs, data, n);
+
+                 py::module_::import("numpy").attr("copyto")(arr, farr);
+
+                 return;
+               }
+             }
+
+             throw std::runtime_error(
+                 "Expected either a NumPy array or amigo.Vector<double>");
+           })
       .def("get_inertia", [](const amigo::SparseLDL<double>& self) {
         int npos = 0, nneg = 0;
         self.get_inertia(&npos, &nneg);

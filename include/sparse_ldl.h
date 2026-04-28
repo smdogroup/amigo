@@ -145,10 +145,32 @@ class SparseLDL {
    * @param xvec
    */
   void solve(Vector<T>* xvec) const {
+    int nrhs = 1;
+    T* x = xvec->get_array();
+    int ldx = xvec->get_size();
     if (solver_type == SolverType::CHOLESKY) {
-      solve_cholesky(xvec);
+      solve_cholesky(nrhs, x, ldx);
     } else {  // solver_type == SolverType::LDL
-      solve_ldl(xvec);
+      solve_ldl(nrhs, x, ldx);
+    }
+  }
+
+  /**
+   * @brief Compute the solution of the system of equations
+   *
+   * L * D * L^{T} * y = x
+   *
+   * where y <- x. The solution vector overwrites the right-hand-side.
+   *
+   * @param nrhs Number of right-hand-side vectors
+   * @param x Right-hand-side vectors
+   * @param ldx Leading dimension of the right-hand-side vectors
+   */
+  void solve(int nrhs, T* x, int ldx) const {
+    if (solver_type == SolverType::CHOLESKY) {
+      solve_cholesky(nrhs, x, ldx);
+    } else {  // solver_type == SolverType::LDL
+      solve_ldl(nrhs, x, ldx);
     }
   }
 
@@ -1232,22 +1254,31 @@ class SparseLDL {
    * On input x = b on output the solution is stored in x
    *
    * @param n Number of rows/columns in L
+   * @param nrhs Number of right-hand-sides
    * @param piv Pivots (used to detect 1x1 and 2x2 pivots)
    * @param L The entries in the matrix
    * @param ldl The leading dimension of L
    * @param x The right hand side on input and the solution output
+   * @param ldx Leading dimension of the x vector
    */
-  void solve_pivot_lower(const int n, const int piv[], const T L[],
-                         const int ldl, T x[]) const {
+  void solve_pivot_lower(const int n, const int nrhs, const int piv[],
+                         const T L[], const int ldl, T x[],
+                         const int ldx) const {
     for (int j = 0; j < n;) {
       if (piv[j] >= 0) {
-        for (int i = j + 1; i < n; i++) {
-          x[i] -= L[i + ldl * j] * x[j];
+        for (int k = 0; k < nrhs; k++) {
+          T* xk = &x[ldx * k];
+          for (int i = j + 1; i < n; i++) {
+            xk[i] -= L[i + ldl * j] * xk[j];
+          }
         }
         j += 1;
       } else {
-        for (int i = j + 2; i < n; i++) {
-          x[i] -= L[i + ldl * j] * x[j] + L[i + ldl * (j + 1)] * x[j + 1];
+        for (int k = 0; k < nrhs; k++) {
+          T* xk = &x[ldx * k];
+          for (int i = j + 2; i < n; i++) {
+            xk[i] -= L[i + ldl * j] * xk[j] + L[i + ldl * (j + 1)] * xk[j + 1];
+          }
         }
         j += 2;
       }
@@ -1260,28 +1291,55 @@ class SparseLDL {
    * On input x = b on output the solution is stored in x
    *
    * @param n Number of rows/columns in L
+   * @param nrhs Number of right-hand-sides
    * @param piv Pivots (used to detect 1x1 and 2x2 pivots)
    * @param L The entries in the matrix
    * @param ldl The leading dimension of L
    * @param x The right hand side on input and the solution output
+   * @param ldx Leading dimension of the x vector
    */
-  void solve_pivot_diagonal(const int n, const int piv[], const T L[],
-                            const int ldl, T x[]) const {
-    for (int i = 0; i < n;) {
-      if (piv[i] >= 0) {
-        x[i] /= L[i * (ldl + 1)];
-        i++;
-      } else {
-        T d11 = L[i * (ldl + 1)];
-        T d21 = L[i * (ldl + 1) + 1];
-        T d22 = L[(i + 1) * (ldl + 1)];
+  void solve_pivot_diagonal(const int n, const int nrhs, const int piv[],
+                            const T L[], const int ldl, T x[],
+                            const int ldx) const {
+    if (nrhs == 1) {
+      for (int i = 0; i < n;) {
+        if (piv[i] >= 0) {
+          x[i] /= L[i * (ldl + 1)];
+          i++;
+        } else {
+          T d11 = L[i * (ldl + 1)];
+          T d21 = L[i * (ldl + 1) + 1];
+          T d22 = L[(i + 1) * (ldl + 1)];
 
-        T inv = 1.0 / (d11 * d22 - d21 * d21);
-        T x1 = x[i];
-        T x2 = x[i + 1];
-        x[i] = inv * (d22 * x1 - d21 * x2);
-        x[i + 1] = inv * (d11 * x2 - d21 * x1);
-        i += 2;
+          T inv = 1.0 / (d11 * d22 - d21 * d21);
+          T x1 = x[i];
+          T x2 = x[i + 1];
+          x[i] = inv * (d22 * x1 - d21 * x2);
+          x[i + 1] = inv * (d11 * x2 - d21 * x1);
+          i += 2;
+        }
+      }
+    } else if (nrhs >= 2) {
+      for (int i = 0; i < n;) {
+        if (piv[i] >= 0) {
+          for (int k = 0; k < nrhs; k++) {
+            x[i + k * ldx] /= L[i * (ldl + 1)];
+          }
+          i++;
+        } else {
+          T d11 = L[i * (ldl + 1)];
+          T d21 = L[i * (ldl + 1) + 1];
+          T d22 = L[(i + 1) * (ldl + 1)];
+          T inv = 1.0 / (d11 * d22 - d21 * d21);
+
+          for (int k = 0; k < nrhs; k++) {
+            T x1 = x[i + k * ldx];
+            T x2 = x[i + 1 + k * ldx];
+            x[i + k * ldx] = inv * (d22 * x1 - d21 * x2);
+            x[i + 1 + k * ldx] = inv * (d11 * x2 - d21 * x1);
+          }
+          i += 2;
+        }
       }
     }
   }
@@ -1292,23 +1350,32 @@ class SparseLDL {
    * On input x = b on output the solution is stored in x
    *
    * @param n Number of rows/columns in L
+   * @param nrhs Number of right-hand-sides
    * @param piv Pivots (used to detect 1x1 and 2x2 pivots)
    * @param L The entries in the matrix
    * @param ldl The leading dimension of L
    * @param x The right hand side on input and the solution output
+   * @param ldx Leading dimension of the x vector
    */
-  void solve_pivot_transpose(const int n, const int piv[], const T L[],
-                             const int ldl, T x[]) const {
+  void solve_pivot_transpose(const int n, const int nrhs, const int piv[],
+                             const T L[], const int ldl, T x[],
+                             const int ldx) const {
     for (int i = n - 1; i >= 0;) {
       if (piv[i] >= 0) {
-        for (int j = i + 1; j < n; j++) {
-          x[i] -= L[j + ldl * i] * x[j];
+        for (int k = 0; k < nrhs; k++) {
+          T* xk = &x[ldx * k];
+          for (int j = i + 1; j < n; j++) {
+            xk[i] -= L[j + ldl * i] * xk[j];
+          }
         }
         i -= 1;
       } else {
-        for (int j = i + 1; j < n; j++) {
-          x[i - 1] -= L[j + ldl * (i - 1)] * x[j];
-          x[i] -= L[j + ldl * i] * x[j];
+        for (int k = 0; k < nrhs; k++) {
+          T* xk = &x[ldx * k];
+          for (int j = i + 1; j < n; j++) {
+            xk[i - 1] -= L[j + ldl * (i - 1)] * xk[j];
+            xk[i] -= L[j + ldl * i] * xk[j];
+          }
         }
         i -= 2;
       }
@@ -1316,16 +1383,146 @@ class SparseLDL {
   }
 
   /**
+   * @brief Gather values from a vector x to a local vector t
+   *
+   * t[j + k * ldt] = x[indices[j] + k * ldx]
+   *
+   * @param n Number of indices
+   * @param indices Indices in x
+   * @param m Number of vectors
+   * @param x The matrix of vectors
+   * @param ldx Leading dimension of x
+   * @param t The local vector
+   * @param ldt Leading dimension of t
+   */
+  void gather(const int n, const int indices[], const int m, const T* x,
+              const int ldx, T* t, const int ldt) const {
+    for (int k = 0; k < m; k++) {
+      const T* xk = &x[ldx * k];
+      T* tk = &t[ldt * k];
+      for (int j = 0; j < n; j++) {
+        tk[j] = xk[indices[j]];
+      }
+    }
+  }
+
+  /**
+   * @brief Scatter values from a local vector t to a global vector x
+   *
+   * x[indices[j] + k * ldx] = t[j + k * ldt]
+   *
+   * @param n Number of indices
+   * @param indices Indices in x
+   * @param m Number of vectors
+   * @param x The matrix of vectors
+   * @param ldx Leading dimension of x
+   * @param t The local vector
+   * @param ldt Leading dimension of t
+   */
+  void scatter(const int n, const int indices[], const int m, const T* t,
+               const int ldt, T* x, const int ldx) const {
+    for (int k = 0; k < m; k++) {
+      T* xk = &x[ldx * k];
+      const T* tk = &t[ldt * k];
+      for (int j = 0; j < n; j++) {
+        xk[indices[j]] = tk[j];
+      }
+    }
+  }
+
+  /**
+   * @brief Gather values from a vector x to a local vector t
+   *
+   * t[j + k * ldt] = x[indices[j] + k * ldx]
+   *
+   * @param n Number of indices
+   * @param indices Indices in x
+   * @param m Number of vectors
+   * @param x The matrix of vectors
+   * @param ldx Leading dimension of x
+   * @param t The local vector
+   * @param ldt Leading dimension of t
+   */
+  void gather_pivot(const int n, const int indices[], const int m, const T* x,
+                    const int ldx, T* t, const int ldt) const {
+    for (int k = 0; k < m; k++) {
+      const T* xk = &x[ldx * k];
+      T* tk = &t[ldt * k];
+      for (int j = 0; j < n; j++) {
+        if (indices[j] >= 0) {
+          tk[j] = xk[indices[j]];
+        } else {
+          tk[j] = xk[-indices[j] - 1];
+        }
+      }
+    }
+  }
+
+  /**
+   * @brief Scatter values from a local vector t to a global vector x
+   *
+   * x[indices[j] + k * ldx] = t[j + k * ldt]
+   *
+   * @param n Number of indices
+   * @param indices Indices in x
+   * @param m Number of vectors
+   * @param x The matrix of vectors
+   * @param ldx Leading dimension of x
+   * @param t The local vector
+   * @param ldt Leading dimension of t
+   */
+  void scatter_pivot(const int n, const int indices[], const int m, const T* t,
+                     const int ldt, T* x, const int ldx) const {
+    for (int k = 0; k < m; k++) {
+      T* xk = &x[ldx * k];
+      const T* tk = &t[ldt * k];
+      for (int j = 0; j < n; j++) {
+        if (indices[j] >= 0) {
+          xk[indices[j]] = tk[j];
+        } else {
+          xk[-indices[j] - 1] = tk[j];
+        }
+      }
+    }
+  }
+
+  /**
+   * @brief Scatter and subtract values from a local vector t into a global
+   * vector x
+   *
+   * x[indices[j] + k * ldx] -= t[j + k * ldt]
+   *
+   * @param n Number of indices
+   * @param indices Indices in x
+   * @param m Number of vectors
+   * @param x The matrix of vectors
+   * @param ldx Leading dimension of x
+   * @param t The local vector
+   * @param ldt Leading dimension of t
+   */
+  void scatter_subtract(const int n, const int indices[], const int m,
+                        const T* t, const int ldt, T* x, const int ldx) const {
+    for (int k = 0; k < m; k++) {
+      T* xk = &x[ldx * k];
+      const T* tk = &t[ldt * k];
+      for (int j = 0; j < n; j++) {
+        xk[indices[j]] -= tk[j];
+      }
+    }
+  }
+
+  /**
    * @brief Solve the system of equations based on an LDL factorization
    *
-   * @param xvec The right hand side and solution vector
+   * @param nrhs The number of right-hand-sides
+   * @param x The right hand side and solution vector
+   * @param ldx Leading dimension of x
    */
-  void solve_ldl(Vector<T>* xvec) const {
-    T* x = xvec->get_array();
-
+  void solve_ldl(int nrhs, T* x, int ldx) const {
     int max_pivots = fact.get_max_pivots();
     int max_delayed = fact.get_max_delayed();
-    T* temp = new T[max_pivots + max_delayed + max_contrib];
+    int ldt = max_pivots + max_delayed + max_contrib;
+    T* temp = new T[nrhs * ldt];
 
     for (int ks = 0; ks < num_snodes; ks++) {
       // Get the pointers to the factor data
@@ -1342,50 +1539,40 @@ class SparseLDL {
       int ldl = num_pivots + num_delayed + num_contrib;
 
       // Extract the variables from x - 2x2 pivots have negative entries
-      for (int j = 0; j < num_pivots; j++) {
-        int var = pivots[j];
-        if (var < 0) {
-          var = -var - 1;
-        }
-        temp[j] = x[var];
-      }
+      gather_pivot(num_pivots, pivots, nrhs, x, ldx, temp, ldl);
 
       if (ipiv) {
-        int nrhs = 1;
         int info;
         lapack_sytrs("L", ldl, nrhs, L, ldl, ipiv, temp, ldl, &info);
       } else if (num_pivots > 0) {
         // Find the solution t1 = L11^{-1} * t1, overwriting temp
         // with the solution
-        solve_pivot_lower(num_pivots, pivots, L, ldl, temp);
+        solve_pivot_lower(num_pivots, nrhs, pivots, L, ldl, temp, ldl);
 
         // Compute the matrix-vector t2 = L21 * t1 and add the contributions
         // to the lower block
         int size = num_delayed + num_contrib;
-        blas_gemv<T>("N", size, num_pivots, 1.0, &L[num_pivots], ldl, temp, 1,
-                     0.0, &temp[num_pivots], 1);
+        if (nrhs == 1) {
+          blas_gemv<T>("N", size, num_pivots, 1.0, &L[num_pivots], ldl, temp, 1,
+                       0.0, &temp[num_pivots], 1);
+        } else {
+          blas_gemm<T>("N", "N", size, nrhs, num_pivots, 1.0, &L[num_pivots],
+                       ldl, temp, ldl, 0.0, &temp[num_pivots], ldl);
+        }
 
         // Add the contributions
-        for (int j = 0, jj = num_pivots; j < num_delayed; j++, jj++) {
-          x[delayed[j]] -= temp[jj];
-        }
-        for (int jp = contrib_ptr[ks], jj = num_pivots + num_delayed;
-             jp < contrib_ptr[ks + 1]; jp++, jj++) {
-          x[contrib_rows[jp]] -= temp[jj];
-        }
+        const int* contrib_indices = &contrib_rows[contrib_ptr[ks]];
+        scatter_subtract(num_delayed, delayed, nrhs, &temp[num_pivots], ldl, x,
+                         ldx);
+        scatter_subtract(num_contrib, contrib_indices, nrhs,
+                         &temp[num_pivots + num_delayed], ldl, x, ldx);
 
         // Compute x = D11^{1} * temp
-        solve_pivot_diagonal(num_pivots, pivots, L, ldl, temp);
+        solve_pivot_diagonal(num_pivots, nrhs, pivots, L, ldl, temp, ldl);
       }
 
       // Assign the entries back
-      for (int j = 0; j < num_pivots; j++) {
-        int var = pivots[j];
-        if (var < 0) {
-          var = -var - 1;
-        }
-        x[var] = temp[j];
-      }
+      scatter_pivot(num_pivots, pivots, nrhs, temp, ldl, x, ldx);
     }
 
     for (int ks = num_snodes - 1; ks >= 0; ks--) {
@@ -1405,39 +1592,29 @@ class SparseLDL {
         int ldl = num_pivots + num_delayed + num_contrib;
 
         // Extract the variables from x
-        for (int j = 0; j < num_pivots; j++) {
-          int var = pivots[j];
-          if (var < 0) {
-            var = -var - 1;
-          }
-          temp[j] = x[var];
-        }
+        gather_pivot(num_pivots, pivots, nrhs, x, ldx, temp, ldl);
 
         // Collect the values from the contributions
-        for (int j = 0, jj = num_pivots; j < num_delayed; j++, jj++) {
-          temp[jj] = x[delayed[j]];
-        }
-        for (int jp = contrib_ptr[ks], jj = num_pivots + num_delayed;
-             jp < contrib_ptr[ks + 1]; jp++, jj++) {
-          temp[jj] = x[contrib_rows[jp]];
-        }
+        const int* contrib_indices = &contrib_rows[contrib_ptr[ks]];
+        gather(num_delayed, delayed, nrhs, x, ldx, &temp[num_pivots], ldl);
+        gather(num_contrib, contrib_indices, nrhs, x, ldx,
+               &temp[num_pivots + num_delayed], ldl);
 
         // Compute the matrix-vector product
         int size = num_delayed + num_contrib;
-        blas_gemv<T>("T", size, num_pivots, -1.0, &L[num_pivots], ldl,
-                     &temp[num_pivots], 1, 1.0, temp, 1);
+        if (nrhs == 1) {
+          blas_gemv<T>("T", size, num_pivots, -1.0, &L[num_pivots], ldl,
+                       &temp[num_pivots], 1, 1.0, temp, 1);
+        } else {
+          blas_gemm<T>("T", "N", num_pivots, nrhs, size, -1.0, &L[num_pivots],
+                       ldl, &temp[num_pivots], ldl, 1.0, temp, ldl);
+        }
 
         // Solve L11^{T} * x = temp
-        solve_pivot_transpose(num_pivots, pivots, L, ldl, temp);
+        solve_pivot_transpose(num_pivots, nrhs, pivots, L, ldl, temp, ldl);
 
         // Assign the entries back
-        for (int j = 0; j < num_pivots; j++) {
-          int var = pivots[j];
-          if (var < 0) {
-            var = -var - 1;
-          }
-          x[var] = temp[j];
-        }
+        scatter_pivot(num_pivots, pivots, nrhs, temp, ldl, x, ldx);
       }
     }
 
@@ -1564,98 +1741,88 @@ class SparseLDL {
   /**
    * @brief Solve the system of equations based on a Cholesky factorization
    *
-   * @param xvec The right hand side and solution vector
+   * @param nrhs The number of right-hand-sides
+   * @param x The right hand side and solution vector
+   * @param ldx Leading dimension of x
    */
-  void solve_cholesky(Vector<T>* xvec) const {
-    T* x = xvec->get_array();
-
+  void solve_cholesky(int nrhs, T* x, int ldx) const {
     int max_pivots = fact.get_max_pivots();
-    int max_delayed = fact.get_max_delayed();
-    T* temp = new T[max_pivots + max_delayed + max_contrib];
+    int ldt = max_pivots + max_contrib;
+    T* temp = new T[nrhs * ldt];
 
     for (int ks = 0; ks < num_snodes; ks++) {
       // Get the pointers to the factor data
-      int num_pivots, num_delayed;
+      int num_pivots;
       const int* pivots = nullptr;
-      const int* delayed = nullptr;
       const T* L;
 
       // Get the factor L = (L11, L21) that constitute the factor data
-      fact.get_factor(ks, &num_pivots, &pivots, &num_delayed, &delayed, &L);
+      fact.get_factor(ks, &num_pivots, &pivots, nullptr, nullptr, &L);
       int num_contrib = contrib_ptr[ks + 1] - contrib_ptr[ks];
-      int ldl = num_pivots + num_delayed + num_contrib;
+      int ldl = num_pivots + num_contrib;
 
       // Extract the variables from x corresponding to the pivots which are
       // the columns shared by L11 and L21
-      for (int j = 0; j < num_pivots; j++) {
-        temp[j] = x[pivots[j]];
-      }
+      gather(num_pivots, pivots, nrhs, x, ldx, temp, ldl);
 
       // Compute the solution of L11 * t1 = t1
-      int nrhs = 1;
       blas_trsm<T>("L", "L", "N", "N", num_pivots, nrhs, 1.0, L, ldl, temp,
-                   num_pivots);
+                   ldl);
 
       // Assign the t1 entries back into the x vector
-      for (int j = 0; j < num_pivots; j++) {
-        x[pivots[j]] = temp[j];
-      }
+      scatter(num_pivots, pivots, nrhs, temp, ldl, x, ldx);
 
       // Compute the matrix-vector product t2 = L21 * t1
-      int size = num_delayed + num_contrib;
-      blas_gemv<T>("N", size, num_pivots, 1, &L[num_pivots], ldl, temp, 1, 0.0,
-                   &temp[num_pivots], 1);
+      if (nrhs == 1) {
+        blas_gemv<T>("N", num_contrib, num_pivots, 1, &L[num_pivots], ldl, temp,
+                     1, 0.0, &temp[num_pivots], 1);
+      } else {
+        blas_gemm<T>("N", "N", num_contrib, nrhs, num_pivots, 1.0,
+                     &L[num_pivots], ldl, temp, ldl, 0.0, &temp[num_pivots],
+                     ldl);
+      }
 
       // Add the contributions x -= t2
-      for (int j = 0, jj = num_pivots; j < num_delayed; j++, jj++) {
-        x[delayed[j]] -= temp[jj];
-      }
-      for (int jp = contrib_ptr[ks], jj = num_pivots + num_delayed;
-           jp < contrib_ptr[ks + 1]; jp++, jj++) {
-        x[contrib_rows[jp]] -= temp[jj];
-      }
+      const int* contrib_indices = &contrib_rows[contrib_ptr[ks]];
+      scatter_subtract(num_contrib, contrib_indices, nrhs, &temp[num_pivots],
+                       ldl, x, ldx);
     }
 
     for (int ks = num_snodes - 1; ks >= 0; ks--) {
       // Get the pointers to the factor data
-      int num_pivots, num_delayed;
+      int num_pivots;
       const int* pivots = nullptr;
-      const int* delayed = nullptr;
       const T* L;
 
       // Get the factor L = (L11, L21) that constitute the factor data
-      fact.get_factor(ks, &num_pivots, &pivots, &num_delayed, &delayed, &L);
+      fact.get_factor(ks, &num_pivots, &pivots, nullptr, nullptr, &L);
       int num_contrib = contrib_ptr[ks + 1] - contrib_ptr[ks];
-      int ldl = num_pivots + num_delayed + num_contrib;
+      int ldl = num_pivots + num_contrib;
 
-      // Extract the variables from x
-      for (int j = 0; j < num_pivots; j++) {
-        temp[j] = x[pivots[j]];
-      }
+      // Collect the variables from x
+      gather(num_pivots, pivots, nrhs, x, ldx, temp, ldl);
 
       // Collect the values from the contributions
-      for (int j = 0, jj = num_pivots; j < num_delayed; j++, jj++) {
-        temp[jj] = x[delayed[j]];
-      }
-      for (int jp = contrib_ptr[ks], jj = num_pivots + num_delayed;
-           jp < contrib_ptr[ks + 1]; jp++, jj++) {
-        temp[jj] = x[contrib_rows[jp]];
-      }
+      const int* contrib_indices = &contrib_rows[contrib_ptr[ks]];
+      gather(num_contrib, contrib_indices, nrhs, x, ldx, &temp[num_pivots],
+             ldl);
 
-      // Compute the matrix-vector product t1 = t1 - L21 * t2
-      int size = num_delayed + num_contrib;
-      blas_gemv<T>("T", size, num_pivots, -1.0, &L[num_pivots], ldl,
-                   &temp[num_pivots], 1, 1.0, temp, 1);
+      // Compute the matrix-vector product t1 = t1 - L21^{T} * t2
+      if (nrhs == 1) {
+        blas_gemv<T>("T", num_contrib, num_pivots, -1.0, &L[num_pivots], ldl,
+                     &temp[num_pivots], 1, 1.0, temp, 1);
+      } else {
+        blas_gemm<T>("T", "N", num_pivots, nrhs, num_contrib, -1.0,
+                     &L[num_pivots], ldl, &temp[num_pivots], ldl, 1.0, temp,
+                     ldl);
+      }
 
       // Compute the solution x1 = L11^{-T} * t1
-      int nrhs = 1;
       blas_trsm<T>("L", "L", "T", "N", num_pivots, nrhs, 1.0, L, ldl, temp,
-                   num_pivots);
+                   ldl);
 
       // Assign the t1 entries back to x
-      for (int j = 0; j < num_pivots; j++) {
-        x[pivots[j]] = temp[j];
-      }
+      scatter(num_pivots, pivots, nrhs, temp, ldl, x, ldx);
     }
   }
 
