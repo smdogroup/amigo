@@ -209,7 +209,10 @@ class SparseLDL {
       nodes.resize(num_snodes);
     }
 
-    void clear() {}
+    void clear() {
+      nodes.clear();
+      nodes.resize(num_snodes);
+    }
 
     /**
      * @brief Add contributions from the factors
@@ -430,9 +433,7 @@ class SparseLDL {
   class ContributionData {
    public:
     ContributionData(int num_snodes)
-        : contrib_vars(num_snodes),
-          contrib_block(num_snodes),
-          num_delayed(num_snodes) {}
+        : num_snodes(num_snodes), nodes(num_snodes, ContribNode{}) {}
 
     /**
      * @brief Add the delayed pivots to the list of indices/vars
@@ -449,8 +450,8 @@ class SparseLDL {
       for (int c = 0; c < num_children; c++) {
         int child = children[c];
 
-        for (int j = 0; j < num_delayed[child]; j++) {
-          int delayed = contrib_vars[child][j];
+        for (int j = 0; j < nodes[child].num_delayed; j++) {
+          int delayed = nodes[child].vars[j];
           if (front_indices[delayed] == -1) {
             front_indices[delayed] = fully_summed;
             front_vars[fully_summed] = delayed;
@@ -482,16 +483,18 @@ class SparseLDL {
      */
     void add_contribution(int snode, int num_pivots, int num_delayed_pivots,
                           int front_size, const int vars[], const T F[]) {
+      ContribNode& node = nodes[snode];
+
       // Insert the variables
-      contrib_vars[snode].assign(vars + num_pivots, vars + front_size);
+      node.vars.assign(vars + num_pivots, vars + front_size);
 
       // Record the number of delayed pivots
-      num_delayed[snode] = num_delayed_pivots;
+      node.num_delayed = num_delayed_pivots;
 
       // Insert the contribution block itself
       int contrib_size = front_size - num_pivots;
-      contrib_block[snode].resize((contrib_size * (contrib_size + 1)) / 2);
-      T* ptr = contrib_block[snode].data();
+      node.block.resize((contrib_size * (contrib_size + 1)) / 2);
+      T* ptr = node.block.data();
       for (int j = num_pivots; j < front_size; j++) {
         for (int i = j; i < front_size; i++, ptr++) {
           ptr[0] = F[i + front_size * j];
@@ -509,23 +512,23 @@ class SparseLDL {
      */
     void get_contribution(int snode, int* num_delayed_pivots, int* contrib_size,
                           int* vars[], T* C[]) {
-      *num_delayed_pivots = num_delayed[snode];
-      *contrib_size = contrib_vars[snode].size();
-      *vars = contrib_vars[snode].data();
-      *C = contrib_block[snode].data();
+      *num_delayed_pivots = nodes[snode].num_delayed;
+      *contrib_size = nodes[snode].vars.size();
+      *vars = nodes[snode].vars.data();
+      *C = nodes[snode].block.data();
     }
 
-    void free_contribution(int snode) {
-      num_delayed[snode] = 0;
-      contrib_vars[snode] = std::vector<int>();
-      contrib_block[snode] = std::vector<T>();
-    }
+    void free_contribution(int snode) { nodes[snode] = ContribNode{}; }
 
    private:
-    // Contribution data
-    std::vector<std::vector<int>> contrib_vars;
-    std::vector<std::vector<T>> contrib_block;
-    std::vector<int> num_delayed;
+    struct ContribNode {
+      int num_delayed;
+      std::vector<int> vars;
+      std::vector<T> block;
+    };
+
+    int num_snodes;
+    std::vector<ContribNode> nodes;
   };
 
   /**
@@ -620,9 +623,14 @@ class SparseLDL {
     tid = omp_get_thread_num();
 #endif  // AMIGO_USE_OPENMP
 
-    // Get the front variable arrays from the contribution data
-    int *front_vars = nullptr, *front_indices = nullptr;
-    assembly.get_front_arrays(tid, &front_vars, &front_indices);
+    // // Get the front variable arrays from the contribution data
+    // int *front_vars = nullptr, *front_indices = nullptr;
+    // assembly.get_front_arrays(tid, &front_vars, &front_indices);
+
+    std::vector<int> fvars(ncols);
+    std::vector<int> fidx(ncols, -1);
+    int* front_vars = fvars.data();
+    int* front_indices = fidx.data();
 
     // Get the frontal variables
     int fully_summed = 0, front_size = 0;
@@ -631,15 +639,18 @@ class SparseLDL {
 
     // Get the temporary matrix data and ensure that there's enough space
     // allocated
-    std::vector<T>& F = assembly.get_front_matrix(tid);
-    if (F.size() < front_size * front_size) {
-      F.resize(front_size * front_size);
-    }
+    // std::vector<T>& F = assembly.get_front_matrix(tid);
+    // if (F.size() < front_size * front_size) {
+    //   F.resize(front_size * front_size);
+    // }
 
-    std::vector<T>& W = assembly.get_work_matrix(tid);
-    if (stype == SolverType::LDL && W.size() < block_size * front_size) {
-      W.resize(block_size * front_size);
-    }
+    // std::vector<T>& W = assembly.get_work_matrix(tid);
+    // if (stype == SolverType::LDL && W.size() < block_size * front_size) {
+    //   W.resize(block_size * front_size);
+    // }
+
+    std::vector<T> F(front_size * front_size);
+    std::vector<T> W(front_size * block_size);
 
     // Assemble the front matrices from the children
     assemble_front_matrix(ks, num_children, children, front_size, front_indices,
