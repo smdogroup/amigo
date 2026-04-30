@@ -408,7 +408,7 @@ class SparseLDL {
 
   class ResourcePool {
    public:
-    ResourcePool(int ncols, int min_front_dim = 256) : ncols(ncols) {}
+    ResourcePool() {}
 
     std::vector<int> borrow_vars() {
       std::lock_guard<std::mutex> lock(vars_mtx);
@@ -468,8 +468,6 @@ class SparseLDL {
 
    private:
     // Variables allocated per thread
-    int ncols;
-    int min_front_dim;
     std::mutex vars_mtx;
     std::vector<std::vector<int>> vars_pool;
     std::mutex index_mtx;
@@ -609,7 +607,7 @@ class SparseLDL {
     fact.clear();
 
     // Estimate the max front dimension
-    ResourcePool pool(ncols);
+    ResourcePool pool;
 
     // Use estimates of the contribution
     ContributionData contrib(num_snodes);
