@@ -481,14 +481,12 @@ if comm_rank == 0:
 
         net.from_nx(graph)
         # net.show_buttons(filter_=["physics"])
-        net.set_options(
-            """
-            var options = {
-            "interaction": {
-                "dragNodes": false
-            }
-            }
-            """
-        )
+        # net.set_options("""
+        #     var options = {
+        #     "interaction": {
+        #         "dragNodes": false
+        #     }
+        #     }
+        #     """)
 
         net.show("cart_pole_graph.html")

@@ -3,6 +3,13 @@
 
 #include <complex>
 
+#ifdef AMIGO_USE_MKL
+#include <mkl.h>
+#elif defined(AMIGO_USE_OPENBLAS)
+#include <cblas.h>
+#include <openblas_config.h>
+#endif
+
 extern "C" {
 
 // Find the argmax
