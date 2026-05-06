@@ -7,7 +7,7 @@ import matplotlib.pylab as plt
 import niceplots
 
 # Problem parameters
-num_time_steps = 100
+num_time_steps = 300
 
 """
 Space Shuttle Re-entry Trajectory (Maximum Cross-Range)
@@ -383,7 +383,7 @@ lower["dyn.u[:, 1]"] = np.radians(-90.0) / scaling["beta"]
 upper["dyn.u[:, 1]"] = np.radians(90.0) / scaling["beta"]
 
 # Create optimizer and solve
-opt = am.Optimizer(model, x, lower=lower, upper=upper)
+opt = am.Optimizer(model, x, lower=lower, upper=upper, solver="amigo")
 data = opt.optimize(
     {
         "initial_barrier_param": 1.0,

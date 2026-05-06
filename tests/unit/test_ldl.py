@@ -312,3 +312,7 @@ def test_sparse_ldl_poisson_amd_rhs():
             err = max(err, np.linalg.norm(X[:, k] - xsoln))
 
         assert err < 1e-11
+
+
+if __name__ == "__main__":
+    test_sparse_ldl_amd()
