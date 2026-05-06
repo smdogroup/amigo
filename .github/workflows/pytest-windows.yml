@@ -42,7 +42,7 @@ jobs:
         run: pip install pytest smt
 
       - name: Run tests
-        # tests/interp is excluded because it contains Mumps-dependent tests that
+        # tests/functional is excluded because it contains Mumps-dependent tests that
         # require the ThirdParty-Mumps library, which cannot be built on Windows
         # runners due to the absence of a Fortran toolchain (gfortran).
-        run: pytest tests/ -v --ignore=tests/interp
+        run: pytest tests/ -v --ignore=tests/functional
