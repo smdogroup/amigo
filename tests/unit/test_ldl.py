@@ -172,7 +172,7 @@ def test_sparse_ldl_amd():
         assert ldl_inertia[1] == inertia[1]
 
 
-def test_sparse_poisson():
+def test_sparse_poisson_natural():
     for n in [10, 20, 50]:
         np.random.seed(0)
         csr, xsoln, rhs, inertia = get_poisson_2d(n)
@@ -312,7 +312,3 @@ def test_sparse_ldl_poisson_amd_rhs():
             err = max(err, np.linalg.norm(X[:, k] - xsoln))
 
         assert err < 1e-11
-
-
-if __name__ == "__main__":
-    test_sparse_poisson()

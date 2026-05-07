@@ -1010,29 +1010,50 @@ class SparseLDL {
     int k = node_ptr[ks];
     int ns = node_ptr[ks + 1] - node_ptr[ks];
 
+    bool is_sorted = false;
     if (order == OrderingType::NATURAL) {
       // Assemble the contributions into F from the matrix. Since the ordering
       // is natural, it's straightforward to assemble only the entries below
       // the diagonal of F that are required
-      for (int j = 0; j < ns; j++) {
-        // Get the column variable associated with the node
-        int var = node_to_var[k + j];
-        T* Fj = &F[front_size * j];
+      if (is_sorted) {
+        for (int j = 0; j < ns; j++) {
+          // Get the column variable associated with the node
+          int var = node_to_var[k + j];
+          T* Fj = &F[front_size * j];
 
-        int start = colp[var];
-        int end = colp[var + 1];
-        const int* it = std::lower_bound(&rows[start], &rows[end], var);
+          int start = colp[var];
+          int end = colp[var + 1];
+          const int* it = std::lower_bound(&rows[start], &rows[end], var);
 
-        if (it != rows + end) {
-          for (int ip = it - rows; ip < end; ip++) {
+          if (it != rows + end) {
+            for (int ip = it - rows; ip < end; ip++) {
+              // Get the original row index
+              int i = rows[ip];
+
+              // Get the front index
+              int ifront = front_indices[i];
+
+              // Add the contribution to the frontal matrix
+              Fj[ifront] += data[ip];
+            }
+          }
+        }
+      } else {
+        for (int j = 0; j < ns; j++) {
+          // Get the column variable associated with the snode
+          int var = node_to_var[k + j];
+          T* Fj = &F[front_size * j];
+
+          for (int ip = colp[var]; ip < colp[var + 1]; ip++) {
             // Get the original row index
             int i = rows[ip];
+            if (i >= var) {
+              // Get the front index
+              int ifront = front_indices[i];
 
-            // Get the front index
-            int ifront = front_indices[i];
-
-            // Add the contribution to the frontal matrix
-            Fj[ifront] += data[ip];
+              // Add the contribution to the frontal matrix
+              Fj[ifront] += data[ip];
+            }
           }
         }
       }
@@ -2249,16 +2270,23 @@ class SparseLDL {
       }
     }
 
+    int* snode_children = new int[num_snodes];
+    int* snode_children_ptr = new int[num_snodes + 2];
+    count_node_children(num_snodes, snode_parent, snode_children_ptr,
+                        snode_children);
+
     // Merge supernodes to obtain the relaxed supernodes
     int* var_to_node = nullptr;
     int* node_colcount = nullptr;
     int* node_parent = nullptr;
-    num_nodes =
-        merge_super_nodes(ncols, num_snodes, snode_parent, colcount, snode_ptr,
-                          snode_to_var, &node_ptr, &node_to_var, &var_to_node,
-                          &node_colcount, &node_parent, work);
+    num_nodes = merge_super_nodes(
+        ncols, num_snodes, snode_parent, snode_children_ptr, snode_children,
+        colcount, snode_ptr, snode_to_var, &node_ptr, &node_to_var,
+        &var_to_node, &node_colcount, &node_parent, work);
 
     // Free the supernode information
+    delete[] snode_children;
+    delete[] snode_children_ptr;
     delete[] var_to_snode;
     delete[] snode_to_var;
     delete[] snode_ptr;
@@ -2270,8 +2298,8 @@ class SparseLDL {
     // tree
     node_children = new int[num_nodes];
     node_children_ptr = new int[num_nodes + 2];
-    count_super_node_children(num_nodes, node_parent, node_children_ptr,
-                              node_children);
+    count_node_children(num_nodes, node_parent, node_children_ptr,
+                        node_children);
     delete[] node_parent;
 
     // Count up the sizes of the contribution blocks
@@ -2324,6 +2352,8 @@ class SparseLDL {
     if (perm) {
       delete[] perm;
     }
+
+    // print_histogram();
 
     // Set the inverse permutation
     invperm = iperm;
@@ -2718,13 +2748,34 @@ class SparseLDL {
     return snode;
   }
 
+  /**
+   * @brief Merge supernodes into relaxed supernodes for performance
+   *
+   * @param ncols Number of columns in the matrix
+   * @param num_snodes Number of fundamental supernodes
+   * @param snode_parent Supernode parent of each supernode
+   * @param colcount Column count for the original set of columns
+   * @param snode_ptr Pointer into the supernodes
+   * @param snode_to_var Variables that comprise a supernode
+   * @param new_node_ptr_ New pointer into the merged nodes
+   * @param new_node_to_vars_ New variables that comprise a merged node
+   * @param new_vars_to_node_ New merged nodes for each variable
+   * @param new_colcounts_ New column count - now strictly below the supernode
+   * @param new_node_parent_ New node parent
+   * @param work Work array of dimension 4 x num_snodes
+   * @param max_node_width Input to control the maximum width of a merged node
+   * @param max_zeros_added Max zeros added to a node at any merge step
+   * @return int Number of new merged nodes
+   */
   int merge_super_nodes(int ncols, int num_snodes, const int snode_parent[],
-                        const int colcount[], const int snode_ptr[],
-                        const int snode_to_var[], int* new_node_ptr_[],
-                        int* new_node_to_vars_[], int* new_vars_to_node_[],
-                        int* new_colcounts_[], int* new_node_parent_[],
-                        int work[], const int max_node_width = 24,
-                        const int max_zeros_added = 512) {
+                        const int snode_children_ptr[],
+                        const int snode_children[], const int colcount[],
+                        const int snode_ptr[], const int snode_to_var[],
+                        int* new_node_ptr_[], int* new_node_to_vars_[],
+                        int* new_vars_to_node_[], int* new_colcounts_[],
+                        int* new_node_parent_[], int work[],
+                        const int max_node_width = 32,
+                        const int max_zeros_added = 64) {
     int* root_of = work;
     int* root_colcount = &work[num_snodes];
     int* width = &work[2 * num_snodes];
@@ -2753,27 +2804,36 @@ class SparseLDL {
 
     // Loop over the supernodes (already in post-order)
     for (int is = 0; is < num_snodes; is++) {
-      int ps = snode_parent[is];
+      // Find the parent root
+      int start = snode_children_ptr[is];
+      int end = snode_children_ptr[is + 1];
 
-      // Check that this is not a root
-      if (ps >= 0) {
-        // Get the root for the given merged node
-        int ri = find_root(is);
-        int rp = find_root(ps);
+      // Loop over the children
+      for (int ip = start; ip < end; ip++) {
+        // For each child, check if we can merge
+        int child = snode_children[ip];
 
-        int merged_width = width[ri] + width[rp];
+        // Compute parent root here because it may change with merges
+        int r_parent = find_root(is);
+        int r_child = find_root(child);
 
-        if (ri != rp && merged_width <= max_node_width) {
+        // Compute the width of the new candidate node
+        int merged_width = width[r_child] + width[r_parent];
+
+        // Check if the merge criterion is satisfied
+        if (r_child != r_parent && merged_width <= max_node_width) {
           // Column count of the number of added zeros
           int extra_rows =
-              std::max(0, root_colcount[rp] - (root_colcount[ri] - width[rp]));
-          int zeros_added = extra_rows * width[ri];
+              std::max(0, root_colcount[r_parent] -
+                              (root_colcount[r_child] - width[r_parent]));
+          int zeros_added = extra_rows * width[r_child];
 
           // Okay, merge the supernodes
           if (zeros_added <= max_zeros_added) {
-            root_colcount[rp] = merged_width + root_colcount[rp] - width[rp];
-            width[rp] = merged_width;
-            root_of[ri] = rp;
+            root_colcount[r_parent] =
+                merged_width + root_colcount[r_parent] - width[r_parent];
+            width[r_parent] = merged_width;
+            root_of[r_child] = r_parent;
           }
         }
       }
@@ -2875,46 +2935,47 @@ class SparseLDL {
   }
 
   /**
-   * @brief Count up the number of children for each super node
+   * @brief Count up the number of children for each super node. Place all roots
+   * at the end of the child array
    *
-   * @param ns Number of nodes
+   * @param nnodes Number of nodes
    * @param node_parent Parent pointer
-   * @param sn_child_ptr Pointer into the supernode children and roots
-   * @param sn_children Supernode children
+   * @param sn_child_ptr Pointer to children and roots (length nnodes + 2)
+   * @param sn_children Supernode children and roots
    */
-  void count_super_node_children(const int ns, const int node_parent[],
-                                 int sn_child_ptr[], int sn_children[]) {
-    std::fill(sn_child_ptr, sn_child_ptr + ns + 2, 0);
+  void count_node_children(const int nnodes, const int node_parent[],
+                           int sn_child_ptr[], int sn_children[]) {
+    std::fill(sn_child_ptr, sn_child_ptr + nnodes + 2, 0);
 
     // Count up the children within the post-ordered elmination tree
-    for (int i = 0; i < ns; i++) {
+    for (int i = 0; i < nnodes; i++) {
       int p = node_parent[i];
       if (p != -1) {
         sn_child_ptr[p + 1]++;
       } else {  // This is a root, put it at the end
-        sn_child_ptr[ns + 1]++;
+        sn_child_ptr[nnodes + 1]++;
       }
     }
 
     // Count up the children
-    for (int i = 0; i < ns + 1; i++) {
+    for (int i = 0; i < nnodes + 1; i++) {
       sn_child_ptr[i + 1] += sn_child_ptr[i];
     }
 
     // Set the children
-    for (int i = 0; i < ns; i++) {
+    for (int i = 0; i < nnodes; i++) {
       int p = node_parent[i];
       if (p != -1) {
         sn_children[sn_child_ptr[p]] = i;
         sn_child_ptr[p]++;
       } else {  // This is a root, put it at the end
-        sn_children[sn_child_ptr[ns]] = i;
-        sn_child_ptr[ns]++;
+        sn_children[sn_child_ptr[nnodes]] = i;
+        sn_child_ptr[nnodes]++;
       }
     }
 
     // Reset the child array
-    for (int i = ns; i >= 0; i--) {
+    for (int i = nnodes; i >= 0; i--) {
       sn_child_ptr[i + 1] = sn_child_ptr[i];
     }
     sn_child_ptr[0] = 0;
@@ -3107,7 +3168,8 @@ class SparseLDL {
 
       // Now pop the children off the stack
       int num_children = node_children_ptr[ks + 1] - node_children_ptr[ks];
-      for (int k = 0; k < num_children && top > 0; k++) {
+      int k = 0;
+      for (; k < num_children && top > 0; k++) {
         top -= 2;
       }
 

@@ -260,6 +260,9 @@ parser = argparse.ArgumentParser()
 parser.add_argument(
     "--build", dest="build", action="store_true", default=False, help="Enable building"
 )
+parser.add_argument(
+    "--solver", dest="solver", choices=["amigo", "mumps"], default="mumps"
+)
 args = parser.parse_args()
 
 # Set the scaling factors for the space shuttle problem
@@ -383,7 +386,7 @@ lower["dyn.u[:, 1]"] = np.radians(-90.0) / scaling["beta"]
 upper["dyn.u[:, 1]"] = np.radians(90.0) / scaling["beta"]
 
 # Create optimizer and solve
-opt = am.Optimizer(model, x, lower=lower, upper=upper, solver="amigo")
+opt = am.Optimizer(model, x, lower=lower, upper=upper, solver=args.solver)
 data = opt.optimize(
     {
         "initial_barrier_param": 1.0,
