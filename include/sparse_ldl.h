@@ -819,11 +819,10 @@ class SparseLDL {
                                const int rows[], const T data[],
                                ContributionData& contrib, ResourcePool& pool,
                                MatrixFactor& factor) {
-    // constexpr int flops_threshold = 500;
     int num_children = node_children_ptr[ks + 1] - node_children_ptr[ks];
     const int* children = &node_children[node_children_ptr[ks]];
 
-    if (num_children > 1) {  // } && subtree_flops[ks] > flops_threshold) {
+    if (num_children > 1) {
       for (int k = 0; k < num_children; k++) {
         int child = children[k];
 #ifdef AMIGO_USE_OPENMP
@@ -2310,7 +2309,6 @@ class SparseLDL {
       }
     }
 
-    // subtree_flops = new int[num_snodes];
     estimate_cholesky_nonzeros(work);
 
     // Set the array sizes within the factorization
@@ -2326,8 +2324,6 @@ class SparseLDL {
     if (perm) {
       delete[] perm;
     }
-
-    print_histogram();
 
     // Set the inverse permutation
     invperm = iperm;
@@ -2727,11 +2723,11 @@ class SparseLDL {
                         const int snode_to_var[], int* new_node_ptr_[],
                         int* new_node_to_vars_[], int* new_vars_to_node_[],
                         int* new_colcounts_[], int* new_node_parent_[],
-                        int work[], const int max_node_width = 32,
-                        const int max_zeros_added = 1024) {
+                        int work[], const int max_node_width = 24,
+                        const int max_zeros_added = 512) {
     int* root_of = work;
-    int* width = &work[num_snodes];
-    int* root_colcount = &work[2 * num_snodes];
+    int* root_colcount = &work[num_snodes];
+    int* width = &work[2 * num_snodes];
 
     // Initialize the supernode data
     for (int is = 0; is < num_snodes; is++) {
@@ -2784,17 +2780,22 @@ class SparseLDL {
     }
 
     // Now, create the new info about the columns/non-zero
-    int* snode_to_new = &work[3 * num_snodes];
+    int* snode_to_new = &work[2 * num_snodes];
+    int* new_indices = &work[3 * num_snodes];
     std::fill(snode_to_new, snode_to_new + num_snodes, -1);
+    std::fill(new_indices, new_indices + num_snodes, -1);
 
     int nnodes = 0;
     for (int is = 0; is < num_snodes; is++) {
-      // Find the root with path compression
       int r = find_root(is);
-      if (snode_to_new[r] < 0) {
-        snode_to_new[r] = nnodes++;
+      if (is == r) {
+        new_indices[is] = nnodes;
+        nnodes++;
       }
-      snode_to_new[is] = snode_to_new[r];
+    }
+
+    for (int is = 0; is < num_snodes; is++) {
+      snode_to_new[is] = new_indices[find_root(is)];
     }
 
     // Allocate new variables
@@ -3189,9 +3190,6 @@ class SparseLDL {
   int max_contrib;    // Max size
   int* contrib_ptr;   // Pointer into the rows
   int* contrib_rows;  // Contribution rows
-
-  // Flops of all descendants
-  // int* subtree_flops;
 
   // Storage for the matrix factorization
   MatrixFactor fact;

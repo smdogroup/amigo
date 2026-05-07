@@ -140,9 +140,9 @@ def test_sparse_ldl():
         x = np.array(xvec[:], dtype=float)
         err = np.linalg.norm(x - xvec[:])
 
+        assert err < 1e-15
         assert ldl_inertia[0] == inertia[0]
         assert ldl_inertia[1] == inertia[1]
-        assert err < 1e-15
 
 
 def test_sparse_ldl_amd():
@@ -167,9 +167,9 @@ def test_sparse_ldl_amd():
         x = np.array(xvec[:], dtype=float)
         err = np.linalg.norm(x - xvec[:])
 
+        assert err < 1e-15
         assert ldl_inertia[0] == inertia[0]
         assert ldl_inertia[1] == inertia[1]
-        assert err < 1e-15
 
 
 def test_sparse_poisson():
@@ -194,9 +194,9 @@ def test_sparse_poisson():
         x = np.array(xvec[:], dtype=float)
         err = np.linalg.norm(x - xvec[:])
 
+        assert err < 1e-15
         assert ldl_inertia[0] == inertia[0]
         assert ldl_inertia[1] == inertia[1]
-        assert err < 1e-15
 
 
 def test_sparse_poisson_amd():
@@ -222,9 +222,9 @@ def test_sparse_poisson_amd():
         x = np.array(xvec[:], dtype=float)
         err = np.linalg.norm(x - xvec[:])
 
+        assert err < 1e-15
         assert ldl_inertia[0] == inertia[0]
         assert ldl_inertia[1] == inertia[1]
-        assert err < 1e-15
 
 
 def test_sparse_cholesky_poisson_rhs():
@@ -315,4 +315,4 @@ def test_sparse_ldl_poisson_amd_rhs():
 
 
 if __name__ == "__main__":
-    test_sparse_ldl_amd()
+    test_sparse_poisson()
