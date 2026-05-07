@@ -36,7 +36,7 @@ jobs:
         # available on Windows runners.
         run: |
           pip install scikit-build-core pybind11 mpi4py numpy scipy matplotlib
-          pip install -e .
+          pip install -e . -C cmake.args="-DAMIGO_ENABLE_OPENMP=OFF"
 
       - name: Install test dependencies
         run: pip install pytest smt

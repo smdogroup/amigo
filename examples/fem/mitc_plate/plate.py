@@ -172,8 +172,11 @@ if args.solver == "cholesky" or args.solver == "ldl":
         stype = am.SolverType.LDL
 
     ldl = am.SparseLDL(mat, stype, ustab=0.05)
-    start_time = time.perf_counter()
     flag = ldl.factor()
+
+    start_time = time.perf_counter()
+    for i in range(10):
+        flag = ldl.factor()
     end_time = time.perf_counter()
     if flag != 0:
         print(f"LDL factor flag {flag}")
@@ -182,16 +185,21 @@ if args.solver == "cholesky" or args.solver == "ldl":
     ldl.solve(x.get_vector())
     if stype == am.SolverType.LDL:
         print("Inertia: ", ldl.get_inertia())
+
+    tfactor = (end_time - start_time) / 10
 elif args.solver == "cholesky_left":
     chol = am.SparseCholesky(mat)
     start_time = time.perf_counter()
-    flag = chol.factor()
+    for i in range(10):
+        flag = chol.factor()
     end_time = time.perf_counter()
     if flag != 0:
         print(f"Cholesky factor flag {flag}")
 
     x[:] = g[:]
     chol.solve(x.get_vector())
+
+    tfactor = (end_time - start_time) / 10
 elif args.solver == "scipy":
     csr = am.tocsr(mat)
 
@@ -200,7 +208,9 @@ elif args.solver == "scipy":
     x[:] = spsolve(csr, g[:])
     end_time = time.perf_counter()
 
-print(f"Solve time... {end_time - start_time:.6f} seconds")
+    tfactor = end_time - start_time
+
+print(f"Factor time... {tfactor:.6f} seconds")
 
 print("Plotting...")
 w = x["soln.w"]
