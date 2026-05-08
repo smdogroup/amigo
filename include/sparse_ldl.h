@@ -2353,8 +2353,6 @@ class SparseLDL {
       delete[] perm;
     }
 
-    // print_histogram();
-
     // Set the inverse permutation
     invperm = iperm;
   }
