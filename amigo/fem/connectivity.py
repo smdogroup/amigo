@@ -48,17 +48,17 @@ class InpParser:
                     section = "NODE"
                 elif header.startswith("*ELEMENT"):
                     section = "ELEMENT"
-                    elem_type = self._find_kw(raw, "TYPE")
-                    elset = self._find_kw(raw, "ELSET")
+                    elem_type = self._find_kw(header, "TYPE")
+                    elset = self._find_kw(header, "ELSET")
                     if elset not in self.elem_conn:
                         self.elem_conn[elset] = {}
                     if elem_type not in self.elem_conn[elset]:
                         self.elem_conn[elset][elem_type] = {}
-                    if "SURFACE" in elset.upper():
+                    if "SURFACE" in elset:
                         self.surfaces.append(elset)
                 elif header.startswith("*NSET"):
                     section = "NSET"
-                    nset_name = self._find_kw(raw, "NSET")
+                    nset_name = self._find_kw(header, "NSET")
                     if nset_name not in self.node_sets:
                         self.node_sets[nset_name] = []
                 else:
@@ -99,10 +99,11 @@ class InpParser:
         return len(self.surfaces)
 
     def get_conn(self, elset, elem_type):
-        conn = self.elem_conn[elset][elem_type]
+        conn = self.elem_conn[elset.upper()][elem_type.upper()]
         return np.array([conn[k] for k in sorted(conn.keys())], dtype=int)
 
     def get_nodes_in_domain(self, elset):
+        elset = elset.upper()
         if elset in self.node_sets:
             return np.array(list(dict.fromkeys(self.node_sets[elset])))
 
