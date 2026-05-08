@@ -1,5 +1,6 @@
 def write_vtu(mesh, conns, u, v, w, filename="cylinder_shell.vtu"):
     import numpy as np
+
     X = mesh.X
     nnodes = X.shape[0]
     conn = np.vstack(conns) if isinstance(conns, list) else conns

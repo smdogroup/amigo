@@ -230,10 +230,10 @@ domains = mesh.get_domains()
 
 
 # groups made with cylinder_mesh.py
-lateral_surfaces = ['Surface1']
-bottom_line = 'Line3'
-lateral_line = 'Line2'
-top_line = 'Line1'
+lateral_surfaces = ["Surface1"]
+bottom_line = "Line3"
+lateral_line = "Line2"
+top_line = "Line1"
 print(f"Lateral: {lateral_surfaces}, bottom: {bottom_line}, top: {top_line}")
 
 soln_space = SolutionSpace(

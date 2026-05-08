@@ -246,10 +246,10 @@ args = parser.parse_args()
 mesh = Mesh("cylinder_coarse.inp")
 domains = mesh.get_domains()
 
-lateral_surfaces = ['SURFACE1']
-bottom_line = 'LINE3'
-lateral_line = 'LINE2'
-top_line = 'LINE1'
+lateral_surfaces = ["SURFACE1"]
+bottom_line = "LINE3"
+lateral_line = "LINE2"
+top_line = "LINE1"
 print(f"Lateral: {lateral_surfaces}, bottom: {bottom_line}, top: {top_line}")
 
 # 6 DOF/node: u, v, w translations + rx, ry, rz global rotations
