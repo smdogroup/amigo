@@ -7,7 +7,6 @@ import matplotlib.tri as tri
 import json
 import openmdao.api as om
 
-
 length = 1.0
 # nelems = 5
 E = 25000

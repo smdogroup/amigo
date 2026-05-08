@@ -294,7 +294,9 @@ model.add_model("fem", submodel)
 
 
 # gap_coord, gap_disp, gap_floor = "y", "v", 2.6 # for a minimum value
-gap_coord, gap_disp, gap_floor = "x", "u", 2.3# for a minimum value
+gap_coord, gap_disp, gap_floor = "x", "u", 2.3  # for a minimum value
+
+
 # gap_coord, gap_disp, gap_floor = "z", "w", 2.8# for a minimum value
 # Adding nonlinear constraint component group to contribute to the Lagrangian
 class GapConstraint(am.Component):

@@ -33,7 +33,7 @@ def potential_bending(soln, data=None, geo=None):
     U_b = (
         0.5 * D * (k2 * (k1 * nu + k2) + k1 * (k1 + k2 * nu) + 1 / 2 * k3**2 * (1 - nu))
     )
-    Work_ext = - q0 * w_val
+    Work_ext = -q0 * w_val
 
     return U_b - Work_ext
 

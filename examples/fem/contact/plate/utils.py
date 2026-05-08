@@ -6,7 +6,6 @@ import numpy as np
 import argparse
 import matplotlib.tri as tri
 
-
 # def plot_mesh(mesh: Mesh, dx, dy):
 #     fig, ax = plt.subplots()
 
