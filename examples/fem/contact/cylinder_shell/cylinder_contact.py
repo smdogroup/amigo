@@ -1,3 +1,6 @@
+# Author: Jack Turbush
+# Description: MITC4 shell FEM contact problem on a cylindrical shell geometry.
+
 """
 MITC4 shell FEM on a cylinder — end traction variant.
 Load applied as axial traction integrated along top ring (LINE1, T3D2),
@@ -207,30 +210,6 @@ args = parser.parse_args()
 mesh = Mesh("cylinder_coarse.inp")
 domains = mesh.get_domains()
 
-# lateral_surfaces = [
-#     n
-#     for n, etypes in domains.items()
-#     if "CPS4" in etypes
-#     and mesh.X[mesh.get_nodes_in_domain(n), 2].max()
-#     - mesh.X[mesh.get_nodes_in_domain(n), 2].min()
-#     > 1e-6
-# ]
-# z_min = mesh.X[:, 2].min()
-# bottom_line = next(
-#     n
-#     for n, etypes in domains.items()
-#     if "T3D2" in etypes
-#     and np.allclose(mesh.X[mesh.get_nodes_in_domain(n), 2], z_min, atol=1e-6)
-# )
-# top_line = next(
-#     n
-#     for n, etypes in domains.items()
-#     if "T3D2" in etypes
-#     and np.allclose(
-#         mesh.X[mesh.get_nodes_in_domain(n), 2], mesh.X[:, 2].max(), atol=1e-6
-#     )
-# )
-
 lateral_surfaces = ["SURFACE1"]
 bottom_line = "LINE3"
 top_line = "LINE1"
@@ -327,19 +306,6 @@ data = model.get_data_vector()
 data["contact.x_floor"] = -0.4
 
 x = model.create_vector()
-
-# linear solve =================================================================
-# g = model.create_vector()
-# mat = model.create_matrix()
-
-# model.eval_gradient(x, g)
-# model.eval_hessian(x, mat)
-
-# K = am.tocsr(mat)
-# diag = K.diagonal()
-# K = K + diags(np.where(np.abs(diag) < 1e-10, 1.0, 0.0))
-
-# x.get_vector().get_array()[:] = spsolve(K, g.get_vector().get_array())
 
 # nonlinear solve ==============================================================
 opt_options = {

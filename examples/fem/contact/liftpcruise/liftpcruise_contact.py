@@ -1,3 +1,6 @@
+# Author: Jack Turbush
+# Description: Lift-plus-cruise aircraft structural contact problem.
+
 """
 MITC4 shell FEM on a cylinder — end traction variant.
 Load applied as axial traction integrated along top ring (LINE1, T3D2),
@@ -231,7 +234,7 @@ domains = mesh.get_domains()
 #     )
 # )
 
-lateral_surfaces = ["Surface0"]
+lateral_surfaces = ["SURFACE0"]
 # bottom_line = "LINE3"
 # top_line = "LINE1"
 bc_line = "line1"

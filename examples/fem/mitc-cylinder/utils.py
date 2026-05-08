@@ -1,3 +1,6 @@
+# write VTU function for amigo fem results
+
+
 def write_vtu(mesh, conns, u, v, w, filename="cylinder_shell.vtu"):
     import numpy as np
 

@@ -1,3 +1,6 @@
+# Author: Jack Turbush
+# Description: Utility functions for VTU output in the plate contact example.
+
 from amigo.fem import Mesh
 import amigo as am
 from scipy.sparse.linalg import spsolve
@@ -5,28 +8,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import argparse
 import matplotlib.tri as tri
-
-# def plot_mesh(mesh: Mesh, dx, dy):
-#     fig, ax = plt.subplots()
-
-#     # Get the domains in the mesh
-#     domains = mesh.get_domains()
-#     etypes = ["CPS3"]
-#     for name in domains:
-#         for etype in domains[name]:
-#             if etype not in etypes:
-#                 continue
-#             conn = mesh.get_conn(name, etype)
-#             triang = tri.Triangulation(mesh.X[:, 0], mesh.X[:, 1], conn)
-#             triang_deformed = tri.Triangulation(
-#                 mesh.X[:, 0] + dx, mesh.X[:, 1] + dy, conn
-#             )
-#             ax.triplot(triang, color="grey", linestyle="--", linewidth=1.0)
-#             ax.triplot(triang_deformed, color="blue", linestyle="-", linewidth=1.0)
-
-#     ax.set_aspect("equal")
-#     ax.set_axis_off()
-#     return
 
 
 def plot_3d(

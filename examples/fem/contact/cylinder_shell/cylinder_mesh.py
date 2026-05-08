@@ -1,3 +1,6 @@
+# Author: Jack Turbush
+# Description: Mesh generation script for the cylindrical shell contact example.
+
 import gmsh
 
 R = 0.5  # radius

@@ -1,3 +1,6 @@
+# Author: Jack Turbush
+# Description: Plate contact problem using reduced-integration shell elements.
+
 from amigo.fem import Mesh, Problem, SolutionSpace, FiniteElement, QuadQuadrature
 import amigo as am
 from scipy.sparse.linalg import spsolve
@@ -22,12 +25,10 @@ class GapConstraint(am.Component):
 
     def __init__(self):
         super().__init__()
-        # self.add_data("y_coord")
         self.add_input("w")
         self.add_constraint("gap", lower=0.0, upper=float("inf"))
 
     def compute(self):
-        # y = self.data["y_coord"]
         z = 0.0
         w = self.inputs["w"]
         z_contact = 75.0e3  # ceiling
@@ -162,17 +163,6 @@ xm = model.create_vector()
 
 # Solve
 x = xm.get_vector()
-# mat = p.create_matrix()
-# g = p.create_vector()
-
-# print("Evaluating the Hessian...")
-# p.hessian(1.0, x, mat)  # assembles K
-# p.gradient(1.0, x, g)  # assembles f (body force / BC terms)
-
-# print("Solving...")
-# K = am.tocsr(mat)
-# x.get_array()[:] = spsolve(K, g.get_array())
-
 
 opt_options = {
     "max_iterations": 200,
@@ -204,7 +194,6 @@ plot_3d(mesh, -w_nocontact, view="side")
 
 plt.show()
 
-# exit()
 fig, ax = plt.subplots(1, 3, figsize=(8, 3))
 for index, soln in enumerate([w, tx, ty]):
     mesh.plot(soln, ax=ax[index])

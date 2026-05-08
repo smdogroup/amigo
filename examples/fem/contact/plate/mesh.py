@@ -1,3 +1,6 @@
+# Author: Jack Turbush
+# Description: Mesh generation script for the plate contact example.
+
 import numpy as np
 import gmsh
 import sys
@@ -10,7 +13,7 @@ gmsh.initialize()
 gmsh.model.add("plate")
 
 # Mesh refinement
-lc = 0.005
+lc = 0.01
 
 # Geometry definition
 L = 1.0  # plate size

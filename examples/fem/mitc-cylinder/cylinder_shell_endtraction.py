@@ -2,6 +2,7 @@
 MITC4 shell FEM on a cylinder — end traction variant.
 Load applied as axial traction integrated along top ring (LINE1, T3D2),
 instead of a distributed surface pressure.
+Author: Jack Turbush
 """
 
 import argparse
@@ -230,7 +231,7 @@ domains = mesh.get_domains()
 
 
 # groups made with cylinder_mesh.py
-lateral_surfaces = ["Surface1"]
+lateral_surfaces = ["SURFACE1"]
 bottom_line = "Line3"
 lateral_line = "Line2"
 top_line = "Line1"

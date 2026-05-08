@@ -1,3 +1,7 @@
+# Author: Jack Turbush
+# Description: Utility functions for VTU output in the lift-plus-cruise contact example.
+
+
 def write_vtu(mesh, conns, u, v, w, filename="cylinder_shell.vtu"):
     import numpy as np
 

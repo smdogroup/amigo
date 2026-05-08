@@ -62,11 +62,11 @@ data_space = SolutionSpace({})
 
 integrand_map = {
     "bending_potential": {
-        "target": ["Surface1"],
+        "target": ["SURFACE1"],
         "integrand": potential_bending,
     },
     "shear_potential": {
-        "target": ["Surface1"],
+        "target": ["SURFACE1"],
         "integrand": potential_shear,
         "rule": ["reduced"],
     },
