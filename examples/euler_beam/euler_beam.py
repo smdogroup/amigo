@@ -344,6 +344,6 @@ ax.set_ylabel(r"$h*$")
 ax.set_xlabel(r"$x$")
 ax.set_title("Optimized Thickness Distribution")
 
-fig,ax = plt.subplots()
+fig, ax = plt.subplots()
 ax.plot(x["src.v"])
 plt.show()
