@@ -408,6 +408,7 @@ class Problem:
         for integrand_name in self.integrand_map:
             targets = self.integrand_map[integrand_name]["target"]
             integrand = self.integrand_map[integrand_name]["integrand"]
+            integration_rule = self.integrand_map[integrand_name].get("rule", None)
 
             # Figure out the element types that we need
             etypes = []
@@ -432,8 +433,14 @@ class Problem:
                 data_basis = self.data_dof.get_basis(etype)
                 geo_basis = self.geo_dof.get_basis(etype)
 
-                # Create the quadrature instance
-                quadrature = self.soln_dof.get_quadrature(etype)
+                # reduced integration option if rule is given
+                if integration_rule == ["reduced"]:
+                    # override get quadrature with custom quadrature
+                    quadrature = basis.ReducedQuadQuadrature()
+                elif integration_rule is not None:
+                    raise ValueError("Non-standard integration rule not supported")
+                else:
+                    quadrature = self.soln_dof.get_quadrature(etype)
 
                 # Create the element object
                 obj = FiniteElement(
