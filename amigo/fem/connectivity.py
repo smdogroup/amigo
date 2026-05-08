@@ -27,6 +27,7 @@ class InpParser:
 
         self.X = {}
         self.elem_conn = {}
+        self.node_sets = {}
         self.surfaces = []
 
         elem_type = None
@@ -43,18 +44,25 @@ class InpParser:
             if raw.startswith("*"):
                 header = raw.upper()
 
-                if header.startswith("*NODE"):
+                if header.startswith("*NODE") and not header.startswith("*NSET"):
                     section = "NODE"
                 elif header.startswith("*ELEMENT"):
                     section = "ELEMENT"
-                    elem_type = self._find_kw(header, "TYPE")
-                    elset = self._find_kw(header, "ELSET")
-                    if elem_type not in self.elem_conn:
+                    elem_type = self._find_kw(raw, "TYPE")
+                    elset = self._find_kw(raw, "ELSET")
+                    if elset not in self.elem_conn:
                         self.elem_conn[elset] = {}
-                    if elset not in self.elem_conn[elset]:
+                    if elem_type not in self.elem_conn[elset]:
                         self.elem_conn[elset][elem_type] = {}
-                    if "SURFACE" in elset:
+                    if "SURFACE" in elset.upper():
                         self.surfaces.append(elset)
+                elif header.startswith("*NSET"):
+                    section = "NSET"
+                    nset_name = self._find_kw(raw, "NSET")
+                    if nset_name not in self.node_sets:
+                        self.node_sets[nset_name] = []
+                else:
+                    section = None
                 continue
 
             if section == "NODE":
@@ -70,6 +78,10 @@ class InpParser:
                 eid = int(parts[0])
                 conn = [(int(p) - 1) for p in parts[1:]]
                 self.elem_conn[elset][elem_type][eid - 1] = conn
+
+            elif section == "NSET":
+                parts = self._split_csv_line(raw)
+                self.node_sets[nset_name].extend(int(p) - 1 for p in parts)
 
     def get_nodes(self):
         return np.array([self.X[k] for k in sorted(self.X.keys())])
@@ -91,6 +103,9 @@ class InpParser:
         return np.array([conn[k] for k in sorted(conn.keys())], dtype=int)
 
     def get_nodes_in_domain(self, elset):
+        if elset in self.node_sets:
+            return np.array(list(dict.fromkeys(self.node_sets[elset])))
+
         conn = []
         for elem_type in self.elem_conn[elset]:
             conn.extend(self.get_conn(elset, elem_type).flatten())
