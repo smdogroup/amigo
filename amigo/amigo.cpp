@@ -10,6 +10,7 @@ typedef SSIZE_T ssize_t;
 #endif
 
 #include "alias_tracker.h"
+#include "component_group.h"
 #include "csr_matrix.h"
 #include "external_component.h"
 #include "interior_point_optimizer.h"
@@ -424,6 +425,16 @@ PYBIND11_MODULE(amigo, mod) {
             amigo::ExternalComponentGroup<double, detail::policy>>(
             vars.size(), vars.data(), cons.size(), cons.data(), extrn);
       }));
+
+  py::class_<amigo::ComponentGroup<double, detail::policy,
+                                   amigo::SlackComponent__<double>>,
+             amigo::ComponentGroupBase<double, detail::policy>,
+             std::shared_ptr<amigo::ComponentGroup<
+                 double, detail::policy, amigo::SlackComponent__<double>>>>(
+      mod, "SlackComponent")
+      .def(py::init<int, std::shared_ptr<amigo::Vector<int>>,
+                    std::shared_ptr<amigo::Vector<int>>,
+                    std::shared_ptr<amigo::Vector<int>>>());
 
   // SlackCouplingGroup: couples slack variables to inequality constraints
   // for the 2x2 augmented system (Wachter & Biegler 2006, eq. 13).
