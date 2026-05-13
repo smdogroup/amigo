@@ -2772,11 +2772,13 @@ class SparseLDL {
                         int* new_node_ptr_[], int* new_node_to_vars_[],
                         int* new_vars_to_node_[], int* new_colcounts_[],
                         int* new_node_parent_[], int work[],
-                        const int max_node_width = 32,
-                        const int max_zeros_added = 64) {
+                        const int max_node_width = 64,
+                        const int max_zeros_added = 256) {
     int* root_of = work;
     int* root_colcount = &work[num_snodes];
     int* width = &work[2 * num_snodes];
+    int* new_non_zeros = &work[3 * num_snodes];
+    std::fill(new_non_zeros, new_non_zeros + num_snodes, 0);
 
     // Initialize the supernode data
     for (int is = 0; is < num_snodes; is++) {
@@ -2806,8 +2808,20 @@ class SparseLDL {
       int start = snode_children_ptr[is];
       int end = snode_children_ptr[is + 1];
 
+      std::vector<int> kids(end - start);
+      for (int ip = start, i = 0; ip < end; ip++, i++) {
+        int child = snode_children[ip];
+        kids[i] = ip;
+      }
+
+      std::sort(kids.begin(), kids.end(), [&](int a, int b) {
+        return width[find_root(a)] < width[find_root(b)];
+      });
+
       // Loop over the children
-      for (int ip = start; ip < end; ip++) {
+      for (int i = 0; i < kids.size(); i++) {
+        int ip = kids[i];
+
         // For each child, check if we can merge
         int child = snode_children[ip];
 
@@ -2827,11 +2841,13 @@ class SparseLDL {
           int zeros_added = extra_rows * width[r_child];
 
           // Okay, merge the supernodes
-          if (zeros_added <= max_zeros_added) {
+          if (new_non_zeros[r_parent] + new_non_zeros[r_child] + zeros_added <=
+              max_zeros_added) {
             root_colcount[r_parent] =
                 merged_width + root_colcount[r_parent] - width[r_parent];
             width[r_parent] = merged_width;
             root_of[r_child] = r_parent;
+            new_non_zeros[r_parent] += zeros_added + new_non_zeros[r_child];
           }
         }
       }

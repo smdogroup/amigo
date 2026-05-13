@@ -33,7 +33,7 @@ void add_diagonal_cuda(int nrows, const int* d_indices, const T* d_values,
 
 template <typename T>
 AMIGO_KERNEL void zero_at_indices(int nentries, const int* d_indices,
-                                  double* d_array) {
+                                  T* d_array) {
   for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < nentries;
        i += blockDim.x * gridDim.x) {
     d_array[d_indices[i]] = 0.0;
@@ -45,7 +45,7 @@ void zero_at_indices_cuda(int nentries, const int* d_indices, T* d_array,
                           cudaStream_t stream) {
   constexpr int TPB = 256;
 
-  int grid = (nrows + TPB - 1) / TPB;
+  int grid = (nentries + TPB - 1) / TPB;
   zero_at_indices<T><<<grid, TPB, 0, stream>>>(nentries, d_indices, d_array);
 }
 
@@ -64,7 +64,7 @@ void set_value_at_indices_cuda(const T value, int nentries,
                                cudaStream_t stream) {
   constexpr int TPB = 256;
 
-  int grid = (nrows + TPB - 1) / TPB;
+  int grid = (nentries + TPB - 1) / TPB;
   set_value_at_indices<T>
       <<<grid, TPB, 0, stream>>>(value, nentries, d_indices, d_array);
 }

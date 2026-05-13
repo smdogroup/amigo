@@ -160,11 +160,19 @@ void bind_vector(py::module_& m, const std::string& name) {
 
 py::array_t<int> reorder_model(amigo::OrderingType order_type,
                                std::vector<py::array_t<int>> arrays,
-                               py::object output_vars = py::none()) {
+                               py::array_t<int> num_cons = py::none(),
+                               py::object con_indices = py::none()) {
   std::vector<int> intervals(arrays.size() + 1);
   intervals[0] = 0;
 
   int max_node = 0;
+
+  if (!num_cons.is_none()) {
+    if (arrays.size() != num_cons.size()) {
+      throw std::runtime_error(
+          "The constraints and input arrays must be the same size");
+    }
+  }
 
   // Check the dimension of the arrays
   ssize_t max_columns = 0;
@@ -195,9 +203,11 @@ py::array_t<int> reorder_model(amigo::OrderingType order_type,
   int nrows = max_node, ncols = max_node;
   int nelems = intervals[arrays.size()];
 
+  auto nc = num_cons.unchecked<1>();
   std::vector<int> columns(max_columns);
 
-  auto element_nodes = [&](int element, const int** ptr) {
+  auto element_nodes = [&](int element, const int** ptr, int* ncon = nullptr,
+                           bool* is_linear = nullptr) {
     // upper_bound finds the first index i such that intervals[i] >
     // element
     auto it = std::upper_bound(intervals.begin(), intervals.end(), element);
@@ -212,6 +222,16 @@ py::array_t<int> reorder_model(amigo::OrderingType order_type,
     int ncols = r.shape(1);
     for (int j = 0; j < ncols; j++) {
       columns[j] = r(elem, j);
+    }
+
+    if (ncon) {
+      *ncon = 0;
+      if (!num_cons.is_none()) {
+        *ncon = nc(idx);
+      }
+    }
+    if (is_linear) {
+      *is_linear = false;
     }
 
     *ptr = columns.data();
@@ -229,20 +249,20 @@ py::array_t<int> reorder_model(amigo::OrderingType order_type,
 
   // Compute the reordering
   int *perm, *iperm;
-  if (!output_vars.is_none()) {
-    auto output_array = output_vars.cast<py::array_t<int>>();
-    auto outputs_ = output_array.unchecked<1>();
+  if (!con_indices.is_none()) {
+    auto con_array = con_indices.cast<py::array_t<int>>();
+    auto cons_ = con_array.unchecked<1>();
 
-    int num_outputs = outputs_.shape(0);
-    int* outputs = new int[num_outputs];
-    for (int i = 0; i < num_outputs; i++) {
-      outputs[i] = outputs_[i];
+    int num_constraints = cons_.shape(0);
+    int* cons = new int[num_constraints];
+    for (int i = 0; i < num_constraints; i++) {
+      cons[i] = cons_[i];
     }
 
     amigo::OrderingUtils::reorder_block(order_type, nrows, rowp, cols,
-                                        num_outputs, outputs, &perm, &iperm);
+                                        num_constraints, cons, &perm, &iperm);
 
-    delete[] outputs;
+    delete[] cons;
   } else {
     amigo::OrderingUtils::reorder(order_type, nrows, rowp, cols, &perm, &iperm);
   }
@@ -296,7 +316,8 @@ PYBIND11_MODULE(amigo, mod) {
       .export_values();
 
   mod.def("reorder_model", &reorder_model, py::arg("order_type"),
-          py::arg("arrays"), py::arg("output_indices") = py::none());
+          py::arg("arrays"), py::arg("num_cons") = py::none(),
+          py::arg("output_indices") = py::none());
 
   py::class_<amigo::CSRMat<double>, std::shared_ptr<amigo::CSRMat<double>>>(
       mod, "CSRMat")

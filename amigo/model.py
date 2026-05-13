@@ -775,16 +775,20 @@ class Model:
 
     def _reorder_indices(self, order_type, order_for_block=False):
         arrays = []
+        num_cons = []
         for name, comp in self.comp.items():
             array = comp.get_indices(comp.vars)
             if array.size > 0:
                 arrays.append(array)
+                ncon = comp.comp_obj.get_num_constraints()
+                num_cons.append(ncon)
 
+        num_cons = np.array(num_cons, dtype=int)
         if order_for_block:
             constraint_indices = self._get_constraint_indices()
-            iperm = reorder_model(order_type, arrays, constraint_indices)
+            iperm = reorder_model(order_type, arrays, num_cons, constraint_indices)
         else:
-            iperm = reorder_model(order_type, arrays)
+            iperm = reorder_model(order_type, arrays, num_cons)
 
         # Apply the reordering to the variables
         for name, comp in self.comp.items():

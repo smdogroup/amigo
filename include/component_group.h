@@ -643,10 +643,13 @@ class ComponentGroup : public ComponentGroupBase<T, policy> {
 
   static constexpr int ncomp = __get_collection_ncomp<Components...>::value;
   static constexpr int ndata = __get_collection_ndata<Components...>::value;
+  static constexpr int nconstraints =
+      __get_collection_nconstraints<Components...>::value;
   static constexpr int noutputs =
       __get_collection_noutputs<Components...>::value;
   static constexpr bool continuation =
       __get_collection_continuation<Components...>::value;
+  static constexpr bool linear = __get_collection_linear<Components...>::value;
 
   // Use whatever class is defined as the default backend
   using Backend =
@@ -673,6 +676,8 @@ class ComponentGroup : public ComponentGroupBase<T, policy> {
   }
 
   bool is_continuation() const { return continuation; }
+  bool is_linear() const { return linear; }
+  int get_num_component_constraints() const { return nconstraints; }
 
   // Group compute functions
   T lagrangian(T alpha, const Vector<T>& data_vec, const Vector<T>& vec) const {

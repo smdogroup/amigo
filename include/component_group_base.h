@@ -23,6 +23,14 @@ class ComponentGroupBase {
   // Define whether this is a component intended for continuation or not
   virtual bool is_continuation() const { return false; }
 
+  // Does this component define a linear objective function and linear
+  // constraints
+  virtual bool is_linear() const { return false; }
+
+  // How many constraints does this component define
+  virtual int get_num_component_constraints() const { return 0; }
+
+  // Evaluate the Lagrangian
   virtual T lagrangian(T alpha, const Vector<T>& data,
                        const Vector<T>& x) const {
     return T(0.0);
@@ -210,6 +218,19 @@ struct __get_collection_noutputs<T, Ts...> {
 };
 
 template <class... Ts>
+struct __get_collection_nconstraints;
+
+template <class T>
+struct __get_collection_nconstraints<T> {
+  static constexpr int value = T::nconstraints;
+};
+
+template <class T, class... Ts>
+struct __get_collection_nconstraints<T, Ts...> {
+  static constexpr int value = __get_collection_nconstraints<Ts...>::value;
+};
+
+template <class... Ts>
 struct __get_collection_continuation;
 
 template <class T>
@@ -220,6 +241,19 @@ struct __get_collection_continuation<T> {
 template <class T, class... Ts>
 struct __get_collection_continuation<T, Ts...> {
   static constexpr int value = __get_collection_continuation<Ts...>::value;
+};
+
+template <class... Ts>
+struct __get_collection_linear;
+
+template <class T>
+struct __get_collection_linear<T> {
+  static constexpr int value = T::is_linear;
+};
+
+template <class T, class... Ts>
+struct __get_collection_linear<T, Ts...> {
+  static constexpr int value = __get_collection_linear<Ts...>::value;
 };
 
 }  // namespace amigo
