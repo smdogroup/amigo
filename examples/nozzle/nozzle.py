@@ -511,11 +511,7 @@ parser.add_argument(
     help="Enable the Largrange-Newton-Krylov-Schur inexact solver",
 )
 parser.add_argument(
-    "--with-cuda",
-    dest="use_cuda",
-    action="store_true",
-    default=False,
-    help="Enable the CUDA solver",
+    "--solver", dest="solver", choices=["amigo", "mumps", "cuda"], default="mumps"
 )
 parser.add_argument(
     "--num-cells", dest="num_cells", default=400, type=int, help="Number of cells"
@@ -683,7 +679,7 @@ eta = xi_cell_center / length
 # Compute the target area distribution
 A_target = compute_area_target(eta)
 
-solver = "amigo"
+solver = args.solver
 if args.use_lnks:
     problem = model.get_problem()
 
@@ -702,8 +698,6 @@ if args.use_lnks:
         state_vars=state_vars,
         residuals=residuals,
     )
-elif args.use_cuda:
-    solver = am.DirectCudaSolver(model.get_problem(), pivot_eps=1e-8)
 
 
 def continuation_control(iteration, res_norm):
