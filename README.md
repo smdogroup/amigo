@@ -59,7 +59,7 @@ pip install -e . -v \
 
 ## MUMPS sparse solver
 
-Amigo's interior-point optimizer requires [MUMPS](https://mumps-solver.org/) for symmetric indefinite factorization of the KKT system. MUMPS is loaded at runtime, so it is not needed at build time. It must be built with [METIS](http://glaros.dtc.umn.edu/gkhome/metis/metis/overview) and [Scotch](https://www.labri.fr/perso/pelegrin/scotch/) for correct pivot ordering and matrix scaling. We use [coin-or/ThirdParty-Mumps](https://github.com/coin-or-tools/ThirdParty-Mumps) to build from source on all platforms.
+Amigo's interior-point optimizer can use [MUMPS](https://mumps-solver.org/) to obtain symmetric indefinite factorization of the KKT system. MUMPS is loaded at runtime, so it is not needed at build time. It must be built with [METIS](http://glaros.dtc.umn.edu/gkhome/metis/metis/overview) and [Scotch](https://www.labri.fr/perso/pelegrin/scotch/) for correct pivot ordering and matrix scaling. We use [coin-or/ThirdParty-Mumps](https://github.com/coin-or-tools/ThirdParty-Mumps) to build from source on all platforms.
 
 ### Linux
 
