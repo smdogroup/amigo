@@ -7,6 +7,78 @@
 
 namespace amigo {
 
+/**
+ * Slack component generated from the following python class:
+ *
+ * class SlackComponent(am.Component):
+ *     def __init__(self):
+ *         super().__init__()
+ *         self.add_input("s")
+ *         self.add_constraint("res")
+ *
+ *     def compute(self):
+ *         self.constraints["res"] = -self.inputs["s"]
+ */
+template <typename T__>
+class SlackComponent__ {
+ public:
+  template <typename R__>
+  using Input = A2D::VarTuple<R__, R__, R__>;
+  static constexpr int ncomp = Input<T__>::ncomp;
+  static constexpr int nconstraints = 1;
+  static constexpr bool is_linear = false;
+  template <typename R__>
+  using Data = typename A2D::VarTuple<R__, R__>;
+  static constexpr int ndata = 0;
+  static constexpr bool is_compute_empty = false;
+  static constexpr bool is_continuation_component = false;
+  static constexpr bool is_output_empty = true;
+  template <typename R__>
+  using Output = typename A2D::VarTuple<R__, R__>;
+  static constexpr int noutputs = 0;
+  template <typename R__>
+  AMIGO_HOST_DEVICE static R__ lagrange(R__ alpha__, Data<R__>& data__,
+                                        Input<R__>& input__) {
+    R__& s = A2D::get<0>(input__);
+    R__& lam_res__ = A2D::get<1>(input__);
+    R__ lagrangian__;
+    lagrangian__ = (-(s)*lam_res__);
+    return lagrangian__;
+  }
+  template <typename R__>
+  AMIGO_HOST_DEVICE static void gradient(R__ alpha__, Data<R__>& data__,
+                                         Input<R__>& input__,
+                                         Input<R__>& boutput__) {
+    A2D::ADObj<R__&> s(A2D::get<0>(input__), A2D::get<0>(boutput__));
+    A2D::ADObj<R__&> lam_res__(A2D::get<1>(input__), A2D::get<1>(boutput__));
+    A2D::ADObj<R__> lagrangian__;
+    auto stack__ = A2D::MakeStack(A2D::Eval((-(s)*lam_res__), lagrangian__));
+    lagrangian__.bvalue() = 1.0;
+    stack__.reverse();
+  }
+  template <typename R__>
+  AMIGO_HOST_DEVICE static void hessian(R__ alpha__, Data<R__>& data__,
+                                        Input<R__>& input__,
+                                        Input<R__>& pinput__,
+                                        Input<R__>& boutput__,
+                                        Input<R__>& houtput__) {
+    A2D::A2DObj<R__&> s(A2D::get<0>(input__), A2D::get<0>(boutput__),
+                        A2D::get<0>(pinput__), A2D::get<0>(houtput__));
+    A2D::A2DObj<R__&> lam_res__(A2D::get<1>(input__), A2D::get<1>(boutput__),
+                                A2D::get<1>(pinput__), A2D::get<1>(houtput__));
+    A2D::A2DObj<R__> lagrangian__;
+    auto stack__ = A2D::MakeStack(A2D::Eval((-(s)*lam_res__), lagrangian__));
+    lagrangian__.bvalue() = 1.0;
+    stack__.reverse();
+    stack__.hforward();
+    stack__.hreverse();
+  }
+  template <typename R__>
+  AMIGO_HOST_DEVICE static void compute_output(Data<R__>& data__,
+                                               Input<R__>& input__,
+                                               Output<R__>& output__) {}
+};
+
 /*
   Couples slack variables to inequality constraints.
 
@@ -33,10 +105,14 @@ class SlackCouplingGroup : public ComponentGroupBase<T, policy> {
     jac_cols_ = std::make_shared<Vector<int>>(n_);
     int* rp = jac_rowp_->get_array();
     int* cl = jac_cols_->get_array();
-    for (int k = 0; k < n_; k++) { rp[k] = k; cl[k] = k; }
+    for (int k = 0; k < n_; k++) {
+      rp[k] = k;
+      cl[k] = k;
+    }
     rp[n_] = n_;
 
-    // Data positions in the CSR matrix, filled once during initialize_hessian_pattern
+    // Data positions in the CSR matrix, filled once during
+    // initialize_hessian_pattern
     loc_si_ = std::make_shared<Vector<int>>(n_);
     loc_ci_ = std::make_shared<Vector<int>>(n_);
   }
@@ -76,7 +152,8 @@ class SlackCouplingGroup : public ComponentGroupBase<T, policy> {
     }
   }
 
-  // Write -1 at precomputed positions: H[slack_k, ineq_k] and H[ineq_k, slack_k].
+  // Write -1 at precomputed positions: H[slack_k, ineq_k] and H[ineq_k,
+  // slack_k].
   void add_hessian(T alpha, const Vector<T>& data, const Vector<T>& x,
                    const NodeOwners& owners, CSRMat<T>& mat) const override {
     const int* lsi = loc_si_->get_array();
@@ -88,9 +165,9 @@ class SlackCouplingGroup : public ComponentGroupBase<T, policy> {
     }
   }
 
-  void get_csr_data(int* nvars, const int* vars[], int* ncon,
-                    const int* cons[], const int* jac_rowp[],
-                    const int* jac_cols[], const int* hess_rowp[],
+  void get_csr_data(int* nvars, const int* vars[], int* ncon, const int* cons[],
+                    const int* jac_rowp[], const int* jac_cols[],
+                    const int* hess_rowp[],
                     const int* hess_cols[]) const override {
     if (nvars) *nvars = n_;
     if (vars) *vars = si_->get_array();

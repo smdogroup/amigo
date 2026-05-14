@@ -18,10 +18,11 @@ from .amigo import (
     NodeOwners,
     CSRMat,
     ExternalComponentGroup,
-    SlackCouplingGroup,
+    SlackComponent,
 )
 from .cmake_helper import get_cmake_dir
 from .component import Component
+from .meta import Meta
 
 try:
     from mpi4py.MPI import COMM_WORLD
@@ -150,6 +151,8 @@ def _to_list(obj):
         return None
     elif isinstance(obj, (int, np.integer)):
         return int(obj)
+    elif isinstance(obj, float):
+        return float(obj)
     elif isinstance(obj, np.ndarray):
         return obj.tolist()
     elif isinstance(obj, list):
@@ -177,12 +180,13 @@ class ComponentGroup:
         name: str,
         size: int,
         comp_obj: Component,
-        var_shapes: dict,
-        index_pool: GlobalIndexPool,
-        data_shapes: dict,
-        data_index_pool: GlobalIndexPool,
-        out_shapes: dict,
-        out_index_pool: GlobalIndexPool,
+        var_shapes: dict = {},
+        index_pool: GlobalIndexPool | None = None,
+        data_shapes: dict = {},
+        data_index_pool: GlobalIndexPool | None = None,
+        out_shapes: dict = {},
+        out_index_pool: GlobalIndexPool | None = None,
+        c_obj=None,
     ):
         self.name = name
         self.size = size
@@ -204,28 +208,38 @@ class ComponentGroup:
         for out_name, shape in out_shapes.items():
             self.outputs[out_name] = out_index_pool.allocate(shape)
 
+        self.c_obj = c_obj
+
     def get_input_names(self):
+        """Get the names of all inputs for this component group"""
         return self.comp_obj.get_input_names()
 
     def get_constraint_names(self):
+        """Get the names of all constraints for this component group"""
         return self.comp_obj.get_constraint_names()
 
     def get_data_names(self):
+        """Get the names of all data for this component group"""
         return self.comp_obj.get_data_names()
 
     def get_output_names(self):
+        """Get the names of all constraints for this component group"""
         return self.comp_obj.get_output_names()
 
     def get_var(self, varname: str):
+        """Get the indices associated with the variable name"""
         return self.vars[varname]
 
     def get_data(self, name: str):
+        """Get the indices associated with the data name"""
         return self.data[name]
 
     def get_output(self, name: str):
+        """Get the indices associated with the output name"""
         return self.outputs[name]
 
     def get_meta(self, name):
+        """Get the meta data for the associated name"""
         if name in self.comp_obj.inputs:
             return self.comp_obj.inputs.get_meta(name)
         elif name in self.comp_obj.constraints:
@@ -244,6 +258,7 @@ class ComponentGroup:
             )
 
     def get_indices(self, vars: dict):
+        """Get the indices of the provided variables and pack them in an array"""
         size = 0
         dim = 0
         for name in vars:
@@ -279,6 +294,7 @@ class ComponentGroup:
         return array
 
     def create_group_object(self, module_name: str):
+        """Create the Amigo ComponentGroup object"""
         if (
             not self.comp_obj.is_compute_empty()
             or not self.comp_obj.is_compute_output_empty()
@@ -295,9 +311,12 @@ class ComponentGroup:
             out_vec.get_array()[:] = out_array.ravel()
 
             # Create the object
-            return _import_class(module_name, self.class_name)(
-                self.size, data_vec, var_vec, out_vec
-            )
+            if self.c_obj is None:
+                return _import_class(module_name, self.class_name)(
+                    self.size, data_vec, var_vec, out_vec
+                )
+            else:
+                return self.c_obj(self.size, data_vec, var_vec, out_vec)
         return None
 
 
@@ -333,19 +352,30 @@ class ExternalComponent:
 
 
 class ModelVector:
+    """
+    ModelVector class
+
+    This class wraps the c++ class instance and enables access via the input,
+    constraint, data or output names that are defined within a model. To enable
+    access via name, the class maintains a reference to the underlying Model
+    instance. Alternatively, the underlying vector components can be accessed by
+    their indices using integers, slices or arrays of intgers.
+    """
+
     def __init__(self, model, x, kind=None):
         self._model = model
         self._x = x
         self.kind = kind
 
     def get_vector(self):
+        """Get the underlying c++ vector instance"""
         return self._x
 
     def __getitem__(self, expr):
         if isinstance(expr, (str, list)):
             x_array = self._x.get_array()
             return x_array[self._model.get_indices(expr)]
-        elif isinstance(expr, (int, np.integer, slice)):
+        elif isinstance(expr, (int, np.integer, slice, np.ndarray)):
             x_array = self._x.get_array()
             return x_array[expr]
         else:
@@ -355,7 +385,7 @@ class ModelVector:
         if isinstance(expr, (str, list)):
             x_array = self._x.get_array()
             x_array[self._model.get_indices(expr)] = item
-        elif isinstance(expr, (int, np.integer, slice)):
+        elif isinstance(expr, (int, np.integer, slice, np.ndarray)):
             x_array = self._x.get_array()
             x_array[expr] = item
         else:
@@ -407,7 +437,7 @@ class ModelVector:
 class Model:
     def __init__(self, module_name: str | None = None):
         """
-        Initialize the model class.
+        Instantiate the model class.
 
         Args:
             module_name (str): Name of the module that contains the component classes
@@ -425,9 +455,24 @@ class Model:
         self.data_index_pool = GlobalIndexPool()
         self.output_index_pool = GlobalIndexPool()
         self.links = []
-        self._initialized = False
-        self._staged_data = {}
+
+        # Staged values that are applied to the model at initialization
+        self._staged_data = []
         self._staged_fixed_vars = []
+        self._staged_meta_data = []
+
+        # Set slack information
+        self.num_slacks = 0
+        self.slack_comp_name = None
+        self.slack_names = None
+        self.ineq_names = None
+        self.slack_lower = []
+        self.slack_upper = []
+
+        # Is this model initialized or not
+        self._initialized = False
+
+        return
 
     def _get_group_shapes(self, size: int, var_shapes: dict):
         for var_name in var_shapes:
@@ -552,6 +597,9 @@ class Model:
 
         # Add all of the sub-model components
         for comp_name in model.comp:
+            # Skip the slack component
+            if comp_name == model.slack_comp_name:
+                continue
             sub_name = name + "." + comp_name
             sub_size = model.comp[comp_name].size
             sub_obj = model.comp[comp_name].comp_obj
@@ -584,13 +632,17 @@ class Model:
         ) in model.links:
             self.link(name + "." + src_expr, name + "." + tgt_expr, src_idx, tgt_idx)
 
-        # Add any staged data
-        for data_name in model._staged_data:
-            self._staged_data[name + "." + data_name] = model._staged_data[data_name]
+        # Add staged data
+        for data_name, data in model._staged_data:
+            self._staged_data.append((name + "." + data_name, data))
 
-        # Add any fixed variables
+        # Add fixed variables
         for expr, indices in model._staged_fixed_vars:
             self._staged_fixed_vars.append((name + "." + expr, indices))
+
+        # Add staged meta data
+        for meta, expr, data in model._staged_meta_data:
+            self._staged_fixed_vars.append((meta, name + "." + expr, data))
 
         return
 
@@ -708,20 +760,6 @@ class Model:
 
         return counter
 
-    def set_data(self, name: str, data):
-        """
-        Set data into the model.
-
-        If this is called prior to initialization, the data is staged and later applied to the model.
-        If this is called after initialization, the data is written directly into the data vector.
-        """
-        if self._initialized:
-            d = self.problem.get_data_vector()
-            d.get_array()[self.get_indices(name)] = data
-        else:
-            self._staged_data[name] = data
-        return
-
     def link_by_name(self, src_comp=None, tgt_comp=None, vtype="input"):
         """
         Link inputs, constraints, outputs or data with the same name between different components.
@@ -764,16 +802,56 @@ class Model:
 
         return
 
+    def set_data(self, name: str, data: float | List | np.ndarray):
+        """
+        Set data into the model.
+
+        If this is called prior to initialization, the data is staged and later applied to the model.
+        If this is called after initialization, the data is written directly into the data vector.
+
+        Args:
+            name (str): Name of the data
+            data (float, list, np.ndarray): Data values
+        """
+        if self._initialized:
+            d = self.problem.get_data_vector()
+            d.get_array()[self.get_indices(name)] = data
+        else:
+            self._staged_data.append((name, data))
+        return
+
     def add_fixed(self, expr: str, indices: None | list | np.ndarray = None):
         """
         Add fixed variables.
 
         These are fixed values that will not be changed during the optimization.
         """
+        if self._initialized:
+            raise RuntimeError("Cannot add fixed variables after initialization")
+
         self._staged_fixed_vars.append((expr, indices))
         return
 
-    def _reorder_indices(self, order_type, order_for_block=False):
+    def set_meta(self, meta_name: str, name: str, data: List | np.ndarray):
+        """
+        Set meta data into the model.
+
+        These meta data values override values set in the the component.
+
+        Args:
+            meta_name (str): Name of the meta data argument
+            expr (str): Name of the data
+            data (float, list, np.ndarray): Data values
+        """
+
+        if self._initialized:
+            raise RuntimeError("Cannot set meta data values after initialization")
+
+        self._staged_meta_data.append((meta_name, name, data))
+
+        return
+
+    def _reorder_indices(self, order_type, con_indices, order_for_block=False):
         arrays = []
         num_cons = []
         for name, comp in self.comp.items():
@@ -785,8 +863,7 @@ class Model:
 
         num_cons = np.array(num_cons, dtype=int)
         if order_for_block:
-            constraint_indices = self._get_constraint_indices()
-            iperm = reorder_model(order_type, arrays, num_cons, constraint_indices)
+            iperm = reorder_model(order_type, arrays, num_cons, con_indices)
         else:
             iperm = reorder_model(order_type, arrays, num_cons)
 
@@ -810,6 +887,16 @@ class Model:
                 temp[comp.vars[conname]] = 1
 
         return np.nonzero(temp)[0]
+
+    def _apply_staged_data(self):
+        """Set the data that was staged"""
+        d_array = self.problem.get_data_vector().get_array()
+
+        for name, data in self._staged_data:
+            indices = self.get_indices(name)
+            d_array[indices] = data
+
+        return
 
     def initialize(
         self, comm=COMM_WORLD, order_type=OrderingType.DEFAULT, order_for_block=False
@@ -842,14 +929,28 @@ class Model:
             self.links, self.output_index_pool, vtype="output"
         )
 
-        self._reorder_indices(order_type, order_for_block)
+        # Get the constraint indices
+        con_indices = self._get_constraint_indices()
 
+        # Add the slack variables to the problem
+        self.slack_names, self.ineq_names = self._initialize_slacks(con_indices)
+
+        # Now reorder the variables
+        self._reorder_indices(order_type, con_indices, order_for_block)
+
+        # After reordering, get the constraint information
         self.constraint_indices = self._get_constraint_indices()
         self.num_constraints = len(self.constraint_indices)
 
-        # Slack introduction for inequality constraints.
-        self._allocate_slacks()
+        # After reordering, get the slack and inequality constraint indices
+        if self.num_slacks > 0:
+            self.ineq_constraint_indices = self.get_indices(self.ineq_names)
+            self.slack_indices = self.get_indices(self.slack_names)
+        else:
+            self.ineq_constraint_indices = []
+            self.slack_indices = []
 
+        # The problem is now initialized
         self._initialized = True
         self.problem = self._create_opt_problem(comm=comm)
 
@@ -858,8 +959,9 @@ class Model:
 
         return
 
-    def _allocate_slacks(self):
-        """Identify inequality constraints and allocate slack variable indices.
+    def _initialize_slacks(self, con_indices):
+        """
+        Identify inequality constraints and allocate slack variable indices.
 
         Each inequality constraint ``lbc <= c(x) <= ubc`` is reformulated as
         the equality ``c(x) - s = 0`` with a bounded slack ``lbc <= s <= ubc``.
@@ -868,54 +970,80 @@ class Model:
         correct bounds and initial values for slacks without any post-processing
         in the Optimizer.
         """
-        ineq_indices = []
-        slack_meta = []  # (lower, upper) per slack
 
+        # Local slack component
+        class LocalSlackComponent(Component):
+            def __init__(self):
+                super().__init__()
+                self.add_input("s")
+                self.add_constraint("res")
+
+            def compute(self):
+                self.constraints["res"] = -self.inputs["s"]
+
+        # Find the lower and upper values
+        lower = np.zeros(self.num_variables)
+        upper = np.zeros(self.num_variables)
+
+        # Get the meta data from values set in the components
         for comp_name, comp in self.comp.items():
-            for con_name in comp.get_constraint_names():
-                meta = comp.get_meta(con_name)
-                lb = np.asarray(meta["lower"]).ravel()
-                ub = np.asarray(meta["upper"]).ravel()
-                idx = comp.get_var(con_name).ravel()
-                for j in range(len(idx)):
-                    lb_j = float(lb[j]) if lb.size > 1 else float(lb[0])
-                    ub_j = float(ub[j]) if ub.size > 1 else float(ub[0])
-                    is_eq = np.isfinite(lb_j) and np.isfinite(ub_j) and lb_j == ub_j
-                    if not is_eq:
-                        ineq_indices.append(idx[j])
-                        slack_meta.append((lb_j, ub_j))
+            for var_name in comp.vars:
+                name = comp_name + "." + var_name
+                meta = self.get_meta(name)
+                if meta.is_value_set("lower"):
+                    lower[comp.vars[var_name]] = meta["lower"]
+                if meta.is_value_set("upper"):
+                    upper[comp.vars[var_name]] = meta["upper"]
 
-        self.ineq_constraint_indices = np.array(ineq_indices, dtype=np.int32)
+        # Get any staged meta data
+        for meta_name, name, data in self._staged_meta_data:
+            if "lower" == meta_name:
+                lower[self.get_indices(name)] = data
+            if "upper" == meta_name:
+                upper[self.get_indices(name)] = data
+
+        # Find those constraints corresponding to inequalities
+        mask = lower[con_indices] < upper[con_indices]
+        ineq_indices = con_indices[mask]
+
+        # Set the number of slack variables
         self.num_slacks = len(ineq_indices)
 
-        self.slack_indices = np.arange(
-            self.num_variables,
-            self.num_variables + self.num_slacks,
-            dtype=np.int32,
-        )
+        slack_names = None
+        ineq_names = None
 
-        # Meta data for each slack: bounds inherited from its inequality
-        # constraint, initial value = 0 (will be set to c(x) during init),
-        # and the constraint row becomes equality (lb = ub = 0).
-        self._slack_meta = []
-        for k in range(self.num_slacks):
-            self._slack_meta.append(
-                {
-                    "lower": slack_meta[k][0],
-                    "upper": slack_meta[k][1],
-                    "value": 0.0,
-                }
+        if self.num_slacks > 0:
+            # Manually add the slack group to the component
+            self.slack_comp_name = "_slack_component"
+            size = self.num_slacks
+            comp_obj = LocalSlackComponent()
+            group = ComponentGroup(
+                self.slack_comp_name, size, comp_obj, c_obj=SlackComponent
             )
 
-        self.num_variables += self.num_slacks
+            # Set/link the slack variables and constraints
+            group.vars["s"] = np.arange(
+                self.num_variables, self.num_variables + self.num_slacks
+            )
+            group.vars["res"] = ineq_indices
 
-    def _apply_staged_data(self):
-        d_array = self.problem.get_data_vector().get_array()
+            # Set the component group object
+            self.comp[self.slack_comp_name] = group
 
-        for name in self._staged_data:
-            d_array[self.get_indices(name)] = self._staged_data[name]
+            # Store the constraint bounds
+            self.slack_lower = lower[ineq_indices]
+            self.slack_upper = upper[ineq_indices]
 
-        return
+            # Now adjust the number of variables
+            self.num_variables += self.num_slacks
+
+            slack_names = self.slack_comp_name + ".s"
+            ineq_names = self.slack_comp_name + ".res"
+        else:
+            self.slack_lower = []
+            self.slack_upper = []
+
+        return slack_names, ineq_names
 
     def _get_expr_type(self, name: str):
         path, indices = _parse_var_expr(name)
@@ -1097,17 +1225,6 @@ class Model:
             if obj is not None:
                 objs.append(obj)
 
-        # Add the slack coupling component group.
-        # This declares the -I Jacobian sparsity between slacks and
-        # inequality constraints and adds the corresponding gradient
-        # and Hessian contributions during evaluation.
-        if self.num_slacks > 0:
-            slack_coupling = SlackCouplingGroup(
-                np.ascontiguousarray(self.slack_indices, dtype=np.int32),
-                np.ascontiguousarray(self.ineq_constraint_indices, dtype=np.int32),
-            )
-            objs.append(slack_coupling)
-
         var_ranges = np.zeros(comm_size + 1, dtype=np.int32)
         var_ranges[1:] = self.num_variables
         var_owners = NodeOwners(comm, var_ranges)
@@ -1142,6 +1259,7 @@ class Model:
         fixed = VectorInt(len(fixed_vars))
         fixed.get_array()[:] = fixed_vars
 
+        # Create the optimization problem
         prob = OptimizationProblem(
             comm, data_owners, var_owners, output_owners, is_multiplier, objs, fixed
         )
@@ -1212,7 +1330,9 @@ class Model:
 
         return inputs, cons, data, outputs
 
-    def get_values_from_meta(self, meta_name: str):
+    def get_values_from_meta(
+        self, meta_name: str, x: ModelVector | np.ndarray | None = None
+    ):
         """
         Return a vector with meta data values for all variables including slacks.
 
@@ -1222,7 +1342,6 @@ class Model:
         to 0). For "lower" and "upper", the inequality constraint rows are
         set to 0 (equality: c(x) - s = 0).
 
-
         Args:
             meta_name (str) : The name of the meta data to place into the array
 
@@ -1231,27 +1350,42 @@ class Model:
         """
 
         if not self._initialized:
-            raise RuntimeError(
-                "Must call initialize before calling get_values_from_meta"
-            )
+            raise RuntimeError("Must call initialize before get_values_from_meta")
 
-        x = self.create_vector()
+        if x is None:
+            x = self.create_vector()
+
+        # Set the entire vector to the default meta value
+        x[:] = Meta.get_default_value(meta_name)
+
+        # Modify the default values for all constraints so that they
+        # default to equalitie constraints
+        if meta_name in ("lower", "upper"):
+            x[self.constraint_indices] = 0.0
+
+        # Get the meta data from values set in the components
         for comp_name, comp in self.comp.items():
             for var_name in comp.vars:
                 name = comp_name + "." + var_name
                 meta = self.get_meta(name)
-                value = meta[meta_name]
-                if value is None:
-                    value = 0.0
-                x[name] = value
+                if meta.is_value_set(meta_name):
+                    x[comp.vars[var_name]] = meta[meta_name]
 
-        # Fill slack variable meta and convert inequality constraints to equalities
-        if self.num_slacks > 0 and meta_name in self._slack_meta[0]:
-            arr = x.get_vector().get_array()
-            for k in range(self.num_slacks):
-                arr[self.slack_indices[k]] = self._slack_meta[k][meta_name]
-                if meta_name in ("lower", "upper"):
-                    arr[self.ineq_constraint_indices[k]] = 0.0
+        # Get any staged meta data
+        for meta_name_, name, data in self._staged_meta_data:
+            if meta_name == meta_name_:
+                x[self.get_indices(name)] = data
+
+        # Deal with the slack variables
+        if meta_name in ("lower", "upper"):
+            # Set bounds for the inequality constraints
+            x[self.ineq_constraint_indices] = 0.0
+
+            # Set bounds on the slack variables
+            if meta_name == "lower":
+                x[self.slack_indices] = self.slack_lower
+            elif meta_name == "upper":
+                x[self.slack_indices] = self.slack_upper
 
         return x
 
@@ -1419,8 +1553,7 @@ class Model:
 
         # Optionally drop a trivial CMakeLists.txt into the source_dir
         cmakelists = source_dir / "CMakeLists.txt"
-        cmakelists.write_text(
-            f"""\
+        cfg_str = f"""\
 cmake_minimum_required(VERSION 3.25)
 project({self.module_name} LANGUAGES CXX)
 
@@ -1435,7 +1568,7 @@ amigo_add_python_module(
     SOURCES {self.module_name}.cpp
 )
 """
-        )
+        cmakelists.write_text(cfg_str)
 
         # Locate the installed Amigo CMake package inside the Python package
         amigo_cmake_dir = get_cmake_dir()
@@ -1501,6 +1634,8 @@ amigo_add_python_module(
         # Serialize the components
         comp_list = []
         for name, comp in self.comp.items():
+            if name == self.slack_comp_name:
+                continue
             comp_data = {}
             comp_data["name"] = name
             comp_data["size"] = comp.size
@@ -1527,6 +1662,22 @@ amigo_add_python_module(
         # Set the path names
         model_data["links"] = link_data
 
+        # Serialize the staged data
+        staged_data = []
+        for name, data in self._staged_data:
+            staged_data.append((name, _to_list(data)))
+        model_data["staged_data"] = staged_data
+
+        fixed_vars = []
+        for name, indices in self._staged_fixed_vars:
+            fixed_vars.append((name, _to_list(indices)))
+        model_data["fixed_vars"] = fixed_vars
+
+        staged_meta = []
+        for meta_name, name, data in self._staged_meta_data:
+            staged_meta.append((meta_name, name, _to_list(data)))
+        model_data["staged_meta"] = staged_meta
+
         return model_data
 
     @classmethod
@@ -1549,6 +1700,19 @@ amigo_add_python_module(
             src = data["src"]
             tgt = data["tgt"]
             obj.link(src[0], tgt[0], src_indices=src[1], tgt_indices=tgt[1])
+
+        # Deserialize the staged information
+        staged_data = model_data["staged_data"]
+        for name, data in staged_data:
+            obj.set_data(name, data)
+
+        fixed_vars = model_data["fixed_vars"]
+        for name, indices in fixed_vars:
+            obj.add_fixed(name, indices)
+
+        staged_meta = model_data["staged_meta"]
+        for meta_name, name, data in staged_meta:
+            obj.set_meta(meta_name, name, data)
 
         return obj
 

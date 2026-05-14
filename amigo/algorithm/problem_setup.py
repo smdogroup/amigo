@@ -59,10 +59,12 @@ class ProblemSetup:
         if hasattr(self.model, "num_slacks") and self.model.num_slacks > 0:
             lb_arr = self.lower.get_array()
             ub_arr = self.upper.get_array()
-            for k in range(self.model.num_slacks):
-                idx = self.model.slack_indices[k]
-                lb_arr[idx] = self.model._slack_meta[k]["lower"]
-                ub_arr[idx] = self.model._slack_meta[k]["upper"]
+            # for k in range(self.model.num_slacks)ß
+            #     idx = self.model.slack_indices[k]
+            #     lb_arr[idx] = self.model._slack_meta[k]["lower"]
+            #     ub_arr[idx] = self.model._slack_meta[k]["upper"]
+            lb_arr[self.model.slack_indices] = self.model.slack_lower
+            ub_arr[self.model.slack_indices] = self.model.slack_upper
 
     def _distribute_vectors(self):
         if self.distribute:
@@ -86,7 +88,10 @@ class ProblemSetup:
             elif solver_pref == "pardiso":
                 self.solver = PardisoSolver(self.problem)
             elif solver_pref == "mumps":
-                self.solver = MumpsSolver(self.problem)
+                try:
+                    self.solver = MumpsSolver(self.problem)
+                except:
+                    self.solver = AmigoSolver(self.problem)
             elif solver_pref == "amigo":
                 self.solver = AmigoSolver(self.problem)
             else:

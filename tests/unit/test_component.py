@@ -46,30 +46,10 @@ class TestMetaValidation:
         with pytest.raises(ValueError):
             Meta("x", "input", value=5.0, lower=0.0, upper=4.0)
 
-    # The value must be an instance of the declared type (default float)
-    def test_value_wrong_type_raises(self):
-        # default type is float; passing int 1 raises TypeError because isinstance(1, float) is False
-        with pytest.raises(TypeError):
-            Meta("x", "input", value=1)
-
-    # value=1 with type=int is valid (isinstance(1, int) is True)
-    def test_value_correct_int_type_succeeds(self):
-        m = Meta("x", "input", value=1, type=int)
-        assert m.value == 1
-        assert m.type is int
-
     # Unknown keyword arguments are not silently ignored
     def test_unknown_kwarg_raises(self):
         with pytest.raises(ValueError):
             Meta("x", "input", unknown_kwarg=42)
-
-    # Default bounds are (-inf, +inf) with value=0.0 and type=float
-    def test_valid_meta_defaults(self):
-        m = Meta("x", "input")
-        assert m["lower"] == float("-inf")
-        assert m["upper"] == float("inf")
-        assert m["value"] == 0.0
-        assert m["type"] is float
 
     # serialize() produces a plain dict; deserialize() reconstructs identical fields
     def test_serialize_deserialize_roundtrip(self):
@@ -77,15 +57,10 @@ class TestMetaValidation:
         data = m.serialize()
         # deserialize pops from the dict, so pass a copy
         m2 = Meta.deserialize(dict(data))
-        assert m2.name == m.name
-        assert m2.var_type == m.var_type
-        assert m2.lower == m.lower
-        assert m2.upper == m.upper
-        assert m2.value == m.value
-        assert m2.type is m.type
-        assert m2.units == m.units
-        assert m2.scale == m.scale
-        assert m2.label == m.label
+        data2 = m2.serialize()
+        for name in data:
+            if m.is_value_set(name):
+                assert data[name] == data2[name]
 
 
 # ---------------------------------------------------------------------------

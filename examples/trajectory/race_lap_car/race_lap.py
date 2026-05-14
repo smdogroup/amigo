@@ -86,7 +86,7 @@ class RacecarCollocation(am.Component):
         self.add_input("q2", shape=8)
         self.add_input("u1", shape=2)
         self.add_input("u2", shape=2)
-        self.add_constraint("res", shape=8)
+        self.add_constraint("res", shape=8, lower=0.0, upper=0.0)
 
     def _dynamics(self, q, u, kappa):
         V = self.scaling["V"] * q[2]
@@ -188,13 +188,38 @@ class NodeConstraints(am.Component):
     def __init__(self, scaling):
         super().__init__()
         self.scaling = scaling
-        self.add_input("q", shape=8)
-        self.add_input("u", shape=2)
-        self.add_constraint("c_fl", lower=float("-inf"), upper=1.0)
-        self.add_constraint("c_fr", lower=float("-inf"), upper=1.0)
-        self.add_constraint("c_rl", lower=float("-inf"), upper=1.0)
-        self.add_constraint("c_rr", lower=float("-inf"), upper=1.0)
-        self.add_constraint("c_pow", lower=float("-inf"), upper=1.0)
+
+        # Start out with no bounds
+        q_min = [-am.inf] * 8
+        q_max = [am.inf] * 8
+
+        # Set min velocity
+        v_min = 1.0 / scaling["V"]
+        q_min[2] = v_min
+
+        # Set max heading bounds
+        alpha_max = (np.pi / 3) / scaling["alpha"]
+        q_min[3] = -alpha_max
+        q_max[3] = alpha_max
+
+        # Set max slip bounds
+        lam_max = 0.25 / scaling["lam"]
+        q_min[4] = -lam_max
+        q_max[4] = lam_max
+        self.add_input("q", shape=8, lower=q_min, upper=q_max)
+
+        # Set max steering bounds
+        delta_max = 0.5 / scaling["delta"]
+        u_min = [-delta_max, -am.inf]
+        u_max = [delta_max, am.inf]
+        self.add_input("u", shape=2, lower=u_min, upper=u_max)
+
+        # Add constraints
+        self.add_constraint("c_fl", lower=-am.inf, upper=1.0)
+        self.add_constraint("c_fr", lower=-am.inf, upper=1.0)
+        self.add_constraint("c_rl", lower=-am.inf, upper=1.0)
+        self.add_constraint("c_rr", lower=-am.inf, upper=1.0)
+        self.add_constraint("c_pow", lower=-am.inf, upper=1.0)
 
     def _node_constraints(self, q, u):
         V = self.scaling["V"] * q[2]
@@ -267,8 +292,8 @@ class NodeConstraints(am.Component):
 class InitialTime(am.Component):
     def __init__(self):
         super().__init__()
-        self.add_input("t")
-        self.add_constraint("res", shape=1)
+        self.add_input("t", lower=-am.inf, upper=am.inf)
+        self.add_constraint("res", shape=1, lower=0.0, upper=0.0)
 
     def compute(self):
         self.constraints["res"] = [self.inputs["t"]]
@@ -277,7 +302,7 @@ class InitialTime(am.Component):
 class LapTimeObjective(am.Component):
     def __init__(self):
         super().__init__()
-        self.add_input("t_final")
+        self.add_input("t_final", lower=-am.inf, upper=am.inf)
         self.add_objective("obj")
 
     def compute(self):
@@ -336,6 +361,37 @@ def create_racecar_model(module_name="racecar_mod", num_intervals=300, ds=1.0):
         model.link(f"colloc.u1[:, {i}]", f"nc.u[:{num_intervals}, {i}]")
         model.link(f"colloc.u2[{num_intervals-1}, {i}]", f"nc.u[{num_intervals}, {i}]")
 
+    # Set the width + singularity bounds on n
+    kappa_margin = 0.9
+    nc_n_lo = -track.w_right / scaling["n"]
+    nc_n_hi = track.w_left / scaling["n"]
+    for i in range(num_nodes):
+        k = kappa_nodes[i]
+        if abs(k) > 1e-6:
+            n_sing = kappa_margin / (k * scaling["n"])
+            if k > 0:
+                nc_n_hi[i] = min(nc_n_hi[i], n_sing)
+            else:
+                nc_n_lo[i] = max(nc_n_lo[i], n_sing)
+
+    model.set_meta("lower", "nc.q[:, 1]", nc_n_lo)
+    model.set_meta("upper", "nc.q[:, 1]", nc_n_hi)
+
+    # Set the curvature data
+    model.set_data("colloc.kappa1", kappa_nodes[:-1])
+    model.set_data("colloc.kappa2", kappa_nodes[1:])
+
+    # Set the initial guess
+    V_init = 20.0
+    t_est = s_final / V_init
+    t_init = np.linspace(0, t_est, num_intervals + 1)
+    model.set_meta("value", "colloc.q1[:, 0]", t_init[:-1] / scaling["t"])
+    model.set_meta("value", "colloc.q2[:, 0]", t_init[1:] / scaling["t"])
+    model.set_meta("value", "colloc.q1[:, 2]", V_init / scaling["V"])
+    model.set_meta("value", "colloc.q2[:, 2]", V_init / scaling["V"])
+    model.set_meta("value", "colloc.u1[:, 1]", 0.1)
+    model.set_meta("value", "colloc.u2[:, 1]", 0.1)
+
     return model
 
 
@@ -354,122 +410,21 @@ if args.build:
 model.initialize()
 print(f"Variables: {model.num_variables}, Constraints: {model.num_constraints}")
 
-# Curvature data
-data = model.get_data_vector()
-for i in range(num_intervals):
-    data[f"colloc.kappa1[{i}]"] = kappa_nodes[i]
-    data[f"colloc.kappa2[{i}]"] = kappa_nodes[i + 1]
-
-# Initial guess
-x = model.create_vector()
-x[:] = 0.0
-V_init = 20.0
-t_est = s_final / V_init
-
-x["colloc.q1[:, 0]"] = (
-    np.linspace(0, t_est * (num_intervals - 1) / num_intervals, num_intervals)
-    / scaling["t"]
-)
-x["colloc.q2[:, 0]"] = (
-    np.linspace(t_est / num_intervals, t_est, num_intervals) / scaling["t"]
-)
-x["colloc.q1[:, 2]"] = V_init / scaling["V"]
-x["colloc.q2[:, 2]"] = V_init / scaling["V"]
-x["colloc.u1[:, 1]"] = 0.1
-x["colloc.u2[:, 1]"] = 0.1
+with open("race_car_lap.json", "w") as fp:
+    json.dump(model.serialize(), fp, indent=2)
 
 # Bounds
 lower = model.create_vector()
 upper = model.create_vector()
+model.get_values_from_meta("lower", lower)
+model.get_values_from_meta("upper", upper)
 
-for end in ["1", "2"]:
-    lower[f"colloc.q{end}"] = -float("inf")
-    upper[f"colloc.q{end}"] = float("inf")
-    lower[f"colloc.u{end}"] = -float("inf")
-    upper[f"colloc.u{end}"] = float("inf")
-
-# Linked variables: link() merges indices via union-find, so these
-# write to the same entries as the colloc bounds. Set ±inf to ensure
-# all linked positions are unbounded by default.
-lower["obj.t_final"] = -float("inf")
-upper["obj.t_final"] = float("inf")
-lower["ic.t"] = -float("inf")
-upper["ic.t"] = float("inf")
-lower["nc.q"] = -float("inf")
-upper["nc.q"] = float("inf")
-lower["nc.u"] = -float("inf")
-upper["nc.u"] = float("inf")
-lower["smooth.delta_left"] = -float("inf")
-upper["smooth.delta_left"] = float("inf")
-lower["smooth.delta_right"] = -float("inf")
-upper["smooth.delta_right"] = float("inf")
-
-# Speed > 0
-lower["colloc.q1[:, 2]"] = 1.0 / scaling["V"]
-lower["colloc.q2[:, 2]"] = 1.0 / scaling["V"]
-
-# Track width + singularity bounds on n
-kappa_margin = 0.9
-for end, w_r, w_l, kn in [
-    (
-        "1",
-        track.w_right[:num_intervals],
-        track.w_left[:num_intervals],
-        kappa_nodes[:num_intervals],
-    ),
-    ("2", track.w_right[1:], track.w_left[1:], kappa_nodes[1:]),
-]:
-    n_lo = -w_r / scaling["n"]
-    n_hi = w_l / scaling["n"]
-    for i in range(num_intervals):
-        k = kn[i]
-        if abs(k) > 1e-6:
-            n_sing = kappa_margin / (k * scaling["n"])
-            if k > 0:
-                n_hi[i] = min(n_hi[i], n_sing)
-            else:
-                n_lo[i] = max(n_lo[i], n_sing)
-    lower[f"colloc.q{end}[:, 1]"] = n_lo
-    upper[f"colloc.q{end}[:, 1]"] = n_hi
-
-# Heading, slip, steering bounds
-alpha_max = (np.pi / 3) / scaling["alpha"]
-lam_max = 0.25 / scaling["lam"]
-delta_max = 0.5 / scaling["delta"]
-for end in ["1", "2"]:
-    lower[f"colloc.q{end}[:, 3]"] = -alpha_max
-    upper[f"colloc.q{end}[:, 3]"] = alpha_max
-    lower[f"colloc.q{end}[:, 4]"] = -lam_max
-    upper[f"colloc.q{end}[:, 4]"] = lam_max
-    lower[f"colloc.u{end}[:, 0]"] = -delta_max
-    upper[f"colloc.u{end}[:, 0]"] = delta_max
-
-# nc bounds: since link() merges indices, these write to the same
-# entries as colloc. Set them for the last node (nc.q[300]) which
-# is linked to colloc.q2[299] and needs matching bounds.
-lower["nc.q[:, 2]"] = 1.0 / scaling["V"]
-nc_n_lo = -track.w_right / scaling["n"]
-nc_n_hi = track.w_left / scaling["n"]
-for i in range(num_nodes):
-    k = kappa_nodes[i]
-    if abs(k) > 1e-6:
-        n_sing = kappa_margin / (k * scaling["n"])
-        if k > 0:
-            nc_n_hi[i] = min(nc_n_hi[i], n_sing)
-        else:
-            nc_n_lo[i] = max(nc_n_lo[i], n_sing)
-lower["nc.q[:, 1]"] = nc_n_lo
-upper["nc.q[:, 1]"] = nc_n_hi
-lower["nc.q[:, 3]"] = -alpha_max
-upper["nc.q[:, 3]"] = alpha_max
-lower["nc.q[:, 4]"] = -lam_max
-upper["nc.q[:, 4]"] = lam_max
-lower["nc.u[:, 0]"] = -delta_max
-upper["nc.u[:, 0]"] = delta_max
+x = model.create_vector()
+model.get_values_from_meta("value", x)
 
 # Optimize
 opt = am.Optimizer(model, x, lower=lower, upper=upper, solver=args.solver)
-print(f"\nOptimizing (V_init={V_init:.0f} m/s, t_est={t_est:.1f} s)...")
+
 opt_data = opt.optimize(
     {
         "initial_barrier_param": 1.0,
