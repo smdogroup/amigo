@@ -186,7 +186,7 @@ class VolumeConstraint(am.Component):
 
     def compute_output(self):
         h = self.data["h"]
-        vol = h * 0.1 * 1.0 / 50.0  # nelems
+        vol = h * 0.1 * length / nelems  # nelems
         self.outputs["con"] = vol
 
 
@@ -208,6 +208,12 @@ x_coords = np.linspace(0, length, nelems + 1)
 nodes = np.arange(nelems + 1, dtype=int)
 conn = np.array([[i, i + 1] for i in range(nelems)], dtype=int)
 
+# before buliding Amigo model, run ORIGINAL OpenMDAO example and extract optimal h to compare to amigo fem
+om_h, om_v, om_totals_obj, om_totals_con = original_om_problem()
+om_c_wrt_h = om_totals_obj["compliance_comp.compliance", "h"]["J_rev"]
+om_con_wrt_h = om_totals_con["volume_comp.volume", "h"]["J_rev"]
+
+# Build Amigo Model
 model = am.Model("beam")
 
 # Allocate the components
@@ -270,14 +276,14 @@ prob = om.Problem()
 # OpenMDAO Independent Variables
 indeps = prob.model.add_subsystem("indeps", om.IndepVarComp())
 
-# run openmdao example and extract optimal h to test amigo fem
-om_h, om_v, om_totals_obj, om_totals_con = original_om_problem()
-om_c_wrt_h = om_totals_obj["compliance_comp.compliance", "h"]["J_rev"]
-om_con_wrt_h = om_totals_con["volume_comp.volume", "h"]["J_rev"]
+# set initial height distribution
+# set as a linear dist. at a scale of 5x the actual answer or...
+# indeps.add_output("h", shape=nelems, val=1 * np.linspace(om_h[0], om_h[-1], len(om_h)))
+# set as uniform value
+indeps.add_output("h", shape=nelems, val=0.1)
 
-indeps.add_output("h", shape=nelems, val=5 * np.linspace(om_h[0], om_h[-1], len(om_h)))
 
-# Amigo potential energy minimization parameters
+# (Amigo) potential energy optimization parameters
 opt_options = {
     "max_iterations": 500,
     "convergence_tolerance": 1e-8,
@@ -313,6 +319,7 @@ if args.optimizer == "SLSQP":
     prob.driver.options["disp"] = True
 else:
     prob.driver.options["optimizer"] = args.optimizer
+    prob.driver.options["maxiter"] = 200
 
 # perform optimziation
 prob.model.add_design_var("indeps.h", lower=1e-2, upper=10)
@@ -337,4 +344,6 @@ ax.set_ylabel(r"$h*$")
 ax.set_xlabel(r"$x$")
 ax.set_title("Optimized Thickness Distribution")
 
+fig, ax = plt.subplots()
+ax.plot(x["src.v"])
 plt.show()

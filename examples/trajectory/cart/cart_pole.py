@@ -276,13 +276,6 @@ parser.add_argument(
     help="Show graph for timesteps. Can be a single int (e.g., 0) or a list (e.g., '[0,5,6]')",
 )
 parser.add_argument(
-    "--with-cuda",
-    dest="with_cuda",
-    action="store_true",
-    default=False,
-    help="Use the CUDSS factorization on the GPU",
-)
-parser.add_argument(
     "--distribute",
     dest="distribute",
     action="store_true",
@@ -310,14 +303,20 @@ parser.add_argument(
     default="cart_opt_data.json",
     help="Number of time steps",
 )
+parser.add_argument(
+    "--solver",
+    dest="solver",
+    choices=["amigo", "mumps", "cuda"],
+    default="mumps",
+    help="Solver type",
+)
 
 args = parser.parse_args()
 
 model = create_cart_model(num_time_steps=args.num_time_steps)
 
 if args.build:
-    source_dir = Path(__file__).resolve().parent
-    model.build_module(source_dir=source_dir)
+    model.build_module()
 
 comm = COMM_WORLD
 model.initialize(comm=comm)
@@ -348,10 +347,6 @@ opt_options = {
     "filter_line_search": True,
 }
 
-solver = None
-if args.with_cuda:
-    solver = am.DirectCudaSolver(model.get_problem())
-
 for opt_iter in range(4):
     # Get the design variables
     x = model.create_vector()
@@ -374,12 +369,12 @@ for opt_iter in range(4):
         upper["cart.qdot"] = float("inf")
         upper["cart.x"] = 50
 
-        # # Serialize the model (requires serialize method)
-        # with open("cart_pole_model.json", "w") as fp:
-        #     json.dump(model.serialize(), fp, indent=2)
-        # vecs = {"data": data, "x": x, "lower": lower, "upper": upper}
-        # with open("cart_pole_vectors.json", "w") as fp:
-        #     json.dump(model.serialize_vectors(vecs), fp, indent=2)
+        # Serialize the model (requires serialize method)
+        with open("cart_pole_model.json", "w") as fp:
+            json.dump(model.serialize(), fp, indent=2)
+        vecs = {"data": data, "x": x, "lower": lower, "upper": upper}
+        with open("cart_pole_vectors.json", "w") as fp:
+            json.dump(model.serialize_vectors(vecs), fp, indent=2)
 
     # Set up the optimizer
     opt = am.Optimizer(
@@ -389,7 +384,7 @@ for opt_iter in range(4):
         upper=upper,
         comm=comm,
         distribute=distribute,
-        solver="amigo",
+        solver=args.solver,
     )
 
     # Optimize
@@ -481,14 +476,12 @@ if comm_rank == 0:
 
         net.from_nx(graph)
         # net.show_buttons(filter_=["physics"])
-        net.set_options(
-            """
-            var options = {
-            "interaction": {
-                "dragNodes": false
-            }
-            }
-            """
-        )
+        # net.set_options("""
+        #     var options = {
+        #     "interaction": {
+        #         "dragNodes": false
+        #     }
+        #     }
+        #     """)
 
         net.show("cart_pole_graph.html")

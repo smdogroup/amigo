@@ -26,7 +26,7 @@ where = ["."]
 openmdao = ["openmdao>=3.29"]
 
 [tool.scikit-build]
-cmake.minimum-version = "3.25"
+cmake.version = ">=3.25"
 wheel.packages = ["amigo"]
 
 # [tool.scikit-build.cmake]

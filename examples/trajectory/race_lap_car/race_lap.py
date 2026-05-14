@@ -342,13 +342,16 @@ def create_racecar_model(module_name="racecar_mod", num_intervals=300, ds=1.0):
 # --- Main ---
 parser = argparse.ArgumentParser()
 parser.add_argument("--build", action="store_true")
+parser.add_argument(
+    "--solver", dest="solver", choices=["amigo", "mumps"], default="mumps"
+)
 args = parser.parse_args()
 
 model = create_racecar_model(num_intervals=num_intervals, ds=ds)
 if args.build:
-    model.build_module(source_dir=Path(__file__).resolve().parent)
+    model.build_module()
 
-model.initialize(order_type=am.OrderingType.NESTED_DISSECTION)
+model.initialize()
 print(f"Variables: {model.num_variables}, Constraints: {model.num_constraints}")
 
 # Curvature data
@@ -465,7 +468,7 @@ lower["nc.u[:, 0]"] = -delta_max
 upper["nc.u[:, 0]"] = delta_max
 
 # Optimize
-opt = am.Optimizer(model, x, lower=lower, upper=upper, solver="amigo")
+opt = am.Optimizer(model, x, lower=lower, upper=upper, solver=args.solver)
 print(f"\nOptimizing (V_init={V_init:.0f} m/s, t_est={t_est:.1f} s)...")
 opt_data = opt.optimize(
     {
@@ -479,7 +482,8 @@ opt_data = opt.optimize(
         "quality_function_balancing_term": "cubic",
         "adaptive_mu_safeguard_factor": 1e-1,
         "filter_line_search": True,
-        "verbose_barrier": True,
+        "second_order_correction": False,
+        "verbose_barrier": False,
     }
 )
 

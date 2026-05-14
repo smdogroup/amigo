@@ -352,11 +352,16 @@ class ConstraintSet:
         self.multipliers = {}
         self.meta = {}
         self.arg_index = 0
+        self.ncon = 0
 
     def add(self, name, shape=None, type=float, **kwargs):
         # Add the constraint
         self.cons[name] = self.ConstrExpr(name, shape=shape, type=type)
         self.meta[name] = Meta(name, "constraint", shape=shape, type=type, **kwargs)
+        if shape is None:
+            self.ncon += 1
+        else:
+            self.ncon += np.prod(shape)
 
         # Add the associated multiplier
         multiplier_name = self._get_multiplier_name(name)
@@ -405,6 +410,9 @@ class ConstraintSet:
         else:
             raise KeyError(f"{name} not in declared constraints")
 
+    def get_num_constraints(self):
+        return self.ncon
+
     def generate_cpp_types(self, template_name="T__"):
         shapes = [self.cons[name].shape for name in self.cons]
         return _generate_cpp_types(shapes, template_name=template_name)
@@ -425,6 +433,10 @@ class ConstraintSet:
             d = data[name]
             obj.meta[name] = Meta.deserialize(d["meta"])
             obj.cons[name] = cls.ConstrExpr.deserialize(d["expr"])
+            if obj.cons[name].shape is None:
+                self.ncon += 1
+            else:
+                obj.ncon += np.prod(obj.cons[name].shape)
         return obj
 
 
@@ -811,6 +823,9 @@ class Component:
             out_shapes[name] = shape
         return out_shapes
 
+    def get_num_constraints(self):
+        return self.constraints.get_num_constraints()
+
     def _is_overridden(self, method_name):
         instance_method = getattr(type(self), method_name, None)
         base_method = getattr(Component, method_name, None)
@@ -930,6 +945,8 @@ class Component:
             cpp += (
                 "  " + f"static constexpr int ncomp = Input<{template_name}>::ncomp;\n"
             )
+            ncon = self.constraints.get_num_constraints()
+            cpp += "  " + f"static constexpr int nconstraints = {ncon};\n"
         else:
             cpp += (
                 "  "
@@ -937,6 +954,10 @@ class Component:
                 + f"typename A2D::VarTuple<{using_template}, {using_template}>;\n"
             )
             cpp += "  " + "static constexpr int ncomp = 0;\n"
+            cpp += "  " + "static constexpr int nconstraints = 0;\n"
+
+        # For now nothing is linear
+        cpp += "  " + "static constexpr bool is_linear = false;\n"
 
         # Add the data statement
         if len(self.data) > 0:

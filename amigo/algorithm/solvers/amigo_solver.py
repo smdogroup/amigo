@@ -7,7 +7,7 @@ which lets it drive Algorithm IC inertia correction.
 import numpy as np
 
 from . import DirectSparseSolver
-from amigo import SolverType, SparseLDL
+from amigo import SolverType, SparseLDL, OrderingType
 
 
 class AmigoSolver(DirectSparseSolver):
@@ -18,7 +18,13 @@ class AmigoSolver(DirectSparseSolver):
 
     def __init__(self, problem, ustab=0.01, pivot_tol=1e-14):
         self._init_sparse_structure(problem)
-        self.ldl = SparseLDL(self.hess, SolverType.LDL, ustab, pivot_tol)
+        self.ldl = SparseLDL(
+            self.hess,
+            SolverType.LDL,
+            ustab=ustab,
+            pivot_tol=pivot_tol,
+            order=OrderingType.DEFAULT,
+        )
 
     def _do_factor(self):
         """Run the LDL numerical factorization on self.hess."""

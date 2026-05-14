@@ -406,12 +406,42 @@ class OrderingUtils {
         int elem = node_to_elem[j];
 
         const int* ptr;
-        int nodes_per_element = element_nodes(elem, &ptr);
-        for (int k = 0; k < nodes_per_element; k++, ptr++) {
-          int node = ptr[0];
-          if (counter[node] < i) {
-            counter[node] = i;
-            nnz_count++;
+        int ncon = 0;
+        bool is_linear = false;
+        int nodes_per_element = element_nodes(elem, &ptr, &ncon, &is_linear);
+        if (is_linear || ncon > 0) {
+          // Find the i-index of the row
+          int ii = 0;
+          for (; ii < nodes_per_element; ii++) {
+            if (i == ptr[ii]) {
+              break;
+            }
+          }
+
+          // Set the start/end of the array
+          int kstart = 0;
+          int kend = nodes_per_element;
+          if (ii >= nodes_per_element - ncon) {
+            kend = nodes_per_element - ncon;
+          } else if (is_linear) {
+            kstart = nodes_per_element - ncon;
+          }
+
+          // Check if we should add this node
+          for (int k = kstart; k < kend; k++) {
+            int node = ptr[k];
+            if (counter[node] < i) {
+              counter[node] = i;
+              nnz_count++;
+            }
+          }
+        } else {
+          for (int k = 0; k < nodes_per_element; k++) {
+            int node = ptr[k];
+            if (counter[node] < i) {
+              counter[node] = i;
+              nnz_count++;
+            }
           }
         }
       }
@@ -441,13 +471,44 @@ class OrderingUtils {
         int elem = node_to_elem[j];
 
         const int* ptr;
-        int nodes_per_element = element_nodes(elem, &ptr);
-        for (int k = 0; k < nodes_per_element; k++, ptr++) {
-          int node = ptr[0];
-          if (counter[node] < i) {
-            counter[node] = i;
-            cols[nnz_count] = node;
-            nnz_count++;
+        int ncon = 0;
+        bool is_linear = false;
+        int nodes_per_element = element_nodes(elem, &ptr, &ncon, &is_linear);
+        if (is_linear || ncon > 0) {
+          // Find the i-index of the row
+          int ii = 0;
+          for (; ii < nodes_per_element; ii++) {
+            if (i == ptr[ii]) {
+              break;
+            }
+          }
+
+          // Set the start/end of the array
+          int kstart = 0;
+          int kend = nodes_per_element;
+          if (ii >= nodes_per_element - ncon) {
+            kend = nodes_per_element - ncon;
+          } else if (is_linear) {
+            kstart = nodes_per_element - ncon;
+          }
+
+          // Check if we should add this node
+          for (int k = kstart; k < kend; k++) {
+            int node = ptr[k];
+            if (counter[node] < i) {
+              counter[node] = i;
+              cols[nnz_count] = node;
+              nnz_count++;
+            }
+          }
+        } else {
+          for (int k = 0; k < nodes_per_element; k++) {
+            int node = ptr[k];
+            if (counter[node] < i) {
+              counter[node] = i;
+              cols[nnz_count] = node;
+              nnz_count++;
+            }
           }
         }
       }

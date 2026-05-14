@@ -1111,7 +1111,8 @@ class OptimizationProblem {
       intervals[i + 1] = intervals[i] + num_elems;
     }
 
-    auto element_nodes = [&](int element, const int** ptr) {
+    auto element_nodes = [&](int element, const int** ptr, int* ncon = nullptr,
+                             bool* linear = nullptr) {
       // upper_bound finds the first index i such that intervals[i] >
       // element
       auto it = std::upper_bound(intervals.begin(), intervals.end(), element);
@@ -1129,6 +1130,12 @@ class OptimizationProblem {
         *ptr = &data[nnodes_per_elem * elem];
       } else {
         *ptr = nullptr;
+      }
+      if (ncon) {
+        *ncon = components[idx]->get_num_component_constraints();
+      }
+      if (linear) {
+        *linear = components[idx]->is_linear();
       }
       return nnodes_per_elem;
     };
@@ -1153,7 +1160,8 @@ class OptimizationProblem {
       intervals[i + 1] = intervals[i] + num_elems;
     }
 
-    auto element_nodes = [&](int element, const int** ptr) {
+    auto element_nodes = [&](int element, const int** ptr, int* ncon = nullptr,
+                             bool* linear = nullptr) {
       // upper_bound finds the first index i such that intervals[i] >
       // element
       auto it = std::upper_bound(intervals.begin(), intervals.end(), element);
@@ -1171,6 +1179,12 @@ class OptimizationProblem {
         *ptr = &data[ndata_per_elem * elem];
       } else {
         *ptr = nullptr;
+      }
+      if (ncon) {
+        *ncon = 0;
+      }
+      if (linear) {
+        *linear = false;
       }
       return ndata_per_elem;
     };

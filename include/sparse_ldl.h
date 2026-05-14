@@ -1,16 +1,29 @@
 #ifndef AMIGO_SPARSE_LDL_H
 #define AMIGO_SPARSE_LDL_H
 
+#include <deque>
+#include <iomanip>
+#include <iostream>
+#include <mutex>
+
 #include "blas_interface.h"
 #include "csr_matrix.h"
 #include "ordering_utils.h"
+
+#ifdef AMIGO_USE_OPENMP
+#include <omp.h>
+#endif  // AMIGO_USE_OPENMP
 
 namespace amigo {
 
 template <typename T>
 class SparseLDL {
  public:
+  // Type of solver
   enum class SolverType { LDL, CHOLESKY };
+
+  // Block size for the working array for the LDL solver
+  static constexpr int block_size = 64;
 
   /**
    * @brief Construct the data needed for the LDL factorization with the given
@@ -85,11 +98,12 @@ class SparseLDL {
     stack_nnz_estimate = 0;
     cholesky_int_nnz = 0;
     cholesky_factor_nnz = 0;
-    num_snodes = 0;
+    num_nodes = 0;
     invperm = nullptr;
-    snode_size = nullptr;
-    snode_to_var = nullptr;
-    num_children = nullptr;
+    node_ptr = nullptr;
+    node_to_var = nullptr;
+    node_children = nullptr;
+    node_children_ptr = nullptr;
     max_contrib = 0;
     contrib_ptr = nullptr;
     contrib_rows = nullptr;
@@ -106,9 +120,10 @@ class SparseLDL {
     if (invperm) {
       delete[] invperm;
     }
-    delete[] snode_size;
-    delete[] snode_to_var;
-    delete[] num_children;
+    delete[] node_ptr;
+    delete[] node_to_var;
+    delete[] node_children;
+    delete[] node_children_ptr;
     delete[] contrib_ptr;
     delete[] contrib_rows;
   }
@@ -145,10 +160,32 @@ class SparseLDL {
    * @param xvec
    */
   void solve(Vector<T>* xvec) const {
+    int nrhs = 1;
+    T* x = xvec->get_array();
+    int ldx = xvec->get_size();
     if (solver_type == SolverType::CHOLESKY) {
-      solve_cholesky(xvec);
+      solve_cholesky(nrhs, x, ldx);
     } else {  // solver_type == SolverType::LDL
-      solve_ldl(xvec);
+      solve_ldl(nrhs, x, ldx);
+    }
+  }
+
+  /**
+   * @brief Compute the solution of the system of equations
+   *
+   * L * D * L^{T} * y = x
+   *
+   * where y <- x. The solution vector overwrites the right-hand-side.
+   *
+   * @param nrhs Number of right-hand-side vectors
+   * @param x Right-hand-side vectors
+   * @param ldx Leading dimension of the right-hand-side vectors
+   */
+  void solve(int nrhs, T* x, int ldx) const {
+    if (solver_type == SolverType::CHOLESKY) {
+      solve_cholesky(nrhs, x, ldx);
+    } else {  // solver_type == SolverType::LDL
+      solve_ldl(nrhs, x, ldx);
     }
   }
 
@@ -162,7 +199,7 @@ class SparseLDL {
     *npos = 0;
     *nneg = 0;
     if (solver_type == SolverType::LDL) {
-      for (int ks = 0; ks < num_snodes; ks++) {
+      for (int ks = 0; ks < num_nodes; ks++) {
         add_pivot_inertia(ks, npos, nneg);
       }
     }
@@ -170,175 +207,129 @@ class SparseLDL {
 
  private:
   /**
-   * @brief The contribution stack object used for the factorization
+   * @brief Memory slab that is local to each thread
+   *
+   * @tparam R Type of the allocated memory
    */
-  class ContributionStack {
+  template <typename R>
+  class ThreadLocalMemorySlab {
    public:
-    ContributionStack(int max_idx, int max_work)
-        : idx(max_idx), work(max_work) {
-      top_idx = 0;
-      top_work = 0;
-    }
-    ~ContributionStack() {}
+    // default size is 8 MB
+    static constexpr std::size_t default_size = (1ULL << 23) / sizeof(R);
+
+    ThreadLocalMemorySlab() = default;
 
     /**
-     * @brief Add the delayed pivots to the list of indices/vars
+     * @brief Reset the capacity
      *
-     * @param nchildren Number of chiledren to look back at
-     * @param fully_summed Initial number of fully summed variables
-     * @param front_indices Indices in the front matrix
-     * @param front_vars Front variables
-     * @return Number of fully summed delayed pivots
+     * @param init_capacity The initial capacity of the slab
      */
-    int add_delayed_pivots(int nchildren, int fully_summed, int front_indices[],
-                           int front_vars[]) {
-      // Peak at the nchildren top entries
-      int tmp_top = top_idx;
-
-      for (int k = 0; k < nchildren; k++) {
-        int num_delayed_pivots = idx[tmp_top - 2];
-        int contrib_size = idx[tmp_top - 1];
-        int* vars = &idx[tmp_top - 2 - contrib_size];
-
-        for (int j = 0; j < num_delayed_pivots; j++) {
-          int delayed = vars[j];
-          if (front_indices[delayed] == -1) {
-            front_indices[delayed] = fully_summed;
-            front_vars[fully_summed] = delayed;
-            fully_summed++;
-          }
-        }
-
-        tmp_top -= (2 + contrib_size);
-      }
-
-      return fully_summed;
+    void reset(std::size_t init_capacity = default_size) {
+      slabs.clear();
+      slabs.emplace_back(std::max(init_capacity, default_size));
+      current_slab = &slabs.back();
+      offset = 0;
     }
 
     /**
-     * @brief Push a contribution block onto the stack
+     * @brief Allocate the next chunk of memory
      *
-     * The matrix is arranged like this:
-     *
-     * F = [ F11  F12 ]
-     *     [ F21  C   ]
-     *
-     * F11 is size num_pivots x num_pivots
-     * C is size (front_size - num_pivots)
-     *
-     * @param num_pivots Number of columns selected as pivots
-     * @param num_delayed_pivots Number of delayed pivots
-     * @param front_size Size of the front matrix F
-     * @param vars Variables on the front matrix
-     * @param F The front matrix values
+     * @param n Size of the request
+     * @return R* New memory locations
      */
-    void push(int num_pivots, int num_delayed_pivots, int front_size,
-              const int vars[], const T F[]) {
-      // Check the size of the integer storage on the stack
-      int contrib_size = front_size - num_pivots;
-      if (top_idx + 2 + contrib_size > int(idx.size())) {
-        idx.resize(int(top_idx + 2 + contrib_size + 0.5 * idx.size()));
+    R* allocate(std::size_t n) {
+      // Round up to multiple of 8 entries
+      n = (n + 7) & ~std::size_t(7);
+
+      if (!current_slab || offset + n > current_slab->capacity) {
+        const std::size_t actual_size = std::max(default_size, n);
+        slabs.emplace_back(actual_size);
+        current_slab = &slabs.back();
+        offset = 0;
       }
 
-      // Copy the values and set the values
-      std::copy(vars + num_pivots, vars + front_size, &idx[top_idx]);
-      top_idx += contrib_size;
-
-      // Save the delayed pivots and size of the contribution block
-      idx[top_idx] = num_delayed_pivots;
-      idx[top_idx + 1] = contrib_size;
-      top_idx += 2;
-
-      // Check the size of the contribution block
-      int block_size = contrib_size * (contrib_size + 1) / 2;
-      if (top_work + block_size > int(work.size())) {
-        work.resize(int(top_work + block_size + 0.5 * work.size()));
-      }
-
-      // Copy the values into the data array
-      T* ptr = &work[top_work];
-      for (int j = num_pivots; j < front_size; j++) {
-        for (int i = j; i < front_size; i++, ptr++) {
-          ptr[0] = F[i + front_size * j];
-        }
-      }
-      top_work += block_size;
-    }
-
-    /**
-     * @brief Pop a contribution block from the top of the stack
-     *
-     * @param num_delayed_pivots Number of delayed pivots
-     * @param contrib_size Contribution block size
-     * @param vars Indices for the contribution block
-     * @param C The contribution block values
-     */
-    void pop(int* num_delayed_pivots, int* contrib_size, int* vars[], T* C[]) {
-      *num_delayed_pivots = idx[top_idx - 2];
-      int cb_size = idx[top_idx - 1];
-      *contrib_size = cb_size;
-      *vars = &idx[top_idx - 2 - cb_size];
-      top_idx -= (2 + cb_size);
-
-      int block_size = cb_size * (cb_size + 1) / 2;
-      *C = &work[top_work - block_size];
-      top_work -= block_size;
+      R* ptr = current_slab->start + offset;
+      offset += n;
+      return ptr;
     }
 
    private:
-    int top_idx;           // Top of the index stack
-    std::vector<int> idx;  // Index/size values
-    int top_work;          // Top of the entry stack
-    std::vector<T> work;   // Entries in the matrix
+    struct MemorySlab {
+      explicit MemorySlab(std::size_t n)
+          : data(n), capacity(n), start(data.data()) {}
+
+      std::vector<R> data;
+      std::size_t capacity;
+      R* start;
+    };
+
+    std::deque<MemorySlab> slabs;
+    MemorySlab* current_slab = nullptr;
+    std::size_t offset = 0;
+  };
+
+  template <typename R>
+  class MemoryPool {
+   public:
+    MemoryPool() {
+#ifdef AMIGO_USE_OPENMP
+      pools.resize(omp_get_max_threads());
+#else
+      pools.resize(1);
+#endif
+    }
+
+    void reset(std::size_t init_capacity) {
+      std::size_t capacity = init_capacity;
+#ifdef AMIGO_USE_OPENMP
+      capacity = std::size_t(init_capacity / omp_get_max_threads());
+#endif
+      for (auto& pool : pools) {
+        pool.reset(capacity);
+      }
+    }
+
+    R* allocate(std::size_t n) {
+#ifdef AMIGO_USE_OPENMP
+      return pools[omp_get_thread_num()].allocate(n);
+#else
+      return pools[0].allocate(n);
+#endif
+    }
+
+   private:
+    std::vector<ThreadLocalMemorySlab<R>> pools;
   };
 
   /**
-   * @brief Store the factored contributions from the matrix
+   * @brief Store the matrix factorization
    */
   class MatrixFactor {
    public:
-    MatrixFactor() {
-      num_snodes = 0;
-      max_pivots = 0;
-      max_delayed = 0;
+    MatrixFactor() : num_nodes(0), int_nnz(0), factor_nnz(0) {}
 
-      int_size = 0;
-      factor_size = 0;
+    /**
+     * @brief Set the sizes based on the initial estimates of required space
+     *
+     * @param num_nodes_ Number of super nodes
+     * @param int_nnz_ Integer storage estimate
+     * @param factor_nnz_ Real value storage estiamte
+     */
+    void set_sizes(int num_nodes_, std::size_t int_nnz_,
+                   std::size_t factor_nnz_) {
+      num_nodes = num_nodes_;
+      int_nnz = int_nnz_;
+      factor_nnz = factor_nnz_;
     }
 
     /**
-     * @brief Allocate the space for the factored matrix
-     *
-     * The integer space consists of the number of pivots + delayed for each
-     * super node. The number of non-zeros consists of the non-zeros in the
-     * (L11, L21) combined pivot, delayed and contribution blocks. These sizes
-     * are automatically re-allocated if the prediction is wrong.
-     *
-     * @param num_super_nodes Number of super nodes
-     * @param int_nnz Number of expected integers
-     * @param factor_nnz Number of
+     * @brief Reset the factorization data
      */
-    void allocate(int num_super_nodes, int int_nnz, int factor_nnz) {
-      num_snodes = num_super_nodes;
-      max_pivots = 0;
-      max_delayed = 0;
-
-      // Set all of the values to an empty node
-      meta.assign(num_snodes, NodeMeta{});
-
-      // Preallocation
-      int_data.resize(int_nnz);
-      factor_data.resize(factor_nnz);
-    }
-
-    /**
-     * @brief Clear the data before factoring the matrix
-     */
-    void clear() {
-      int_size = 0;
-      factor_size = 0;
-      int_data.clear();
-      factor_data.clear();
+    void reset() {
+      nodes.clear();
+      nodes.resize(num_nodes);
+      int_pool.reset(int_nnz);
+      real_pool.reset(factor_nnz);
     }
 
     /**
@@ -354,52 +345,33 @@ class SparseLDL {
      * @param num_ipiv Number of ipiv entries
      * @param ipiv Entries of ipiv (if any)
      */
-    void add_factor(int ks, int num_pivots, const int pivots[], int num_delayed,
-                    const int delayed[], int contrib_size, const T L[],
-                    int num_ipiv = 0, const int ipiv[] = nullptr) {
+    void add_factor(const int ks, const int num_pivots, const int pivots[],
+                    const int num_delayed, const int delayed[],
+                    const int contrib_size, const T L[]) {
+      NodeFactor& node = nodes[ks];
+
       const int nrows = num_pivots + num_delayed + contrib_size;
-      const int block_size = nrows * num_pivots;
+      const int local_block_size = nrows * num_pivots;
 
-      NodeMeta& m = meta[ks];
-      m.num_pivots = num_pivots;
-      m.num_delayed = num_delayed;
-      m.num_ipiv = num_ipiv;
+      node.num_pivots = num_pivots;
+      node.num_delayed = num_delayed;
+      node.num_ipiv = 0;
+      node.contrib_size = contrib_size;
 
-      if (num_delayed > max_delayed) {
-        max_delayed = num_delayed;
+      node.pivots = int_pool.allocate(num_pivots);
+      node.delayed = int_pool.allocate(num_delayed);
+      node.ipiv = nullptr;
+      node.L = real_pool.allocate(local_block_size);
+
+      if (num_pivots > 0) {
+        std::copy(pivots, pivots + num_pivots, node.pivots);
       }
-      if (num_pivots > max_pivots) {
-        max_pivots = num_pivots;
+      if (num_delayed > 0) {
+        std::copy(delayed, delayed + num_delayed, node.delayed);
       }
-
-      m.int_offset = int_size;
-      m.factor_offset = factor_size;
-
-      // Check if we need to resize the vector
-      int new_int_size = num_pivots + num_delayed + num_ipiv;
-      if (int_size + new_int_size > int(int_data.size())) {
-        int_data.resize(int(int_size + new_int_size + 0.5 * int_data.size()));
+      if (local_block_size > 0) {
+        std::copy(L, L + local_block_size, node.L);
       }
-
-      // Insert the data into the stored factorization
-      int* iptr = int_data.data();
-      std::copy(pivots, pivots + num_pivots, iptr + int_size);
-      int_size += num_pivots;
-      std::copy(delayed, delayed + num_delayed, iptr + int_size);
-      int_size += num_delayed;
-      std::copy(ipiv, ipiv + num_ipiv, iptr + int_size);
-      int_size += num_ipiv;
-
-      // Check if we need to to resize the factor data vector
-      if (factor_size + block_size > int(factor_data.size())) {
-        factor_data.resize(
-            int(factor_size + block_size + 0.5 * factor_data.size()));
-      }
-
-      // Insert the data into the stored factorization
-      T* ptr = factor_data.data();
-      std::copy(L, L + block_size, ptr + factor_size);
-      factor_size += block_size;
     }
 
     /**
@@ -416,46 +388,26 @@ class SparseLDL {
      */
     void reserve_factor_root(int ks, int num_pivots, int* pivots[], T* L[],
                              int* ipiv[]) {
-      int block_size = num_pivots * num_pivots;
+      NodeFactor& node = nodes[ks];
 
-      NodeMeta& m = meta[ks];
-      m.num_pivots = num_pivots;
-      m.num_delayed = 0;
-      m.num_ipiv = num_pivots;
+      node.num_pivots = num_pivots;
+      node.num_delayed = 0;
+      node.num_ipiv = num_pivots;
+      node.contrib_size = 0;
 
-      if (num_pivots > max_pivots) {
-        max_pivots = num_pivots;
-      }
+      node.pivots = int_pool.allocate(num_pivots);
+      node.delayed = nullptr;
+      node.ipiv = int_pool.allocate(num_pivots);
+      node.L = real_pool.allocate(num_pivots * num_pivots);
 
-      m.int_offset = int_size;
-      m.factor_offset = factor_size;
-
-      // Check the integer space needed
-      int new_int_size = 2 * num_pivots;
-      if (int_size + new_int_size > int(int_data.size())) {
-        int_data.resize(int(int_size + new_int_size));
-      }
-
-      // Check if we need to to resize the factor data vector
-      if (factor_size + block_size > int(factor_data.size())) {
-        factor_data.resize(int(factor_size + block_size));
-      }
-
-      // Increase the size of the offsets
-      factor_size += block_size;
-      int_size += 2 * num_pivots;
-
-      int* iptr = int_data.data();
       if (pivots) {
-        *pivots = &iptr[m.int_offset];
+        *pivots = node.pivots;
       }
       if (ipiv) {
-        *ipiv = &iptr[m.int_offset + num_pivots];
+        *ipiv = node.ipiv;
       }
-
-      T* ptr = factor_data.data();
       if (L) {
-        *L = &ptr[m.factor_offset];
+        *L = node.L;
       }
     }
 
@@ -473,93 +425,316 @@ class SparseLDL {
                     int* num_delayed, const int* delayed[], const T* L[],
                     int* num_ipiv = nullptr,
                     const int* ipiv[] = nullptr) const {
-      const NodeMeta& m = meta[ks];
+      const NodeFactor& node = nodes[ks];
+
       if (num_pivots) {
-        *num_pivots = m.num_pivots;
+        *num_pivots = node.num_pivots;
       }
       if (num_delayed) {
-        *num_delayed = m.num_delayed;
+        *num_delayed = node.num_delayed;
       }
       if (num_ipiv) {
-        *num_ipiv = m.num_ipiv;
+        *num_ipiv = node.num_ipiv;
       }
 
-      // Pivots must always be defined
       if (pivots) {
-        *pivots = &int_data[m.int_offset];
+        *pivots = node.pivots;
       }
-
-      // Delayed pivots may or may not be defined
       if (delayed) {
-        if (m.num_delayed == 0) {
-          *delayed = nullptr;
-        } else {
-          *delayed = &int_data[m.int_offset + m.num_pivots];
-        }
+        *delayed = node.delayed;
       }
-
-      // L must always be defined
-      if (L) {
-        *L = &factor_data[m.factor_offset];
-      }
-
-      // ipiv may not be defined
       if (ipiv) {
-        if (m.num_ipiv == 0) {
-          *ipiv = nullptr;
-        } else {
-          *ipiv = &int_data[m.int_offset + m.num_pivots + m.num_delayed];
-        }
+        *ipiv = node.ipiv;
+      }
+      if (L) {
+        *L = node.L;
       }
     }
 
     /**
-     * @brief Get the max pivots for any super node
+     * @brief Get the max pivots and max delayed pivots
      *
-     * @return int
+     * @param max_pivots Max number of pivots
+     * @param max_delayed Max number of delayed pivots
      */
-    int get_max_pivots() const { return max_pivots; }
+    void get_max_pivots_and_delayed(int* max_pivots, int* max_delayed) const {
+      int mp = 0;
+      int md = 0;
+
+      for (const NodeFactor& node : nodes) {
+        mp = std::max(mp, node.num_pivots);
+        md = std::max(md, node.num_delayed);
+      }
+
+      if (max_pivots) {
+        *max_pivots = mp;
+      }
+      if (max_delayed) {
+        *max_delayed = md;
+      }
+    }
 
     /**
-     * @brief Get the max delayed pivots for any super node
+     * @brief Get the number of non-zeros in the data structure
      *
-     * @return int
+     * The integer space consists of the number of pivots + delayed for each
+     * super node. The number of non-zeros consists of the non-zeros in the
+     * (L11, L21) combined pivot, delayed and contribution blocks.
+     *
+     * @param int_nnz
+     * @param factor_nnz
      */
-    int get_max_delayed() const { return max_delayed; }
+    void get_num_nonzeros(std::size_t* int_nnz, std::size_t* factor_nnz) const {
+      std::size_t isize = 0;
+      std::size_t fsize = 0;
 
-    /**
-     * @brief Get the number of nonzeros in the factor
-     *
-     * @param int_nnz The size of the integer vector
-     * @param factor_nnz The size of the factor vector
-     */
-    void get_num_nonzeros(int* int_nnz, int* factor_nnz) const {
+      for (int i = 0; i < num_nodes; i++) {
+        const NodeFactor& node = nodes[i];
+        isize += node.num_pivots;
+        isize += node.num_delayed;
+        isize += node.num_ipiv;
+
+        int nrows = node.num_pivots + node.num_delayed + node.contrib_size;
+        int local_block_size = nrows * node.num_pivots;
+        fsize += local_block_size;
+      }
+
       if (int_nnz) {
-        *int_nnz = int_size;
+        *int_nnz = isize;
       }
       if (factor_nnz) {
-        *factor_nnz = factor_size;
+        *factor_nnz = fsize;
       }
     }
 
    private:
-    struct NodeMeta {
-      int num_pivots;
-      int num_delayed;
-      int num_ipiv;
-      int int_offset;
-      int factor_offset;
+    struct NodeFactor {
+      int num_pivots = 0;
+      int num_delayed = 0;
+      int num_ipiv = 0;
+      int contrib_size = 0;
+
+      int* pivots = nullptr;
+      int* delayed = nullptr;
+      int* ipiv = nullptr;
+      T* L = nullptr;
     };
 
-    int num_snodes;
-    int max_pivots;
-    int max_delayed;
+    // Number of super nodes and their location
+    int num_nodes;
+    std::size_t int_nnz;
+    std::size_t factor_nnz;
 
-    std::vector<NodeMeta> meta;
-    int int_size;
-    std::vector<int> int_data;  // pivots and delayed indices
-    int factor_size;
-    std::vector<T> factor_data;  // all L blocks
+    // Information for each factor
+    std::vector<NodeFactor> nodes;
+
+    // Memory pools
+    MemoryPool<T> real_pool;
+    MemoryPool<int> int_pool;
+  };
+
+  /**
+   * @brief Resource pool for thread data
+   */
+  class ResourcePool {
+   public:
+    struct ResourceNode {
+      std::vector<int> vars;
+      std::vector<int> indices;
+      std::vector<T> F;
+      std::vector<T> W;
+    };
+
+    ResourcePool() {
+#ifdef AMIGO_USE_OPENMP
+      pools.resize(omp_get_max_threads());
+#else
+      pools.resize(1);
+#endif
+    }
+
+    /**
+     * @brief Borrow a resource node allocated for forming and factoring a
+     * frontal matrix
+     *
+     * @return ResourceNode
+     */
+    ResourceNode borrow_node() {
+      int tid = 0;
+#ifdef AMIGO_USE_OPENMP
+      tid = omp_get_thread_num();
+#endif
+      if (pools[tid].empty()) {
+        return ResourceNode{};
+      }
+      auto buf = std::move(pools[tid].back());
+      pools[tid].pop_back();
+      return buf;
+    }
+
+    /**
+     * @brief Return a resource node
+     *
+     * @param buf Resource return node (use std::move()!)
+     */
+    void return_node(ResourceNode&& buf) {
+      int tid = 0;
+#ifdef AMIGO_USE_OPENMP
+      tid = omp_get_thread_num();
+#endif
+      pools[tid].push_back(std::move(buf));
+    }
+
+   private:
+    // Variables allocated per thread
+    std::vector<std::vector<ResourceNode>> pools;
+  };
+
+  /**
+   * @brief The contribution stack object used for the factorization
+   */
+  class ContributionData {
+   public:
+    ContributionData(int num_nodes)
+        : num_nodes(num_nodes), nodes(num_nodes, ContribNode{}) {}
+
+    /**
+     * @brief Add the delayed pivots to the list of indices/vars
+     *
+     * @param nchildren Number of chiledren to look back at
+     * @param fully_summed Initial number of fully summed variables
+     * @param front_indices Indices in the front matrix
+     * @param front_vars Front variables
+     * @return Number of fully summed delayed pivots
+     */
+    int add_delayed_pivots(int fully_summed, int num_children,
+                           const int children[], int front_vars[],
+                           int front_indices[]) const {
+      for (int c = 0; c < num_children; c++) {
+        int child = children[c];
+
+        for (int j = 0; j < nodes[child].num_delayed; j++) {
+          int delayed = nodes[child].vars[j];
+          if (front_indices[delayed] == -1) {
+            front_indices[delayed] = fully_summed;
+            front_vars[fully_summed] = delayed;
+            fully_summed++;
+          }
+        }
+      }
+
+      return fully_summed;
+    }
+
+    /**
+     * @brief Push a contribution block onto the stack
+     *
+     * The matrix is arranged like this:
+     *
+     * F = [ F11  F12 ]
+     *     [ F21  C   ]
+     *
+     * F11 is size num_pivots x num_pivots
+     * C is size (front_size - num_pivots)
+     *
+     * @param node The supernode index
+     * @param num_pivots Number of columns selected as pivots
+     * @param num_delayed_pivots Number of delayed pivots
+     * @param front_size Size of the front matrix F
+     * @param vars Variables in the front matrix
+     * @param F The front matrix values
+     */
+    void add_contribution(int node, int num_pivots, int num_delayed_pivots,
+                          int front_size, const int vars[], const T F[]) {
+      // Insert the variables
+      int contrib_size = front_size - num_pivots;
+      nodes[node].contrib_size = contrib_size;
+      nodes[node].vars = new int[contrib_size];
+      std::copy(vars + num_pivots, vars + front_size, nodes[node].vars);
+
+      // Record the number of delayed pivots
+      nodes[node].num_delayed = num_delayed_pivots;
+
+      // Insert the contribution block itself
+      nodes[node].block = new T[(contrib_size * (contrib_size + 1)) / 2];
+      T* ptr = nodes[node].block;
+
+      for (int j = num_pivots; j < front_size; j++) {
+        for (int i = j; i < front_size; i++, ptr++) {
+          ptr[0] = F[i + front_size * j];
+        }
+      }
+    }
+
+    /**
+     * @brief Get a contribution block from the top of the stack
+     *
+     * @param node The supernode index
+     * @param num_delayed_pivots Number of delayed pivots
+     * @param contrib_size Contribution block size
+     * @param vars Indices for the contribution block
+     * @param C The contribution block values
+     */
+    void get_contribution(int node, int* num_delayed_pivots, int* contrib_size,
+                          int* vars[], T* C[]) {
+      *num_delayed_pivots = nodes[node].num_delayed;
+      *contrib_size = nodes[node].contrib_size;
+      *vars = nodes[node].vars;
+      *C = nodes[node].block;
+    }
+
+    /**
+     * @brief Free the nodal contribution
+     *
+     * @param node The node index
+     */
+    void free_contribution(int node) {
+      delete[] nodes[node].vars;
+      delete[] nodes[node].block;
+      nodes[node] = ContribNode{};
+    }
+
+   private:
+    struct ContribNode {
+      int num_delayed = 0;
+      int contrib_size = 0;
+      int* vars = nullptr;
+      T* block = nullptr;
+    };
+
+    int num_nodes;
+    std::vector<ContribNode> nodes;
+  };
+
+  /**
+   * @brief Object for handling threaded BLAS for the root node factorization
+   */
+  class BlasRootFactorThreadScope {
+   public:
+    explicit BlasRootFactorThreadScope(int front_size) {
+#ifdef AMIGO_USE_MKL
+      old_threads = mkl_get_max_threads();
+      int nthreads = std::min(old_threads, front_size / block_size);
+      mkl_set_num_threads_local(nthreads);
+#elif defined(AMIGO_USE_OPENBLAS)
+      old_threads = openblas_get_num_threads();
+      int nthreads = std::min(old_threads, front_size / block_size);
+      openblas_set_num_threads(nthreads);
+#else
+      old_threads = 1;
+#endif
+    }
+
+    ~BlasRootFactorThreadScope() {
+#ifdef AMIGO_USE_MKL
+      mkl_set_num_threads_local(old_threads);
+#elif defined(AMIGO_USE_OPENBLAS)
+      openblas_set_num_threads(old_threads);
+#endif
+    }
+
+   private:
+    int old_threads = 1;
   };
 
   /**
@@ -585,180 +760,300 @@ class SparseLDL {
   int factor_numeric(const int ncols, const int colp[], const int rows[],
                      const T data[]) {
     // Clear any old factorization data
-    fact.clear();
+    fact.reset();
 
-    // Allocate space for indices
-    int* temp = new int[2 * ncols];
-    std::fill(temp, temp + 2 * ncols, -1);
-    int* front_indices = temp;       // Indices in the front matrix
-    int* front_vars = &temp[ncols];  // Variables in the front
+    // Estimate the max front dimension
+    ResourcePool pool;
 
-    // Compute proper size for the frontal matrix
-    const int nblock = 64;
-    int fdim = int(delay_growth * max_frontal_mat_dimension);
-    std::vector<T> F(fdim * fdim);
-    std::vector<T> W;
-    if constexpr (stype == SolverType::LDL) {
-      W.resize(fdim * nblock);
+    // Use estimates of the contribution
+    ContributionData contrib(num_nodes);
+
+    // The factorization where data is stored
+    MatrixFactor& factor = fact;
+
+    // Loop over all roots because we can't assume that the matrix is
+    // irreducible. Any root nodes are appended at the end of the snode_children
+    // array. The snode_children_ptr array is of length num_snodes + 2 and roots
+    // are stored in snode_children between snode_children_ptr[num_snodes] and
+    // snode_children_ptr[num_snodes + 1].
+    int nroots =
+        node_children_ptr[num_nodes + 1] - node_children_ptr[num_nodes];
+
+    for (int is = node_children_ptr[num_nodes];
+         is < node_children_ptr[num_nodes + 1]; is++) {
+      int root = node_children[is];
+#ifdef AMIGO_USE_OPENMP
+#pragma omp parallel
+#endif  // AMIGO_USE_OPENMP
+      {
+#ifdef AMIGO_USE_OPENMP
+#pragma omp single
+#endif  // AMIGO_USE_OPENMP
+        {
+#ifdef AMIGO_USE_OPENMP
+#pragma task firstprivate(nroots) \
+    shared(colp, rows, data, contrib, pool, factor) if (nroots > 1)
+#endif
+          {
+            int info = factor_numeric_node_task<stype>(
+                root, ncols, colp, rows, data, contrib, pool, factor);
+          }
+        }
+      }
     }
 
-    // Use estimates of the contribution stack sizes
-    int int_estimate = int(delay_growth * stack_int_estimate);
-    int nnz_estimate = int(delay_growth * stack_nnz_estimate);
-    ContributionStack stack(int_estimate, nnz_estimate);
+    // Reset the estimates for the non-zeros
+    std::size_t int_nnz, factor_nnz;
+    fact.get_num_nonzeros(&int_nnz, &factor_nnz);
 
-    // Info flag
+    int_nnz = std::max(int_nnz, std::size_t(delay_growth * cholesky_int_nnz));
+    factor_nnz =
+        std::max(factor_nnz, std::size_t(delay_growth * cholesky_factor_nnz));
+    fact.set_sizes(num_nodes, int_nnz, factor_nnz);
+
+    return 0;
+  }
+
+  template <SolverType stype>
+  int factor_numeric_node_task(int ks, const int ncols, const int colp[],
+                               const int rows[], const T data[],
+                               ContributionData& contrib, ResourcePool& pool,
+                               MatrixFactor& factor) {
+    int num_children = node_children_ptr[ks + 1] - node_children_ptr[ks];
+    const int* children = &node_children[node_children_ptr[ks]];
+
+    if (num_children > 1) {
+      for (int k = 0; k < num_children; k++) {
+        int child = children[k];
+#ifdef AMIGO_USE_OPENMP
+#pragma omp task firstprivate(child) \
+    shared(colp, rows, data, contrib, pool, factor)
+#endif
+        {
+          int info = factor_numeric_node_task<stype>(
+              child, ncols, colp, rows, data, contrib, pool, factor);
+        }
+      }
+
+#ifdef AMIGO_USE_OPENMP
+#pragma omp taskwait
+#endif  // AMIGO_USE_OPENMP
+    } else {
+      for (int k = 0; k < num_children; k++) {
+        int child = children[k];
+        int info = factor_numeric_node_task<stype>(child, ncols, colp, rows,
+                                                   data, contrib, pool, factor);
+      }
+    }
+
+    // Get the front variable arrays from the resource pool
+    auto node = pool.borrow_node();
+    if (node.vars.size() < ncols) {
+      node.vars.resize(ncols);
+    }
+    if (node.indices.size() < ncols) {
+      node.indices.resize(ncols, -1);
+    }
+    int* front_vars = node.vars.data();
+    int* front_indices = node.indices.data();
+
+    // Get the frontal variables
+    int fully_summed = 0, front_size = 0;
+    get_frontal_vars(ks, num_children, children, contrib, front_vars,
+                     front_indices, &fully_summed, &front_size);
+
+    // Get the temporary matrix data and ensure that there's enough space
+    // allocated
+    const int min_dim = 16;
+    if (front_size < min_dim && node.F.size() < min_dim * min_dim) {
+      node.F.resize(min_dim * min_dim);
+    } else if (node.F.size() < front_size * front_size) {
+      node.F.resize(front_size * front_size);
+    }
+
+    if (stype == SolverType::LDL) {
+      if (front_size < min_dim && node.W.size() < min_dim * min_dim) {
+        node.W.resize(min_dim * min_dim);
+      } else if (node.W.size() <
+                 std::min(block_size, front_size) * front_size) {
+        node.W.resize(std::min(block_size, front_size) * front_size);
+      }
+    }
+
+    // Assemble the frontal matrix
+    assemble_front_matrix(ks, num_children, children, front_size, front_indices,
+                          colp, rows, data, contrib, node.F.data());
+
+    // Factor the frontal matrix and save the results
     int info = 0;
-    int ns = 0;
-    for (int ks = 0, k = 0; ks < num_snodes; k += ns, ks++) {
-      // Size of the super node
-      ns = snode_size[ks];
-
-      // Number of children for this super node
-      int nchildren = num_children[ks];
-
-      // Get the frontal variables
-      int fully_summed = 0, front_size = 0;
-      get_frontal_vars(ks, k, ns, nchildren, stack, front_indices, front_vars,
-                       &fully_summed, &front_size);
-
-      // Resize the frontal matrix if needed (this will only happen if stype ==
-      // SolverType::LDL)
-      if (front_size > fdim) {
-        fdim = front_size;
-        F.resize(fdim * fdim);
-        W.resize(fdim * nblock);
-      }
-
-      // Get the underlying array
-      T* Fptr = F.data();
-
-      // Assemble the frontal matrix
-      assemble_front_matrix(k, ns, front_size, front_indices, colp, rows, data,
-                            nchildren, stack, Fptr);
-
-      // Factor the frontal matrix and save the results
-      int info = 0;
-      if constexpr (stype == SolverType::CHOLESKY) {
-        // The Cholesky code works for both frontal and root matrices
-        info = factor_front_matrix_cholesky(ks, fully_summed, front_size,
-                                            front_vars, Fptr, stack, fact);
+    if constexpr (stype == SolverType::CHOLESKY) {
+      // The Cholesky code works for both frontal and root matrices
+      info =
+          factor_front_matrix_cholesky(ks, fully_summed, front_size, front_vars,
+                                       node.F.data(), contrib, factor);
+    } else {
+      if (fully_summed < front_size) {
+        const int nblock = std::min(block_size, front_size);
+        info = factor_front_matrix_block(ks, fully_summed, front_size,
+                                         front_vars, node.F.data(), nblock,
+                                         node.W.data(), contrib, factor);
       } else {
-        if (fully_summed < front_size) {
-          T* Wptr = W.data();
-          info = factor_front_matrix_block(ks, fully_summed, front_size,
-                                           front_vars, Fptr, nblock, Wptr,
-                                           stack, fact);
-        } else {
-          info = factor_root_matrix(ks, front_size, front_vars, Fptr, fact);
+#if defined(AMIGO_USE_OPENMP) && \
+    (defined(AMIGO_USE_MKL) || defined(AMIGO_USE_OPENBLAS))
+#pragma omp task shared(colp, rows, data, contrib, pool, factor)
+#endif  // AMIGO_USE_OPENMP
+        {
+          BlasRootFactorThreadScope blas_threads(front_size);
+          info = factor_root_matrix(ks, front_size, front_vars, node.F.data(),
+                                    factor);
         }
-      }
-
-      // Check the flag
-      if (info != 0) {
-        info += k;
-        break;
-      }
-
-      // Reset the front indices back to -1
-      for (int j = 0; j < front_size; j++) {
-        int var = front_vars[j];
-        if (var < 0) {
-          var = -var - 1;
-        }
-        front_indices[var] = -1;
       }
     }
 
-    // Clean up the data
-    delete[] temp;
+    // Reset the front variables
+    reset_front_vars(fully_summed, front_size, front_vars, front_indices);
+
+    pool.return_node(std::move(node));
 
     return info;
+  }
+
+  /**
+   * @brief Reset the front variables
+   *
+   * @param tid The thread id
+   * @param fully_summed The number of fully summed variables
+   * @param front_size The front size
+   * @param contrib The contribution data
+   */
+  void reset_front_vars(int fully_summed, int front_size, int* front_vars,
+                        int* front_indices) const {
+    int j = 0;
+    for (; j < fully_summed; j++) {
+      int var = front_vars[j];
+      if (var < 0) {
+        var = -var - 1;
+      }
+      front_indices[var] = -1;
+    }
+
+    for (; j < front_size; j++) {
+      int var = front_vars[j];
+      front_indices[var] = -1;
+    }
   }
 
   /**
    * @brief Get the variables for this front
    *
    * @param ks The super nodal index ks
-   * @param k The offset into the super node variable list
-   * @param ns The size of the super node
    * @param nchildren the number of children for this super node
    * @param stack The stack of contribution blocks
-   * @param front_indices The front indices
-   * @param front_vars The variables on the front
    * @param fully_summed Number of fully summed variables
    * @param front_size The front size
+   * @param front_vars The variables on the front
+   * @param front_indices The front indices
    */
-  void get_frontal_vars(const int ks, const int k, const int ns,
-                        const int nchildren, ContributionStack& stack,
-                        int front_indices[], int front_vars[],
-                        int* fully_summed, int* front_size) {
+  void get_frontal_vars(const int ks, int num_children, const int children[],
+                        ContributionData& contrib, int front_vars[],
+                        int front_indices[], int* fully_summed_,
+                        int* front_size_) {
     // Set the ordering of the degrees of freeom in the front
     // Number of fully summed contributions (supernode pivots + delayed
     // pivots)
+    int k = node_ptr[ks];
+    int ns = node_ptr[ks + 1] - node_ptr[ks];
     for (int j = 0; j < ns; j++) {
-      int var = snode_to_var[k + j];
+      int var = node_to_var[k + j];
       front_indices[var] = j;
       front_vars[j] = var;
     }
 
     // Add the additional contributions from the delayed pivots
-    int full_sum =
-        stack.add_delayed_pivots(nchildren, ns, front_indices, front_vars);
+    int fully_summed = contrib.add_delayed_pivots(ns, num_children, children,
+                                                  front_vars, front_indices);
 
     // Get the entries predicted from Cholesky
     int start = contrib_ptr[ks];
     int contrib_size = contrib_ptr[ks + 1] - start;
     for (int j = 0, *row = &contrib_rows[start]; j < contrib_size; j++, row++) {
-      front_indices[*row] = full_sum + j;
-      front_vars[full_sum + j] = *row;
+      front_indices[*row] = fully_summed + j;
+      front_vars[fully_summed + j] = *row;
     }
 
     // Get the size of the front
-    *fully_summed = full_sum;
-    *front_size = full_sum + contrib_size;
+    *fully_summed_ = fully_summed;
+    *front_size_ = fully_summed + contrib_size;
   }
 
   /**
    * @brief Assemble the frontal matrix associated with the delayed pivots and
    * super node entries
    *
-   * @param k Offset into the super node list
-   * @param ns Number of variables in this super node
+   * @param ks The front index
+   * @param nchildren The number of children
+   * @param children The child indices
    * @param front_size Front size
    * @param front_indices Front indices
    * @param colp Pointer into the column
    * @param rows Row indices
    * @param data Entries from the matrix
-   * @param nchildren Number of children in the etree for this super node
-   * @param stack Contribution stack
+   * @param contrib The contribution blocks
    * @param F The frontal matrix
    */
-  void assemble_front_matrix(const int k, const int ns, int front_size,
-                             const int front_indices[], const int colp[],
-                             const int rows[], const T data[],
-                             const int nchildren, ContributionStack& stack,
-                             T F[]) {
+  void assemble_front_matrix(const int ks, int nchildren, const int children[],
+                             int front_size, const int front_indices[],
+                             const int colp[], const int rows[], const T data[],
+                             ContributionData& contrib, T F[]) {
     std::fill(F, F + front_size * front_size, 0.0);
 
+    int k = node_ptr[ks];
+    int ns = node_ptr[ks + 1] - node_ptr[ks];
+
+    bool is_sorted = false;
     if (order == OrderingType::NATURAL) {
       // Assemble the contributions into F from the matrix. Since the ordering
-      // is natural, it's straightforward to assemble only the entries below the
-      // diagonal of F that are required
-      for (int j = 0; j < ns; j++) {
-        // Get the column variable associated with the snode
-        int var = snode_to_var[k + j];
-        T* Fj = &F[front_size * j];
+      // is natural, it's straightforward to assemble only the entries below
+      // the diagonal of F that are required
+      if (is_sorted) {
+        for (int j = 0; j < ns; j++) {
+          // Get the column variable associated with the node
+          int var = node_to_var[k + j];
+          T* Fj = &F[front_size * j];
 
-        for (int ip = colp[var]; ip < colp[var + 1]; ip++) {
-          // Get the original row index
-          int i = rows[ip];
-          if (i >= var) {
-            // Get the front index
-            int ifront = front_indices[i];
+          int start = colp[var];
+          int end = colp[var + 1];
+          const int* it = std::lower_bound(&rows[start], &rows[end], var);
 
-            // Add the contribution to the frontal matrix
-            Fj[ifront] += data[ip];
+          if (it != rows + end) {
+            for (int ip = it - rows; ip < end; ip++) {
+              // Get the original row index
+              int i = rows[ip];
+
+              // Get the front index
+              int ifront = front_indices[i];
+
+              // Add the contribution to the frontal matrix
+              Fj[ifront] += data[ip];
+            }
+          }
+        }
+      } else {
+        for (int j = 0; j < ns; j++) {
+          // Get the column variable associated with the snode
+          int var = node_to_var[k + j];
+          T* Fj = &F[front_size * j];
+
+          for (int ip = colp[var]; ip < colp[var + 1]; ip++) {
+            // Get the original row index
+            int i = rows[ip];
+            if (i >= var) {
+              // Get the front index
+              int ifront = front_indices[i];
+
+              // Add the contribution to the frontal matrix
+              Fj[ifront] += data[ip];
+            }
           }
         }
       }
@@ -766,8 +1061,8 @@ class SparseLDL {
       // Assemble the contributions into F from the matrix. Since the ordering
       // is permuted, we assemble the lower and upper part of F.
       for (int j = 0; j < ns; j++) {
-        // Get the column variable associated with the snode
-        int var = snode_to_var[k + j];
+        // Get the column variable associated with the node
+        int var = node_to_var[k + j];
         int pj = invperm[var];
         T* Fj = &F[front_size * j];
 
@@ -787,12 +1082,14 @@ class SparseLDL {
     }
 
     // Add the contributions from the children
-    for (int child = 0; child < nchildren; child++) {
+    for (int c = 0; c < nchildren; c++) {
+      int child = children[c];
       int num_delayed_pivots;
       int contrib_size;
       int* contrib_indices;
       T* C;
-      stack.pop(&num_delayed_pivots, &contrib_size, &contrib_indices, &C);
+      contrib.get_contribution(child, &num_delayed_pivots, &contrib_size,
+                               &contrib_indices, &C);
 
       // Get the indices of the contribution indices, so we don't have to
       // reference these again
@@ -808,6 +1105,8 @@ class SparseLDL {
         // for column j is at index n * j - j * (j - 1)/2, but we subtract j
         // from this since the row index begins at i = j. This accounts for
         // indexing Cj using i directly.
+        // const int cjindex = j * contrib_size;
+        // const T* Cj = &C[cjindex];
         const int cjindex = j * contrib_size - j * (j + 1) / 2;
         const T* Cj = &C[cjindex];
 
@@ -833,6 +1132,8 @@ class SparseLDL {
 
         // Set the offset into the contribution block. This accounts for
         // indexing Cj using i directly
+        // const int cjindex = j * contrib_size;
+        // const T* Cj = &C[cjindex];
         const int cjindex = j * contrib_size - j * (j + 1) / 2;
         const T* Cj = &C[cjindex];
 
@@ -845,6 +1146,12 @@ class SparseLDL {
           Fj[ifront] += Cj[i];
         }
       }
+    }
+
+    // Free the contributions
+    for (int c = 0; c < nchildren; c++) {
+      int child = children[c];
+      contrib.free_contribution(child);
     }
   }
 
@@ -991,7 +1298,7 @@ class SparseLDL {
   int factor_front_matrix_block(const int ks, const int fully_summed,
                                 const int front_size, int front_vars[], T F[],
                                 const int nblock, T W[],
-                                ContributionStack& stack,
+                                ContributionData& contrib,
                                 MatrixFactor& factor) {
     const int ldf = front_size;
     const int ldw = front_size;
@@ -1215,7 +1522,8 @@ class SparseLDL {
     int num_delayed = fully_summed - num_pivots;
 
     // Push this onto the stack
-    stack.push(num_pivots, num_delayed, front_size, front_vars, F);
+    contrib.add_contribution(ks, num_pivots, num_delayed, front_size,
+                             front_vars, F);
 
     // Push the factored matrix onto the stack
     const int* pivots = front_vars;
@@ -1232,22 +1540,31 @@ class SparseLDL {
    * On input x = b on output the solution is stored in x
    *
    * @param n Number of rows/columns in L
+   * @param nrhs Number of right-hand-sides
    * @param piv Pivots (used to detect 1x1 and 2x2 pivots)
    * @param L The entries in the matrix
    * @param ldl The leading dimension of L
    * @param x The right hand side on input and the solution output
+   * @param ldx Leading dimension of the x vector
    */
-  void solve_pivot_lower(const int n, const int piv[], const T L[],
-                         const int ldl, T x[]) const {
+  void solve_pivot_lower(const int n, const int nrhs, const int piv[],
+                         const T L[], const int ldl, T x[],
+                         const int ldx) const {
     for (int j = 0; j < n;) {
       if (piv[j] >= 0) {
-        for (int i = j + 1; i < n; i++) {
-          x[i] -= L[i + ldl * j] * x[j];
+        for (int k = 0; k < nrhs; k++) {
+          T* xk = &x[ldx * k];
+          for (int i = j + 1; i < n; i++) {
+            xk[i] -= L[i + ldl * j] * xk[j];
+          }
         }
         j += 1;
       } else {
-        for (int i = j + 2; i < n; i++) {
-          x[i] -= L[i + ldl * j] * x[j] + L[i + ldl * (j + 1)] * x[j + 1];
+        for (int k = 0; k < nrhs; k++) {
+          T* xk = &x[ldx * k];
+          for (int i = j + 2; i < n; i++) {
+            xk[i] -= L[i + ldl * j] * xk[j] + L[i + ldl * (j + 1)] * xk[j + 1];
+          }
         }
         j += 2;
       }
@@ -1260,28 +1577,55 @@ class SparseLDL {
    * On input x = b on output the solution is stored in x
    *
    * @param n Number of rows/columns in L
+   * @param nrhs Number of right-hand-sides
    * @param piv Pivots (used to detect 1x1 and 2x2 pivots)
    * @param L The entries in the matrix
    * @param ldl The leading dimension of L
    * @param x The right hand side on input and the solution output
+   * @param ldx Leading dimension of the x vector
    */
-  void solve_pivot_diagonal(const int n, const int piv[], const T L[],
-                            const int ldl, T x[]) const {
-    for (int i = 0; i < n;) {
-      if (piv[i] >= 0) {
-        x[i] /= L[i * (ldl + 1)];
-        i++;
-      } else {
-        T d11 = L[i * (ldl + 1)];
-        T d21 = L[i * (ldl + 1) + 1];
-        T d22 = L[(i + 1) * (ldl + 1)];
+  void solve_pivot_diagonal(const int n, const int nrhs, const int piv[],
+                            const T L[], const int ldl, T x[],
+                            const int ldx) const {
+    if (nrhs == 1) {
+      for (int i = 0; i < n;) {
+        if (piv[i] >= 0) {
+          x[i] /= L[i * (ldl + 1)];
+          i++;
+        } else {
+          T d11 = L[i * (ldl + 1)];
+          T d21 = L[i * (ldl + 1) + 1];
+          T d22 = L[(i + 1) * (ldl + 1)];
 
-        T inv = 1.0 / (d11 * d22 - d21 * d21);
-        T x1 = x[i];
-        T x2 = x[i + 1];
-        x[i] = inv * (d22 * x1 - d21 * x2);
-        x[i + 1] = inv * (d11 * x2 - d21 * x1);
-        i += 2;
+          T inv = 1.0 / (d11 * d22 - d21 * d21);
+          T x1 = x[i];
+          T x2 = x[i + 1];
+          x[i] = inv * (d22 * x1 - d21 * x2);
+          x[i + 1] = inv * (d11 * x2 - d21 * x1);
+          i += 2;
+        }
+      }
+    } else if (nrhs >= 2) {
+      for (int i = 0; i < n;) {
+        if (piv[i] >= 0) {
+          for (int k = 0; k < nrhs; k++) {
+            x[i + k * ldx] /= L[i * (ldl + 1)];
+          }
+          i++;
+        } else {
+          T d11 = L[i * (ldl + 1)];
+          T d21 = L[i * (ldl + 1) + 1];
+          T d22 = L[(i + 1) * (ldl + 1)];
+          T inv = 1.0 / (d11 * d22 - d21 * d21);
+
+          for (int k = 0; k < nrhs; k++) {
+            T x1 = x[i + k * ldx];
+            T x2 = x[i + 1 + k * ldx];
+            x[i + k * ldx] = inv * (d22 * x1 - d21 * x2);
+            x[i + 1 + k * ldx] = inv * (d11 * x2 - d21 * x1);
+          }
+          i += 2;
+        }
       }
     }
   }
@@ -1292,23 +1636,32 @@ class SparseLDL {
    * On input x = b on output the solution is stored in x
    *
    * @param n Number of rows/columns in L
+   * @param nrhs Number of right-hand-sides
    * @param piv Pivots (used to detect 1x1 and 2x2 pivots)
    * @param L The entries in the matrix
    * @param ldl The leading dimension of L
    * @param x The right hand side on input and the solution output
+   * @param ldx Leading dimension of the x vector
    */
-  void solve_pivot_transpose(const int n, const int piv[], const T L[],
-                             const int ldl, T x[]) const {
+  void solve_pivot_transpose(const int n, const int nrhs, const int piv[],
+                             const T L[], const int ldl, T x[],
+                             const int ldx) const {
     for (int i = n - 1; i >= 0;) {
       if (piv[i] >= 0) {
-        for (int j = i + 1; j < n; j++) {
-          x[i] -= L[j + ldl * i] * x[j];
+        for (int k = 0; k < nrhs; k++) {
+          T* xk = &x[ldx * k];
+          for (int j = i + 1; j < n; j++) {
+            xk[i] -= L[j + ldl * i] * xk[j];
+          }
         }
         i -= 1;
       } else {
-        for (int j = i + 1; j < n; j++) {
-          x[i - 1] -= L[j + ldl * (i - 1)] * x[j];
-          x[i] -= L[j + ldl * i] * x[j];
+        for (int k = 0; k < nrhs; k++) {
+          T* xk = &x[ldx * k];
+          for (int j = i + 1; j < n; j++) {
+            xk[i - 1] -= L[j + ldl * (i - 1)] * xk[j];
+            xk[i] -= L[j + ldl * i] * xk[j];
+          }
         }
         i -= 2;
       }
@@ -1316,18 +1669,148 @@ class SparseLDL {
   }
 
   /**
+   * @brief Gather values from a vector x to a local vector t
+   *
+   * t[j + k * ldt] = x[indices[j] + k * ldx]
+   *
+   * @param n Number of indices
+   * @param indices Indices in x
+   * @param m Number of vectors
+   * @param x The matrix of vectors
+   * @param ldx Leading dimension of x
+   * @param t The local vector
+   * @param ldt Leading dimension of t
+   */
+  void gather(const int n, const int indices[], const int m, const T* x,
+              const int ldx, T* t, const int ldt) const {
+    for (int k = 0; k < m; k++) {
+      const T* xk = &x[ldx * k];
+      T* tk = &t[ldt * k];
+      for (int j = 0; j < n; j++) {
+        tk[j] = xk[indices[j]];
+      }
+    }
+  }
+
+  /**
+   * @brief Scatter values from a local vector t to a global vector x
+   *
+   * x[indices[j] + k * ldx] = t[j + k * ldt]
+   *
+   * @param n Number of indices
+   * @param indices Indices in x
+   * @param m Number of vectors
+   * @param x The matrix of vectors
+   * @param ldx Leading dimension of x
+   * @param t The local vector
+   * @param ldt Leading dimension of t
+   */
+  void scatter(const int n, const int indices[], const int m, const T* t,
+               const int ldt, T* x, const int ldx) const {
+    for (int k = 0; k < m; k++) {
+      T* xk = &x[ldx * k];
+      const T* tk = &t[ldt * k];
+      for (int j = 0; j < n; j++) {
+        xk[indices[j]] = tk[j];
+      }
+    }
+  }
+
+  /**
+   * @brief Gather values from a vector x to a local vector t
+   *
+   * t[j + k * ldt] = x[indices[j] + k * ldx]
+   *
+   * @param n Number of indices
+   * @param indices Indices in x
+   * @param m Number of vectors
+   * @param x The matrix of vectors
+   * @param ldx Leading dimension of x
+   * @param t The local vector
+   * @param ldt Leading dimension of t
+   */
+  void gather_pivot(const int n, const int indices[], const int m, const T* x,
+                    const int ldx, T* t, const int ldt) const {
+    for (int k = 0; k < m; k++) {
+      const T* xk = &x[ldx * k];
+      T* tk = &t[ldt * k];
+      for (int j = 0; j < n; j++) {
+        if (indices[j] >= 0) {
+          tk[j] = xk[indices[j]];
+        } else {
+          tk[j] = xk[-indices[j] - 1];
+        }
+      }
+    }
+  }
+
+  /**
+   * @brief Scatter values from a local vector t to a global vector x
+   *
+   * x[indices[j] + k * ldx] = t[j + k * ldt]
+   *
+   * @param n Number of indices
+   * @param indices Indices in x
+   * @param m Number of vectors
+   * @param x The matrix of vectors
+   * @param ldx Leading dimension of x
+   * @param t The local vector
+   * @param ldt Leading dimension of t
+   */
+  void scatter_pivot(const int n, const int indices[], const int m, const T* t,
+                     const int ldt, T* x, const int ldx) const {
+    for (int k = 0; k < m; k++) {
+      T* xk = &x[ldx * k];
+      const T* tk = &t[ldt * k];
+      for (int j = 0; j < n; j++) {
+        if (indices[j] >= 0) {
+          xk[indices[j]] = tk[j];
+        } else {
+          xk[-indices[j] - 1] = tk[j];
+        }
+      }
+    }
+  }
+
+  /**
+   * @brief Scatter and subtract values from a local vector t into a global
+   * vector x
+   *
+   * x[indices[j] + k * ldx] -= t[j + k * ldt]
+   *
+   * @param n Number of indices
+   * @param indices Indices in x
+   * @param m Number of vectors
+   * @param x The matrix of vectors
+   * @param ldx Leading dimension of x
+   * @param t The local vector
+   * @param ldt Leading dimension of t
+   */
+  void scatter_subtract(const int n, const int indices[], const int m,
+                        const T* t, const int ldt, T* x, const int ldx) const {
+    for (int k = 0; k < m; k++) {
+      T* xk = &x[ldx * k];
+      const T* tk = &t[ldt * k];
+      for (int j = 0; j < n; j++) {
+        xk[indices[j]] -= tk[j];
+      }
+    }
+  }
+
+  /**
    * @brief Solve the system of equations based on an LDL factorization
    *
-   * @param xvec The right hand side and solution vector
+   * @param nrhs The number of right-hand-sides
+   * @param x The right hand side and solution vector
+   * @param ldx Leading dimension of x
    */
-  void solve_ldl(Vector<T>* xvec) const {
-    T* x = xvec->get_array();
+  void solve_ldl(int nrhs, T* x, int ldx) const {
+    int max_pivots = 0, max_delayed = 0;
+    fact.get_max_pivots_and_delayed(&max_pivots, &max_delayed);
+    int ldt = max_pivots + max_delayed + max_contrib;
+    T* temp = new T[nrhs * ldt];
 
-    int max_pivots = fact.get_max_pivots();
-    int max_delayed = fact.get_max_delayed();
-    T* temp = new T[max_pivots + max_delayed + max_contrib];
-
-    for (int ks = 0; ks < num_snodes; ks++) {
+    for (int ks = 0; ks < num_nodes; ks++) {
       // Get the pointers to the factor data
       int num_pivots, num_delayed, num_ipiv;
       const int* pivots = nullptr;
@@ -1342,53 +1825,43 @@ class SparseLDL {
       int ldl = num_pivots + num_delayed + num_contrib;
 
       // Extract the variables from x - 2x2 pivots have negative entries
-      for (int j = 0; j < num_pivots; j++) {
-        int var = pivots[j];
-        if (var < 0) {
-          var = -var - 1;
-        }
-        temp[j] = x[var];
-      }
+      gather_pivot(num_pivots, pivots, nrhs, x, ldx, temp, ldl);
 
       if (ipiv) {
-        int nrhs = 1;
         int info;
         lapack_sytrs("L", ldl, nrhs, L, ldl, ipiv, temp, ldl, &info);
       } else if (num_pivots > 0) {
         // Find the solution t1 = L11^{-1} * t1, overwriting temp
         // with the solution
-        solve_pivot_lower(num_pivots, pivots, L, ldl, temp);
+        solve_pivot_lower(num_pivots, nrhs, pivots, L, ldl, temp, ldl);
 
         // Compute the matrix-vector t2 = L21 * t1 and add the contributions
         // to the lower block
         int size = num_delayed + num_contrib;
-        blas_gemv<T>("N", size, num_pivots, 1.0, &L[num_pivots], ldl, temp, 1,
-                     0.0, &temp[num_pivots], 1);
+        if (nrhs == 1) {
+          blas_gemv<T>("N", size, num_pivots, 1.0, &L[num_pivots], ldl, temp, 1,
+                       0.0, &temp[num_pivots], 1);
+        } else {
+          blas_gemm<T>("N", "N", size, nrhs, num_pivots, 1.0, &L[num_pivots],
+                       ldl, temp, ldl, 0.0, &temp[num_pivots], ldl);
+        }
 
         // Add the contributions
-        for (int j = 0, jj = num_pivots; j < num_delayed; j++, jj++) {
-          x[delayed[j]] -= temp[jj];
-        }
-        for (int jp = contrib_ptr[ks], jj = num_pivots + num_delayed;
-             jp < contrib_ptr[ks + 1]; jp++, jj++) {
-          x[contrib_rows[jp]] -= temp[jj];
-        }
+        const int* contrib_indices = &contrib_rows[contrib_ptr[ks]];
+        scatter_subtract(num_delayed, delayed, nrhs, &temp[num_pivots], ldl, x,
+                         ldx);
+        scatter_subtract(num_contrib, contrib_indices, nrhs,
+                         &temp[num_pivots + num_delayed], ldl, x, ldx);
 
         // Compute x = D11^{1} * temp
-        solve_pivot_diagonal(num_pivots, pivots, L, ldl, temp);
+        solve_pivot_diagonal(num_pivots, nrhs, pivots, L, ldl, temp, ldl);
       }
 
       // Assign the entries back
-      for (int j = 0; j < num_pivots; j++) {
-        int var = pivots[j];
-        if (var < 0) {
-          var = -var - 1;
-        }
-        x[var] = temp[j];
-      }
+      scatter_pivot(num_pivots, pivots, nrhs, temp, ldl, x, ldx);
     }
 
-    for (int ks = num_snodes - 1; ks >= 0; ks--) {
+    for (int ks = num_nodes - 1; ks >= 0; ks--) {
       // Get the pointers to the factor data
       int num_pivots, num_delayed, num_ipiv;
       const int* pivots = nullptr;
@@ -1405,39 +1878,29 @@ class SparseLDL {
         int ldl = num_pivots + num_delayed + num_contrib;
 
         // Extract the variables from x
-        for (int j = 0; j < num_pivots; j++) {
-          int var = pivots[j];
-          if (var < 0) {
-            var = -var - 1;
-          }
-          temp[j] = x[var];
-        }
+        gather_pivot(num_pivots, pivots, nrhs, x, ldx, temp, ldl);
 
         // Collect the values from the contributions
-        for (int j = 0, jj = num_pivots; j < num_delayed; j++, jj++) {
-          temp[jj] = x[delayed[j]];
-        }
-        for (int jp = contrib_ptr[ks], jj = num_pivots + num_delayed;
-             jp < contrib_ptr[ks + 1]; jp++, jj++) {
-          temp[jj] = x[contrib_rows[jp]];
-        }
+        const int* contrib_indices = &contrib_rows[contrib_ptr[ks]];
+        gather(num_delayed, delayed, nrhs, x, ldx, &temp[num_pivots], ldl);
+        gather(num_contrib, contrib_indices, nrhs, x, ldx,
+               &temp[num_pivots + num_delayed], ldl);
 
         // Compute the matrix-vector product
         int size = num_delayed + num_contrib;
-        blas_gemv<T>("T", size, num_pivots, -1.0, &L[num_pivots], ldl,
-                     &temp[num_pivots], 1, 1.0, temp, 1);
+        if (nrhs == 1) {
+          blas_gemv<T>("T", size, num_pivots, -1.0, &L[num_pivots], ldl,
+                       &temp[num_pivots], 1, 1.0, temp, 1);
+        } else {
+          blas_gemm<T>("T", "N", num_pivots, nrhs, size, -1.0, &L[num_pivots],
+                       ldl, &temp[num_pivots], ldl, 1.0, temp, ldl);
+        }
 
         // Solve L11^{T} * x = temp
-        solve_pivot_transpose(num_pivots, pivots, L, ldl, temp);
+        solve_pivot_transpose(num_pivots, nrhs, pivots, L, ldl, temp, ldl);
 
         // Assign the entries back
-        for (int j = 0; j < num_pivots; j++) {
-          int var = pivots[j];
-          if (var < 0) {
-            var = -var - 1;
-          }
-          x[var] = temp[j];
-        }
+        scatter_pivot(num_pivots, pivots, nrhs, temp, ldl, x, ldx);
       }
     }
 
@@ -1523,12 +1986,12 @@ class SparseLDL {
    * @param front_size The front size
    * @param front_vars The front variables
    * @param F The frontal matrix itself
-   * @param stack The stack for the contribution blocks
+   * @param contrib The contribution data
    * @param factor The factor contributions
    */
   int factor_front_matrix_cholesky(const int ks, const int fully_summed,
                                    const int front_size, const int front_vars[],
-                                   T F[], ContributionStack& stack,
+                                   T F[], ContributionData& contrib,
                                    MatrixFactor& factor) {
     // Cholesky implementation
     int num_delayed = 0;
@@ -1550,7 +2013,8 @@ class SparseLDL {
                  1.0, &F[num_pivots * (ldf + 1)], ldf);
 
     // Push the update to F22 onto the stack
-    stack.push(num_pivots, num_delayed, front_size, front_vars, F);
+    contrib.add_contribution(ks, num_pivots, num_delayed, front_size,
+                             front_vars, F);
 
     // Push the combined columns of L11 and L21 of the matrix onto the stack
     const int* pivots = front_vars;
@@ -1564,98 +2028,163 @@ class SparseLDL {
   /**
    * @brief Solve the system of equations based on a Cholesky factorization
    *
-   * @param xvec The right hand side and solution vector
+   * @param nrhs The number of right-hand-sides
+   * @param x The right hand side and solution vector
+   * @param ldx Leading dimension of x
    */
-  void solve_cholesky(Vector<T>* xvec) const {
-    T* x = xvec->get_array();
+  void solve_cholesky(int nrhs, T* x, int ldx) const {
+    int max_pivots = 0, max_delayed = 0;
+    fact.get_max_pivots_and_delayed(&max_pivots, &max_delayed);
+    int ldt = max_pivots + max_contrib;
+    T* temp = new T[nrhs * ldt];
 
-    int max_pivots = fact.get_max_pivots();
-    int max_delayed = fact.get_max_delayed();
-    T* temp = new T[max_pivots + max_delayed + max_contrib];
-
-    for (int ks = 0; ks < num_snodes; ks++) {
+    for (int ks = 0; ks < num_nodes; ks++) {
       // Get the pointers to the factor data
-      int num_pivots, num_delayed;
+      int num_pivots;
       const int* pivots = nullptr;
-      const int* delayed = nullptr;
       const T* L;
 
       // Get the factor L = (L11, L21) that constitute the factor data
-      fact.get_factor(ks, &num_pivots, &pivots, &num_delayed, &delayed, &L);
+      fact.get_factor(ks, &num_pivots, &pivots, nullptr, nullptr, &L);
       int num_contrib = contrib_ptr[ks + 1] - contrib_ptr[ks];
-      int ldl = num_pivots + num_delayed + num_contrib;
+      int ldl = num_pivots + num_contrib;
 
       // Extract the variables from x corresponding to the pivots which are
       // the columns shared by L11 and L21
-      for (int j = 0; j < num_pivots; j++) {
-        temp[j] = x[pivots[j]];
-      }
+      gather(num_pivots, pivots, nrhs, x, ldx, temp, ldl);
 
       // Compute the solution of L11 * t1 = t1
-      int nrhs = 1;
       blas_trsm<T>("L", "L", "N", "N", num_pivots, nrhs, 1.0, L, ldl, temp,
-                   num_pivots);
+                   ldl);
 
       // Assign the t1 entries back into the x vector
-      for (int j = 0; j < num_pivots; j++) {
-        x[pivots[j]] = temp[j];
-      }
+      scatter(num_pivots, pivots, nrhs, temp, ldl, x, ldx);
 
       // Compute the matrix-vector product t2 = L21 * t1
-      int size = num_delayed + num_contrib;
-      blas_gemv<T>("N", size, num_pivots, 1, &L[num_pivots], ldl, temp, 1, 0.0,
-                   &temp[num_pivots], 1);
+      if (nrhs == 1) {
+        blas_gemv<T>("N", num_contrib, num_pivots, 1, &L[num_pivots], ldl, temp,
+                     1, 0.0, &temp[num_pivots], 1);
+      } else {
+        blas_gemm<T>("N", "N", num_contrib, nrhs, num_pivots, 1.0,
+                     &L[num_pivots], ldl, temp, ldl, 0.0, &temp[num_pivots],
+                     ldl);
+      }
 
       // Add the contributions x -= t2
-      for (int j = 0, jj = num_pivots; j < num_delayed; j++, jj++) {
-        x[delayed[j]] -= temp[jj];
-      }
-      for (int jp = contrib_ptr[ks], jj = num_pivots + num_delayed;
-           jp < contrib_ptr[ks + 1]; jp++, jj++) {
-        x[contrib_rows[jp]] -= temp[jj];
-      }
+      const int* contrib_indices = &contrib_rows[contrib_ptr[ks]];
+      scatter_subtract(num_contrib, contrib_indices, nrhs, &temp[num_pivots],
+                       ldl, x, ldx);
     }
 
-    for (int ks = num_snodes - 1; ks >= 0; ks--) {
+    for (int ks = num_nodes - 1; ks >= 0; ks--) {
       // Get the pointers to the factor data
-      int num_pivots, num_delayed;
+      int num_pivots;
       const int* pivots = nullptr;
-      const int* delayed = nullptr;
       const T* L;
 
       // Get the factor L = (L11, L21) that constitute the factor data
-      fact.get_factor(ks, &num_pivots, &pivots, &num_delayed, &delayed, &L);
+      fact.get_factor(ks, &num_pivots, &pivots, nullptr, nullptr, &L);
       int num_contrib = contrib_ptr[ks + 1] - contrib_ptr[ks];
-      int ldl = num_pivots + num_delayed + num_contrib;
+      int ldl = num_pivots + num_contrib;
 
-      // Extract the variables from x
-      for (int j = 0; j < num_pivots; j++) {
-        temp[j] = x[pivots[j]];
-      }
+      // Collect the variables from x
+      gather(num_pivots, pivots, nrhs, x, ldx, temp, ldl);
 
       // Collect the values from the contributions
-      for (int j = 0, jj = num_pivots; j < num_delayed; j++, jj++) {
-        temp[jj] = x[delayed[j]];
-      }
-      for (int jp = contrib_ptr[ks], jj = num_pivots + num_delayed;
-           jp < contrib_ptr[ks + 1]; jp++, jj++) {
-        temp[jj] = x[contrib_rows[jp]];
-      }
+      const int* contrib_indices = &contrib_rows[contrib_ptr[ks]];
+      gather(num_contrib, contrib_indices, nrhs, x, ldx, &temp[num_pivots],
+             ldl);
 
-      // Compute the matrix-vector product t1 = t1 - L21 * t2
-      int size = num_delayed + num_contrib;
-      blas_gemv<T>("T", size, num_pivots, -1.0, &L[num_pivots], ldl,
-                   &temp[num_pivots], 1, 1.0, temp, 1);
+      // Compute the matrix-vector product t1 = t1 - L21^{T} * t2
+      if (nrhs == 1) {
+        blas_gemv<T>("T", num_contrib, num_pivots, -1.0, &L[num_pivots], ldl,
+                     &temp[num_pivots], 1, 1.0, temp, 1);
+      } else {
+        blas_gemm<T>("T", "N", num_pivots, nrhs, num_contrib, -1.0,
+                     &L[num_pivots], ldl, &temp[num_pivots], ldl, 1.0, temp,
+                     ldl);
+      }
 
       // Compute the solution x1 = L11^{-T} * t1
-      int nrhs = 1;
       blas_trsm<T>("L", "L", "T", "N", num_pivots, nrhs, 1.0, L, ldl, temp,
-                   num_pivots);
+                   ldl);
 
       // Assign the t1 entries back to x
-      for (int j = 0; j < num_pivots; j++) {
-        x[pivots[j]] = temp[j];
+      scatter(num_pivots, pivots, nrhs, temp, ldl, x, ldx);
+    }
+  }
+
+  void print_histogram() const {
+    std::vector<int> bins = {1, 2, 3, 4, 5, 6, 7, 8, 16, 32, 64, 128};
+    std::vector<int> counts(bins.size(), 0);
+
+    for (int ks = 0; ks < num_nodes; ks++) {
+      int width = node_ptr[ks + 1] - node_ptr[ks];
+
+      int b = 0;
+      while (b + 1 < static_cast<int>(bins.size()) && width >= bins[b + 1]) {
+        b++;
       }
+
+      counts[b]++;
+    }
+
+    std::cout << "\nSupernodes width histogram";
+    std::cout << "\n--------------------------\n";
+
+    int max_count = 0;
+    for (int b = 0; b < bins.size(); b++) {
+      if (counts[b] > max_count) {
+        max_count = counts[b];
+      }
+    }
+
+    for (int b = 0; b < static_cast<int>(bins.size()); b++) {
+      std::string label;
+      if (b + 1 < static_cast<int>(bins.size())) {
+        label = std::to_string(bins[b]) + "-" + std::to_string(bins[b + 1] - 1);
+      } else {
+        label = std::to_string(bins[b]) + "+";
+      }
+
+      std::cout << std::setw(8) << label << " : "
+                << std::string((70 * counts[b]) / max_count, '*') << " "
+                << counts[b] << "\n";
+    }
+
+    bins = {1, 2, 3, 4, 8, 12, 16};
+    std::fill(counts.begin(), counts.end(), 0);
+    for (int ks = 0; ks < num_nodes; ks++) {
+      int width = node_children_ptr[ks + 1] - node_children_ptr[ks];
+
+      int b = 0;
+      while (b + 1 < static_cast<int>(bins.size()) && width >= bins[b + 1]) {
+        b++;
+      }
+
+      counts[b]++;
+    }
+    std::cout << "\nChild counts";
+    std::cout << "\n------------\n";
+
+    max_count = 0;
+    for (int b = 0; b < bins.size(); b++) {
+      if (counts[b] > max_count) {
+        max_count = counts[b];
+      }
+    }
+
+    for (int b = 0; b < static_cast<int>(bins.size()); b++) {
+      std::string label;
+      if (b + 1 < static_cast<int>(bins.size())) {
+        label = std::to_string(bins[b]) + "-" + std::to_string(bins[b + 1] - 1);
+      } else {
+        label = std::to_string(bins[b]) + "+";
+      }
+
+      std::cout << std::setw(8) << label << " : "
+                << std::string((70 * counts[b]) / max_count, '*') << " "
+                << counts[b] << "\n";
     }
   }
 
@@ -1693,7 +2222,7 @@ class SparseLDL {
     }
 
     // Allocate storage that we'll need
-    int* work = new int[3 * ncols];
+    int* work = new int[4 * ncols];
 
     // Compute the elimination tree
     int* parent = new int[ncols];
@@ -1703,79 +2232,122 @@ class SparseLDL {
     int* post = new int[ncols];
     post_order_etree(ncols, parent, post, work);
 
-    // Count the column non-zeros in the post-ordering
-    int* Lnz = new int[ncols];
-    count_column_nonzeros(ncols, colp, rows, perm, iperm, parent, Lnz, work);
+    // Count the column non-zeros in the post-ordering, including diagonals
+    int* colcount = new int[ncols];
+    count_column_nonzeros(ncols, colp, rows, post, perm, iperm, parent,
+                          colcount, work);
 
-    // Initialize the super nodes. snode_to_var points from the
+    // Initialize the strict super nodes. snode_to_var points from the
     // supernode to the variables in the permuted order. After initializing the
     // the non-zero pattern in the matrix, we set snode_to_var so that it points
     // to the variables in their original order.
     int* var_to_snode = new int[ncols];
-    snode_to_var = new int[ncols];
-    num_snodes =
-        init_super_nodes(ncols, post, parent, Lnz, var_to_snode, snode_to_var);
+    int* snode_to_var = new int[ncols];
+    int num_snodes = init_super_nodes(ncols, post, parent, colcount,
+                                      var_to_snode, snode_to_var);
 
     // Count up the size of each snode
-    snode_size = new int[num_snodes];
-    std::fill(snode_size, snode_size + num_snodes, 0);
+    int* snode_ptr = new int[num_snodes + 1];
+    std::fill(snode_ptr, snode_ptr + num_snodes + 1, 0);
     for (int i = 0; i < ncols; i++) {
-      snode_size[var_to_snode[i]]++;
+      snode_ptr[var_to_snode[i] + 1]++;
     }
+    for (int i = 0; i < num_snodes; i++) {
+      snode_ptr[i + 1] += snode_ptr[i];
+    }
+
+    // Set the supernode parent array
+    int* snode_parent = new int[num_snodes];
+
+    // Find the supernode parents
+    for (int is = 0; is < num_snodes; is++) {
+      int last = snode_to_var[snode_ptr[is + 1] - 1];
+      int p = parent[last];
+      if (p >= 0) {
+        snode_parent[is] = var_to_snode[p];
+      } else {
+        snode_parent[is] = -1;
+      }
+    }
+
+    int* snode_children = new int[num_snodes];
+    int* snode_children_ptr = new int[num_snodes + 2];
+    count_node_children(num_snodes, snode_parent, snode_children_ptr,
+                        snode_children);
+
+    // Merge supernodes to obtain the relaxed supernodes
+    int* var_to_node = nullptr;
+    int* node_colcount = nullptr;
+    int* node_parent = nullptr;
+    num_nodes = merge_super_nodes(
+        ncols, num_snodes, snode_parent, snode_children_ptr, snode_children,
+        colcount, snode_ptr, snode_to_var, &node_ptr, &node_to_var,
+        &var_to_node, &node_colcount, &node_parent, work);
+
+    // Free the supernode information
+    delete[] snode_children;
+    delete[] snode_children_ptr;
+    delete[] var_to_snode;
+    delete[] snode_to_var;
+    delete[] snode_ptr;
+    delete[] snode_parent;
+    delete[] colcount;
+    delete[] post;
 
     // Count the children of supernodes within the post-ordered elimination
     // tree
-    num_children = new int[num_snodes];
-    count_super_node_children(ncols, parent, num_snodes, var_to_snode,
-                              num_children, work);
+    node_children = new int[num_nodes];
+    node_children_ptr = new int[num_nodes + 2];
+    count_node_children(num_nodes, node_parent, node_children_ptr,
+                        node_children);
+    delete[] node_parent;
 
     // Count up the sizes of the contribution blocks
-    contrib_ptr = new int[num_snodes + 1];
+    contrib_ptr = new int[num_nodes + 1];
     contrib_ptr[0] = 0;
-    for (int is = 0, i = 0; is < num_snodes; i += snode_size[is], is++) {
-      int var = snode_to_var[i + snode_size[is] - 1];
-      contrib_ptr[is + 1] = Lnz[var];
+    for (int is = 0, i = 0; is < num_nodes; is++) {
+      int ns = node_ptr[is + 1] - node_ptr[is];
+      contrib_ptr[is + 1] = node_colcount[is] - ns;
     }
 
     // Count up the contribution block pointer
-    for (int i = 0; i < num_snodes; i++) {
+    for (int i = 0; i < num_nodes; i++) {
       contrib_ptr[i + 1] += contrib_ptr[i];
     }
 
     // Find the max contribution size
     max_contrib = 0;
-    for (int i = 0; i < num_snodes; i++) {
+    for (int i = 0; i < num_nodes; i++) {
       if (contrib_ptr[i + 1] - contrib_ptr[i] > max_contrib) {
         max_contrib = contrib_ptr[i + 1] - contrib_ptr[i];
       }
     }
 
     // Fill in the rows in the contribution blocks
-    contrib_rows = new int[contrib_ptr[num_snodes]];
-    build_nonzero_pattern(ncols, colp, rows, perm, iperm, parent, num_snodes,
-                          snode_size, var_to_snode, snode_to_var, contrib_ptr,
+    contrib_rows = new int[contrib_ptr[num_nodes]];
+    build_nonzero_pattern(ncols, colp, rows, perm, iperm, parent, num_nodes,
+                          node_ptr, var_to_node, node_to_var, contrib_ptr,
                           contrib_rows, work);
 
     // Permute the snode_to_var variables so that each snode_to_var points
     // to the the original matrix ordering
     if (perm) {
       for (int i = 0; i < ncols; i++) {
-        snode_to_var[i] = perm[snode_to_var[i]];
+        node_to_var[i] = perm[node_to_var[i]];
       }
     }
 
     estimate_cholesky_nonzeros(work);
 
-    // Allocate the arrays within the factorization
-    int int_nnz = int(delay_growth * cholesky_int_nnz);
-    int factor_nnz = int(delay_growth * cholesky_factor_nnz);
-    fact.allocate(num_snodes, int_nnz, factor_nnz);
+    // Set the array sizes within the factorization
+    std::size_t int_nnz = std::size_t(delay_growth * cholesky_int_nnz);
+    std::size_t factor_nnz = std::size_t(delay_growth * cholesky_factor_nnz);
+    fact.set_sizes(num_snodes, int_nnz, factor_nnz);
 
     delete[] work;
     delete[] parent;
-    delete[] post;
-    delete[] Lnz;
-    delete[] var_to_snode;
+    delete[] var_to_node;
+    delete[] node_colcount;
 
     if (perm) {
       delete[] perm;
@@ -1810,14 +2382,14 @@ class SparseLDL {
     if (perm && iperm) {
       for (int k = 0; k < ncols; k++) {
         // Get the original column index for the matrix
-        int ka = perm[k];
+        const int ka = perm[k];
 
         // Loop over the column of k
-        int start = colp[ka];
-        int end = colp[ka + 1];
+        const int start = colp[ka];
+        const int end = colp[ka + 1];
         for (int ip = start; ip < end; ip++) {
           // Get the original row index
-          int ia = rows[ip];
+          const int ia = rows[ip];
 
           // Get the new row index
           int i = iperm[ia];
@@ -1842,8 +2414,8 @@ class SparseLDL {
     } else {
       for (int k = 0; k < ncols; k++) {
         // Loop over the column of k
-        int start = colp[k];
-        int end = colp[k + 1];
+        const int start = colp[k];
+        const int end = colp[k + 1];
         for (int ip = start; ip < end; ip++) {
           int i = rows[ip];
 
@@ -1925,7 +2497,7 @@ class SparseLDL {
     while (last >= 0) {
       // Look at the top of the stack and find the top node p and
       // its child i
-      int p = stack[last];
+      const int p = stack[last];
       int i = head[p];
 
       if (i == -1) {
@@ -1946,71 +2518,184 @@ class SparseLDL {
   }
 
   /**
-   * @brief Build the elimination tree and compute the number of non-zeros in
-   * each column.
+   * @brief Find the root of the row etree
+   *
+   * @param p The given node
+   * @param ancestor Array of ancestors
+   * @return int Root found
+   */
+  int find_root(int p, int ancestor[]) const {
+    int r = p;
+    while (ancestor[r] != r) {
+      r = ancestor[r];
+    }
+
+    // Path compression
+    while (ancestor[p] != p) {
+      int next = ancestor[p];
+      ancestor[p] = r;
+      p = next;
+    }
+
+    return r;
+  }
+
+  /**
+   * @brief Initialize the data required for the column count algorithm
+   *
+   * @param ncols The number of columns in the matrix
+   * @param parent The elimination tree/forest
+   * @param post Post-ordering of the etree
+   * @param first first[k] is the first descendant of node k
+   * @param delta The node weight
+   */
+  void init_column_count_data(const int ncols, const int parent[],
+                              const int post[], int first[],
+                              int delta[]) const {
+    std::fill(first, first + ncols, -1);
+    std::fill(delta, delta + ncols, 0);
+
+    // Propagate minimum postorder index upward through the tree
+    for (int k = 0; k < ncols; k++) {
+      int j = post[k];
+      if (first[j] == -1) {
+        delta[j] = 1;
+      }
+      while (j != -1 && first[j] == -1) {
+        first[j] = k;
+        j = parent[j];
+      }
+    }
+  }
+
+  /**
+   * @brief Count the number of non-zeros in the colums
    *
    * @param ncols The number of columns in the matrix
    * @param colp The pointer into each column
    * @param rows The row indices for each matrix entry
+   * @param post Post-ordering of the matrix
    * @param perm The permutation array
    * @param iperm The inverse permutation array
    * @param parent The elimination tree/forest
-   * @param Lnz The number of non-zeros in each column
-   * @param work Work array of size ncols
+   * @param colcount The number of non-zeros
+   * @param work Work array with size at least 4 times ncols
    */
   void count_column_nonzeros(const int ncols, const int colp[],
-                             const int rows[], const int perm[],
-                             const int iperm[], const int parent[], int Lnz[],
-                             int work[]) {
-    int* flag = work;
-    std::fill(Lnz, Lnz + ncols, 0);
-    std::fill(flag, flag + ncols, -1);
+                             const int rows[], const int post[],
+                             const int perm[], const int iperm[],
+                             const int parent[], int colcount[],
+                             int work[]) const {
+    int* first = &work[0];
+    init_column_count_data(ncols, parent, post, first, colcount);
+
+    // Initialize the remaining data
+    int* prevleaf = &work[ncols];
+    int* maxfirst = &work[2 * ncols];
+    int* ancestor = &work[3 * ncols];
+
+    std::fill(prevleaf, prevleaf + ncols, -1);
+    std::fill(maxfirst, maxfirst + ncols, -1);
+    std::iota(ancestor, ancestor + ncols, 0);
 
     if (perm && iperm) {
-      // Loop over the permuted columns of the matrix
       for (int k = 0; k < ncols; k++) {
-        flag[k] = k;
-        int ka = perm[k];  // Original column in A
+        const int j = post[k];
 
-        // Loop over the k-th column of the permuted matrix
-        int ip_end = colp[ka + 1];
-        for (int ip = colp[ka]; ip < ip_end; ip++) {
-          int ia = rows[ip];  // Original row in A
-          int i = iperm[ia];  // Row in permuted A
+        // Get the original column in the matrix
+        const int ja = perm[j];
 
-          if (i < k) {
-            // Scan up the etree
-            while (flag[i] != k) {
-              Lnz[i]++;
-              flag[i] = k;
+        // If j is not a root node
+        if (parent[j] != -1) {
+          colcount[parent[j]]--;
+        }
 
-              // Set the next parent
-              i = parent[i];
-            }
+        const int start = colp[ja];
+        const int end = colp[ja + 1];
+        for (int ip = start; ip < end; ip++) {
+          // Row in the original matrix
+          const int ia = rows[ip];
+
+          // Row in the new matrix
+          int i = iperm[ia];
+
+          // Only use the sub diagonal part A[i, j], i > j.
+          if (i <= j) {
+            continue;
           }
+
+          // If this column's subtree has already been accounted for in row i,
+          // then j is not a new leaf of row i's pruned row subtree.
+          if (first[j] <= maxfirst[i]) {
+            continue;
+          }
+
+          // Increment the weight by 1
+          colcount[j]++;
+          maxfirst[i] = first[j];
+          const int jprev = prevleaf[i];
+          prevleaf[i] = j;
+
+          if (jprev != -1) {
+            // Subsequent leaf: subtract overlap above the LCA.
+            int q = find_root(jprev, ancestor);
+            colcount[q]--;
+          }
+        }
+
+        if (parent[j] != -1) {
+          ancestor[j] = parent[j];
         }
       }
     } else {
-      // Loop over the original ordering of the matrix
       for (int k = 0; k < ncols; k++) {
-        flag[k] = k;
+        const int j = post[k];
 
-        // Loop over the k-th column of the original matrix
-        int ip_end = colp[k + 1];
-        for (int ip = colp[k]; ip < ip_end; ip++) {
-          int i = rows[ip];
+        // If j is not a root node
+        if (parent[j] != -1) {
+          colcount[parent[j]]--;
+        }
 
-          if (i < k) {
-            // Scan up the etree
-            while (flag[i] != k) {
-              Lnz[i]++;
-              flag[i] = k;
+        const int start = colp[j];
+        const int end = colp[j + 1];
+        for (int ip = start; ip < end; ip++) {
+          const int i = rows[ip];
 
-              // Set the next parent
-              i = parent[i];
-            }
+          // Only use the sub diagonal part A[i, j], i > j.
+          if (i <= j) {
+            continue;
+          }
+
+          // If this column's subtree has already been accounted for in row i,
+          // then j is not a new leaf of row i's pruned row subtree.
+          if (first[j] <= maxfirst[i]) {
+            continue;
+          }
+
+          // Increment the weight by 1
+          colcount[j]++;
+          maxfirst[i] = first[j];
+          const int jprev = prevleaf[i];
+          prevleaf[i] = j;
+
+          if (jprev != -1) {
+            // Subsequent leaf: subtract overlap above the LCA.
+            int q = find_root(jprev, ancestor);
+            colcount[q]--;
           }
         }
+
+        if (parent[j] != -1) {
+          ancestor[j] = parent[j];
+        }
+      }
+    }
+
+    // Accumulate delta up the elimination tree.
+    for (int k = 0; k < ncols; k++) {
+      const int j = post[k];
+      if (parent[j] != -1) {
+        colcount[parent[j]] += colcount[j];
       }
     }
   }
@@ -2023,13 +2708,13 @@ class SparseLDL {
    * @param ncols The number of columns in the matrix
    * @param post The etree post ordering
    * @param parent The etree parents
-   * @param Lnz The number of non-zeros per variable
+   * @param colcount The number of non-zeros per variable
    * @param vtosn Variable to super node
    * @param sntov Super node to variable
    * @return int The number of super nodes
    */
   int init_super_nodes(int ncols, const int post[], const int parent[],
-                       const int Lnz[], int vtosn[], int sntov[]) {
+                       const int colcount[], int vtosn[], int sntov[]) {
     // First find the supernodes
     int snode = 0;
 
@@ -2047,7 +2732,7 @@ class SparseLDL {
         next_var = post[i];
       }
       while (i < ncols && parent[var] == next_var &&
-             (Lnz[next_var] == Lnz[var] - 1)) {
+             (colcount[next_var] == colcount[var] - 1)) {
         var = next_var;
         vtosn[var] = snode;
         sntov[i] = var;
@@ -2062,42 +2747,252 @@ class SparseLDL {
   }
 
   /**
-   * @brief Count up the number of children for each super node
+   * @brief Merge supernodes into relaxed supernodes for performance
    *
-   * @param ncols Number of columns
-   * @param parent Parent pointer for the elimination tree
-   * @param ns Number of super nodes
-   * @param vtosn Variable to super node array
-   * @param nchild Number of children (output)
-   * @param work Work array - at least number of super nodes
+   * @param ncols Number of columns in the matrix
+   * @param num_snodes Number of fundamental supernodes
+   * @param snode_parent Supernode parent of each supernode
+   * @param colcount Column count for the original set of columns
+   * @param snode_ptr Pointer into the supernodes
+   * @param snode_to_var Variables that comprise a supernode
+   * @param new_node_ptr_ New pointer into the merged nodes
+   * @param new_node_to_vars_ New variables that comprise a merged node
+   * @param new_vars_to_node_ New merged nodes for each variable
+   * @param new_colcounts_ New column count - now strictly below the supernode
+   * @param new_node_parent_ New node parent
+   * @param work Work array of dimension 4 x num_snodes
+   * @param max_node_width Input to control the maximum width of a merged node
+   * @param max_zeros_added Max zeros added to a node at any merge step
+   * @return int Number of new merged nodes
    */
-  void count_super_node_children(const int ncols, const int parent[],
-                                 const int ns, const int vtosn[], int nchild[],
-                                 int work[]) {
-    int* snode_parent = work;
-    std::fill(nchild, nchild + ns, 0);
-    std::fill(snode_parent, snode_parent + ns, -1);
+  int merge_super_nodes(int ncols, int num_snodes, const int snode_parent[],
+                        const int snode_children_ptr[],
+                        const int snode_children[], const int colcount[],
+                        const int snode_ptr[], const int snode_to_var[],
+                        int* new_node_ptr_[], int* new_node_to_vars_[],
+                        int* new_vars_to_node_[], int* new_colcounts_[],
+                        int* new_node_parent_[], int work[],
+                        const int max_node_width = 64,
+                        const int max_zeros_added = 256) {
+    int* root_of = work;
+    int* root_colcount = &work[num_snodes];
+    int* width = &work[2 * num_snodes];
+    int* new_non_zeros = &work[3 * num_snodes];
+    std::fill(new_non_zeros, new_non_zeros + num_snodes, 0);
 
-    // Set up the snode parents first
-    for (int j = 0; j < ncols; j++) {
-      int pj = parent[j];
+    // Initialize the supernode data
+    for (int is = 0; is < num_snodes; is++) {
+      int var = snode_to_var[snode_ptr[is]];
 
-      if (pj != -1) {
-        int js = vtosn[j];
-        int pjs = vtosn[pj];
+      // Column count indexed to super node
+      width[is] = snode_ptr[is + 1] - snode_ptr[is];
+      root_colcount[is] = colcount[var];
+    }
 
-        if (pjs != js) {
-          snode_parent[js] = pjs;
+    // Initialize the root of each supernode as itself
+    for (int is = 0; is < num_snodes; is++) {
+      root_of[is] = is;
+    }
+
+    auto find_root = [&](int s) {
+      while (root_of[s] != s) {
+        root_of[s] = root_of[root_of[s]];
+        s = root_of[s];
+      }
+      return s;
+    };
+
+    // Loop over the supernodes (already in post-order)
+    for (int is = 0; is < num_snodes; is++) {
+      // Find the parent root
+      int start = snode_children_ptr[is];
+      int end = snode_children_ptr[is + 1];
+
+      std::vector<int> kids(end - start);
+      for (int ip = start, i = 0; ip < end; ip++, i++) {
+        int child = snode_children[ip];
+        kids[i] = ip;
+      }
+
+      std::sort(kids.begin(), kids.end(), [&](int a, int b) {
+        return width[find_root(a)] < width[find_root(b)];
+      });
+
+      // Loop over the children
+      for (int i = 0; i < kids.size(); i++) {
+        int ip = kids[i];
+
+        // For each child, check if we can merge
+        int child = snode_children[ip];
+
+        // Compute parent root here because it may change with merges
+        int r_parent = find_root(is);
+        int r_child = find_root(child);
+
+        // Compute the width of the new candidate node
+        int merged_width = width[r_child] + width[r_parent];
+
+        // Check if the merge criterion is satisfied
+        if (r_child != r_parent && merged_width <= max_node_width) {
+          // Column count of the number of added zeros
+          int extra_rows =
+              std::max(0, root_colcount[r_parent] -
+                              (root_colcount[r_child] - width[r_parent]));
+          int zeros_added = extra_rows * width[r_child];
+
+          // Okay, merge the supernodes
+          if (new_non_zeros[r_parent] + new_non_zeros[r_child] + zeros_added <=
+              max_zeros_added) {
+            root_colcount[r_parent] =
+                merged_width + root_colcount[r_parent] - width[r_parent];
+            width[r_parent] = merged_width;
+            root_of[r_child] = r_parent;
+            new_non_zeros[r_parent] += zeros_added + new_non_zeros[r_child];
+          }
         }
       }
     }
 
-    // Count up the children within the post-ordered elmination tree
-    for (int i = 0; i < ns; i++) {
-      if (snode_parent[i] != -1) {
-        nchild[snode_parent[i]]++;
+    // Now, create the new info about the columns/non-zero
+    int* snode_to_new = &work[2 * num_snodes];
+    int* new_indices = &work[3 * num_snodes];
+    std::fill(snode_to_new, snode_to_new + num_snodes, -1);
+    std::fill(new_indices, new_indices + num_snodes, -1);
+
+    int nnodes = 0;
+    for (int is = 0; is < num_snodes; is++) {
+      int r = find_root(is);
+      if (is == r) {
+        new_indices[is] = nnodes;
+        nnodes++;
       }
     }
+
+    for (int is = 0; is < num_snodes; is++) {
+      snode_to_new[is] = new_indices[find_root(is)];
+    }
+
+    // Allocate new variables
+    int* new_vars_to_node = new int[ncols];
+    int* new_node_to_vars = new int[ncols];
+    int* new_colcounts = new int[nnodes];
+    int* new_node_ptr = new int[nnodes + 1];
+    std::fill(new_node_ptr, new_node_ptr + nnodes + 1, 0);
+
+    // Count up the sizes of the new supernodes
+    for (int s = 0; s < num_snodes; s++) {
+      int ks = snode_to_new[s];
+      new_node_ptr[ks + 1] += snode_ptr[s + 1] - snode_ptr[s];
+    }
+    for (int ks = 0; ks < nnodes; ks++) {
+      new_node_ptr[ks + 1] += new_node_ptr[ks];
+    }
+
+    // Fill in the new supernode variables
+    for (int s = 0; s < num_snodes; s++) {
+      int ks = snode_to_new[s];
+      for (int ip = snode_ptr[s]; ip < snode_ptr[s + 1]; ip++) {
+        int var = snode_to_var[ip];
+        new_node_to_vars[new_node_ptr[ks]] = var;
+        new_vars_to_node[var] = ks;
+        new_node_ptr[ks]++;
+      }
+    }
+
+    // Reset the pointer
+    for (int s = nnodes; s > 0; s--) {
+      new_node_ptr[s] = new_node_ptr[s - 1];
+    }
+    new_node_ptr[0] = 0;
+
+    // Set the column counts
+    for (int s = 0; s < num_snodes; s++) {
+      int ks = snode_to_new[s];
+
+      // Here relying on path compression from the first pass
+      new_colcounts[ks] = root_colcount[find_root(s)];
+    }
+
+    int* new_node_parent = new int[nnodes];
+    std::fill(new_node_parent, new_node_parent + nnodes, -1);
+
+    // Compute parent of each merged node
+    for (int s = 0; s < num_snodes; s++) {
+      int r = find_root(s);
+
+      // Only process representatives of merged nodes
+      if (r != s) {
+        continue;
+      }
+
+      int ks = snode_to_new[r];
+      int ps = snode_parent[r];
+
+      if (ps >= 0) {
+        int rp = find_root(ps);
+        int kp = snode_to_new[rp];
+
+        // Parent should be outside the merged node
+        if (kp != ks) {
+          new_node_parent[ks] = kp;
+        }
+      }
+    }
+
+    *new_node_ptr_ = new_node_ptr;
+    *new_node_to_vars_ = new_node_to_vars;
+    *new_vars_to_node_ = new_vars_to_node;
+    *new_colcounts_ = new_colcounts;
+    *new_node_parent_ = new_node_parent;
+
+    return nnodes;
+  }
+
+  /**
+   * @brief Count up the number of children for each super node. Place all roots
+   * at the end of the child array
+   *
+   * @param nnodes Number of nodes
+   * @param node_parent Parent pointer
+   * @param sn_child_ptr Pointer to children and roots (length nnodes + 2)
+   * @param sn_children Supernode children and roots
+   */
+  void count_node_children(const int nnodes, const int node_parent[],
+                           int sn_child_ptr[], int sn_children[]) {
+    std::fill(sn_child_ptr, sn_child_ptr + nnodes + 2, 0);
+
+    // Count up the children within the post-ordered elmination tree
+    for (int i = 0; i < nnodes; i++) {
+      int p = node_parent[i];
+      if (p != -1) {
+        sn_child_ptr[p + 1]++;
+      } else {  // This is a root, put it at the end
+        sn_child_ptr[nnodes + 1]++;
+      }
+    }
+
+    // Count up the children
+    for (int i = 0; i < nnodes + 1; i++) {
+      sn_child_ptr[i + 1] += sn_child_ptr[i];
+    }
+
+    // Set the children
+    for (int i = 0; i < nnodes; i++) {
+      int p = node_parent[i];
+      if (p != -1) {
+        sn_children[sn_child_ptr[p]] = i;
+        sn_child_ptr[p]++;
+      } else {  // This is a root, put it at the end
+        sn_children[sn_child_ptr[nnodes]] = i;
+        sn_child_ptr[nnodes]++;
+      }
+    }
+
+    // Reset the child array
+    for (int i = nnodes; i >= 0; i--) {
+      sn_child_ptr[i + 1] = sn_child_ptr[i];
+    }
+    sn_child_ptr[0] = 0;
   }
 
   /**
@@ -2106,105 +3001,157 @@ class SparseLDL {
    *
    * Find the non-zero rows below the diagonal in a column of L.
    *
-   * This utilizes the elimination tree
-   *
+   * @param ncols
    * @param colp Column pointer
    * @param rows Rows for each column
-   * @param parent Parent in the elimination tree
-   * @param row_count The number of indices found so far
-   * @param row_indices The array of row indices
-   * @param tag Tag for the visited nodes
-   * @param flag Array of flags (tag must not be contained in flag initially)
+   * @param perm Permutation array
+   * @param iperm Inverse permutation
+   * @param parent Parent array encoding the etree
+   * @param ns Number of super nodes
+   * @param snptr Pointer to the beginning/end of each super node
+   * @param vtosn Supernode index for each variable
+   * @param sntov Variable indices for each super node
+   * @param cptr Pointer into the row indices for each column
+   * @param cvars Row indices for each column
+   * @param work Work array - size 4 * ns
    */
   void build_nonzero_pattern(const int ncols, const int colp[],
                              const int rows[], const int perm[],
                              const int iperm[], const int parent[], int ns,
-                             int snsize[], const int vtosn[], const int sntov[],
+                             int snptr[], const int vtosn[], const int sntov[],
                              const int cptr[], int cvars[], int work[]) {
     int* Lnz = work;
-    int* flag = &work[ncols];
-    int* snvar = &work[2 * ncols];
+    int* flag = &work[ns];
+    int* snvar = &work[2 * ns];
+    int* snparent = &work[3 * ns];
 
-    std::fill(Lnz, Lnz + ncols, 0);
-    std::fill(flag, flag + ncols, -1);
+    std::fill(Lnz, Lnz + ns, 0);
+    std::fill(flag, flag + ns, -1);
 
     // Find the last variable in each super node
-    for (int ks = 0, k = 0; ks < ns; k += snsize[ks], ks++) {
-      snvar[ks] = sntov[k + snsize[ks] - 1];
+    for (int ks = 0; ks < ns; ks++) {
+      snvar[ks] = sntov[snptr[ks + 1] - 1];
+    }
+
+    // Find the supernode parents
+    for (int is = 0; is < ns; is++) {
+      int last = snvar[is];
+      int p = parent[last];
+      if (p >= 0) {
+        snparent[is] = vtosn[p];
+      } else {
+        snparent[is] = -1;
+      }
     }
 
     if (perm && iperm) {
-      // Loop over the permuted columns of the matrix
+      // Loop over the rows of the permuted matrix
       for (int k = 0; k < ncols; k++) {
-        flag[k] = k;
+        // Find the super node associated with ks
+        int ks = vtosn[k];
         int ka = perm[k];  // Original column in A
 
-        // Loop over the k-th column of the permuted matrix
-        int iptr_end = colp[ka + 1];
-        for (int iptr = colp[ka]; iptr < iptr_end; iptr++) {
-          int ia = rows[iptr];
+        const int start = colp[ka];
+        const int end = colp[ka + 1];
+        for (int ip = start; ip < end; ip++) {
+          // Get the corresponding row in the original matrix
+          int ia = rows[ip];
+
+          // Get the row in the permuted matrix
           int i = iperm[ia];
 
           if (i < k) {
-            // Scan up the etree
-            while (flag[i] != k) {
-              // Get the super node from the variable
-              int is = vtosn[i];
-
-              // Find the last variable in this super node
-              int ivar = snvar[is];
-
-              // If this is the last variable, add this to the row
-              if (ivar == i) {
-                cvars[cptr[is] + Lnz[is]] = ka;
-                Lnz[is]++;
+            // Loop over the supernode parents
+            for (int is = vtosn[i]; is >= 0 && is != ks; is = snparent[is]) {
+              if (flag[is] == k) {
+                break;
               }
 
-              // Flag the node
-              flag[i] = k;
-
-              // Set the next parent
-              i = parent[i];
+              flag[is] = k;
+              cvars[cptr[is] + Lnz[is]] = ka;
+              Lnz[is]++;
             }
           }
         }
       }
     } else {
-      // Loop over the original ordering of the matrix
+      // Loop over the rows of the original matrix
       for (int k = 0; k < ncols; k++) {
-        flag[k] = k;
+        // Find the super node associated with ks
+        int ks = vtosn[k];
 
-        // Loop over the k-th column of the original matrix
-        int iptr_end = colp[k + 1];
-        for (int iptr = colp[k]; iptr < iptr_end; iptr++) {
-          int i = rows[iptr];
+        const int start = colp[k];
+        const int end = colp[k + 1];
+        for (int ip = start; ip < end; ip++) {
+          // Get the corresponding row
+          int i = rows[ip];
 
           if (i < k) {
-            // Scan up the etree
-            while (flag[i] != k) {
-              // Get the super node from the variable
-              int is = vtosn[i];
-
-              // Find the last variable in this super node
-              int ivar = snvar[is];
-
-              // If this is the last variable, add this to the row
-              if (ivar == i) {
-                cvars[cptr[is] + Lnz[is]] = k;
-                Lnz[is]++;
+            // Loop over the supernode parents
+            for (int is = vtosn[i]; is >= 0 && is != ks; is = snparent[is]) {
+              if (flag[is] == k) {
+                break;
               }
 
-              // Flag the node
-              flag[i] = k;
-
-              // Set the next parent
-              i = parent[i];
+              flag[is] = k;
+              cvars[cptr[is] + Lnz[is]] = k;
+              Lnz[is]++;
             }
           }
         }
       }
     }
   }
+
+  /**
+   * @brief Compute the square root of an integer and cast it to an integer
+   */
+  int approx_root(int val) { return int(std::sqrt(val)); }
+
+  /**
+   * @brief Given the square root of two integers, find the sum of the square
+   * roots of the integers
+   *
+   * Given a and b where a = sqrt(v) and b = sqrt(w)
+   *
+   * Find c = sqrt(v + w) = sqrt(v) * sqrt(1 + w / v) so that
+   *
+   * c = a sqrt(1 + b * b / a * a)
+   *
+   * @param a First square root
+   * @param b Second square root
+   * @return int The resulting integer
+   */
+  int approx_root_sum(int count, int a[], int incr) {
+    int amax = 0;
+    for (int i = 0; i < count; i++) {
+      if (amax > a[i * incr]) {
+        amax = a[i * incr];
+      }
+    }
+
+    double sum = 0.0;
+    for (int i = 0; i < count; i++) {
+      double r = 1.0 * a[i * incr] / amax;
+      sum += r * r;
+    }
+
+    return int(amax * std::sqrt(sum));
+  }
+
+  /**
+   * @brief Estimate the square root of the flops at a particular node
+   */
+  // void estimate_flops(int flops_est[]) {
+  //   for (int ks = 0; ks < num_nodes; ks++) {
+  //     int ns = node_ptr[ks + 1] - node_ptr[ks];
+  //     int contrib_size = contrib_ptr[ks + 1] - contrib_ptr[ks];
+
+  //     // Set the flops estimate for the node
+  //     flops_est[ks] =
+  //         approx_root(ns * (ns + contrib_size) * (ns + contrib_size));
+  //   }
+  // }
 
   /**
    * @brief Estimate the non-zeros in the factor and stack and max frontal
@@ -2221,19 +3168,22 @@ class SparseLDL {
     stack_nnz_estimate = 0;
 
     int top = 0;
-    for (int ks = 0; ks < num_snodes; ks++) {
-      int ns = snode_size[ks];
+    for (int ks = 0; ks < num_nodes; ks++) {
+      int ns = node_ptr[ks + 1] - node_ptr[ks];
+      int contrib_size = contrib_ptr[ks + 1] - contrib_ptr[ks];
 
       // Find the total stack size at this point
       int int_size = 0;
       int nnz_size = 0;
-      for (int tmp_top = top; tmp_top >= 0; tmp_top -= 2) {
+      for (int tmp_top = top - 2; tmp_top >= 0; tmp_top -= 2) {
         int_size += work[tmp_top];
         nnz_size += work[tmp_top + 1];
       }
 
       // Now pop the children off the stack
-      for (int k = 0; k < num_children[ks]; k++) {
+      int num_children = node_children_ptr[ks + 1] - node_children_ptr[ks];
+      int k = 0;
+      for (; k < num_children && top > 0; k++) {
         top -= 2;
       }
 
@@ -2243,8 +3193,6 @@ class SparseLDL {
       if (nnz_size > stack_nnz_estimate) {
         stack_nnz_estimate = nnz_size;
       }
-
-      int contrib_size = contrib_ptr[ks + 1] - contrib_ptr[ks];
 
       if (max_frontal_mat_dimension > ns + contrib_size) {
         max_frontal_mat_dimension = ns + contrib_size;
@@ -2259,8 +3207,8 @@ class SparseLDL {
     // Count up the size for the cholesky factorization
     cholesky_int_nnz = 0;
     cholesky_factor_nnz = 0;
-    for (int is = 0; is < num_snodes; is++) {
-      int ns = snode_size[is];
+    for (int is = 0; is < num_nodes; is++) {
+      int ns = node_ptr[is + 1] - node_ptr[is];
       int contrib_size = contrib_ptr[is + 1] - contrib_ptr[is];
       int ldf = contrib_size + ns;
       cholesky_int_nnz += ns;           // Space to store pivots
@@ -2303,17 +3251,16 @@ class SparseLDL {
   // Permutation array defined - nullptr if order == NATURAL
   int* invperm;
 
-  // Number of super nodes in the matrix
-  int num_snodes;
+  // Number of super nodes/relaxed super nodes in the matrix
+  int num_nodes;
 
-  // Size of the super nodes
-  int* snode_size;
+  // Pointer to each relaxed super node and variables within the super node
+  int* node_ptr;
+  int* node_to_var;
 
-  // Go from var to super node or super node to variable
-  int* snode_to_var;
-
-  // Number of children for each super node
-  int* num_children;
+  // Pointer down the snode etree from parent to children
+  int* node_children_ptr;
+  int* node_children;
 
   // The contribution blocks sizes (without delayed pivots)
   int max_contrib;    // Max size

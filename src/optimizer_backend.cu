@@ -5,7 +5,7 @@
 
 #include "a2dcore.h"
 #include "amigo.h"
-#include "optimizer_backend.h"
+#include "interior_point_backend.h"
 
 namespace amigo {
 
