@@ -634,7 +634,7 @@ class Model:
 
         # Add staged data
         for data_name, data in model._staged_data:
-            self._staged_data.append(([name + "." + data_name], data))
+            self._staged_data.append((name + "." + data_name, data))
 
         # Add fixed variables
         for expr, indices in model._staged_fixed_vars:
@@ -893,7 +893,8 @@ class Model:
         d_array = self.problem.get_data_vector().get_array()
 
         for name, data in self._staged_data:
-            d_array[self.get_indices(name)] = data
+            indices = self.get_indices(name)
+            d_array[indices] = data
 
         return
 
@@ -1552,7 +1553,7 @@ class Model:
 
         # Optionally drop a trivial CMakeLists.txt into the source_dir
         cmakelists = source_dir / "CMakeLists.txt"
-        cmakelists.write_text(f"""\
+        cfg_str = f"""\
 cmake_minimum_required(VERSION 3.25)
 project({self.module_name} LANGUAGES CXX)
 
@@ -1566,7 +1567,8 @@ amigo_add_python_module(
     NAME {self.module_name}
     SOURCES {self.module_name}.cpp
 )
-""")
+"""
+        cmakelists.write_text(cfg_str)
 
         # Locate the installed Amigo CMake package inside the Python package
         amigo_cmake_dir = get_cmake_dir()
