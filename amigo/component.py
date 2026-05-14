@@ -1248,7 +1248,7 @@ class Component:
 
         module_class_name = f'"{self.name}"'
         cpp = f"py::class_<{cls}, amigo::{group_type}Base<double, policy>, std::shared_ptr<{cls}>>"
-        cpp += f"({mod_ident}, {module_class_name}).def("
+        cpp += f"({mod_ident}, {module_class_name}, py::module_local()).def("
 
         vec_cls = "std::shared_ptr<amigo::Vector<int>>"
         cpp += f"py::init<int, {vec_cls}, {vec_cls}, {vec_cls}>())"

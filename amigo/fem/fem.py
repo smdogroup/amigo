@@ -339,13 +339,23 @@ class Problem:
         soln_space: basis.SolutionSpace,
         data_space: basis.SolutionSpace,
         geo_space: basis.SolutionSpace,
-        integrand_map={},
+        integrand_map=None,
         integrand_formulation="potential",
-        output_map={},
-        bc_map={},
-        element_objs={},
-        output_objs={},
+        output_map=None,
+        bc_map=None,
+        element_objs=None,
+        output_objs=None,
     ):
+        if integrand_map is None:
+            integrand_map = {}
+        if output_map is None:
+            output_map = {}
+        if bc_map is None:
+            bc_map = {}
+        if element_objs is None:
+            element_objs = {}
+        if output_objs is None:
+            output_objs = {}
         self.mesh = mesh
         self.soln_space = soln_space
         self.data_space = data_space
