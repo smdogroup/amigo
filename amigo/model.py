@@ -1500,8 +1500,7 @@ class Model:
 
         # Optionally drop a trivial CMakeLists.txt into the source_dir
         cmakelists = source_dir / "CMakeLists.txt"
-        cmakelists.write_text(
-            f"""\
+        cmakelists.write_text(f"""\
 cmake_minimum_required(VERSION 3.25)
 project({self.module_name} LANGUAGES CXX)
 
@@ -1515,8 +1514,7 @@ amigo_add_python_module(
     NAME {self.module_name}
     SOURCES {self.module_name}.cpp
 )
-"""
-        )
+""")
 
         # Locate the installed Amigo CMake package inside the Python package
         amigo_cmake_dir = get_cmake_dir()
