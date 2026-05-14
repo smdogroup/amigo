@@ -1,7 +1,7 @@
-import types
 import numpy as np
 from .expressions import *
 from .expressions import _normalize_shape, _type_to_str, _str_to_type
+from .meta import Meta
 
 _cpp_type_map = {int: "int", float: "double", complex: "std::complex<double>"}
 
@@ -71,96 +71,6 @@ def _generate_cpp_types(shapes, template_name="T__"):
                 lines.append(f"A2D::Mat<{template_name}, {shape[0]}, {shape[1]}>")
 
     return lines
-
-
-class Meta:
-    def __init__(self, name, var_type, **kwargs):
-        self.name = name
-        options = ["input", "constraint", "output", "data", "objective", "constant"]
-        if var_type not in options:
-            raise ValueError(f"{var_type} not one of {options}")
-        self.var_type = var_type
-        self.shape = kwargs.pop("shape", (1))
-        self.value = kwargs.pop("value", 0.0)
-        self.type = kwargs.pop("type", float)
-        self.lower = kwargs.pop("lower", float("-inf"))
-        self.upper = kwargs.pop("upper", float("inf"))
-        self.units = kwargs.pop("units", None)
-        self.scale = kwargs.pop("scale", 1.0)
-        self.label = kwargs.pop("label", None)
-
-        if self.value is None:
-            self.value = 0.0
-
-        if len(kwargs) > 0:
-            raise ValueError(f"Unknown options: {kwargs}")
-
-        self._validate()
-
-    def _validate(self):
-        if "__" in self.name:
-            raise ValueError(f"Name {self.name} cannot contain a double underscore")
-        if not isinstance(self.value, self.type):
-            raise TypeError(f"value must be of type {self.type.__name__}")
-        if not isinstance(self.scale, (int, float)):
-            raise TypeError("scale must be a number")
-        if not isinstance(self.lower, (int, float)):
-            raise TypeError("lower must be a number")
-        if not isinstance(self.upper, (int, float)):
-            raise TypeError("upper must be a number")
-        if self.lower > self.upper:
-            raise ValueError("lower bound cannot be greater than upper bound")
-        if self.var_type == "input" and not self.lower <= self.value <= self.upper:
-            raise ValueError("value must be within [lower, upper]")
-
-    def __getitem__(self, name):
-        if name == "name":
-            return self.name
-        elif name == "shape":
-            return self.shape
-        elif name == "value":
-            return self.value
-        elif name == "type":
-            return self.type
-        elif name == "lower":
-            return self.lower
-        elif name == "upper":
-            return self.upper
-        elif name == "units":
-            return self.units
-        elif name == "scale":
-            return self.scale
-        elif name == "label":
-            return self.label
-
-    def __repr__(self):
-        return (
-            f"Meta(name={self.name!r}, var_type={self.var_type!r}, shape={self.shape},\n"
-            f"     value={self.value}, type={self.type.__name__},\n"
-            f"     lower={self.lower}, upper={self.upper}, units={self.units!r},\n"
-            f"     scale={self.scale}, label={self.label!r})"
-        )
-
-    def serialize(self):
-        return {
-            "name": self.name,
-            "var_type": self.var_type,
-            "shape": self.shape,
-            "value": self.value,
-            "type": _type_to_str[self.type],
-            "lower": self.lower,
-            "upper": self.upper,
-            "units": self.units,
-            "scale": self.scale,
-            "label": self.label,
-        }
-
-    @classmethod
-    def deserialize(cls, data):
-        name = data.pop("name")
-        var_type = data.pop("var_type")
-        data["type"] = _str_to_type[data["type"]]
-        return cls(name, var_type, **data)
 
 
 class InputSet:
@@ -729,20 +639,18 @@ class Component:
         self.constants.add(name, value=value, **kwargs)
         return
 
-    def add_input(
-        self, name, shape=None, lower=float("-inf"), upper=float("inf"), **kwargs
-    ):
+    def add_input(self, name, shape=None, **kwargs):
         """
-        Add inputs to the component. Note that inputs by default have no lower or upper bounds.
+        Add inputs to the component.
         """
-        self.inputs.add(name, shape=shape, lower=lower, upper=upper, **kwargs)
+        self.inputs.add(name, shape=shape, **kwargs)
         return
 
-    def add_constraint(self, name, shape=None, lower=0.0, upper=0.0, **kwargs):
+    def add_constraint(self, name, shape=None, **kwargs):
         """
-        Add constraint to the component. By default, constraints are equality constraints.
+        Add constraint to the component.
         """
-        self.constraints.add(name, shape=shape, lower=lower, upper=upper, **kwargs)
+        self.constraints.add(name, shape=shape, **kwargs)
         return
 
     def add_objective(self, name, **kwargs):

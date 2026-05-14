@@ -19,10 +19,11 @@ from .amigo import (
     CSRMat,
     ExternalComponentGroup,
     SlackCouplingGroup,
-    SlackComponent
+    SlackComponent,
 )
 from .cmake_helper import get_cmake_dir
 from .component import Component
+from .meta import Meta
 
 try:
     from mpi4py.MPI import COMM_WORLD
@@ -184,7 +185,7 @@ class ComponentGroup:
         data_index_pool: GlobalIndexPool | None = None,
         out_shapes: dict = {},
         out_index_pool: GlobalIndexPool | None = None,
-        c_obj = None,
+        c_obj=None,
     ):
         self.name = name
         self.size = size
@@ -353,9 +354,9 @@ class ModelVector:
     """
     ModelVector class
 
-    This class wraps the c++ class instance and enables access via the input, 
+    This class wraps the c++ class instance and enables access via the input,
     constraint, data or output names that are defined within a model. To enable
-    access via name, the class maintains a reference to the underlying Model 
+    access via name, the class maintains a reference to the underlying Model
     instance. Alternatively, the underlying vector components can be accessed by
     their indices using integers, slices or arrays of intgers.
     """
@@ -373,7 +374,7 @@ class ModelVector:
         if isinstance(expr, (str, list)):
             x_array = self._x.get_array()
             return x_array[self._model.get_indices(expr)]
-        elif isinstance(expr, (int, np.integer, slice)):
+        elif isinstance(expr, (int, np.integer, slice, np.ndarray)):
             x_array = self._x.get_array()
             return x_array[expr]
         else:
@@ -383,7 +384,7 @@ class ModelVector:
         if isinstance(expr, (str, list)):
             x_array = self._x.get_array()
             x_array[self._model.get_indices(expr)] = item
-        elif isinstance(expr, (int, np.integer, slice)):
+        elif isinstance(expr, (int, np.integer, slice, np.ndarray)):
             x_array = self._x.get_array()
             x_array[expr] = item
         else:
@@ -816,22 +817,22 @@ class Model:
         self._staged_fixed_vars.append((expr, indices))
         return
 
-    def set_meta(self, name: str, meta_name: str, data: List | np.ndarray):
+    def set_meta(self, meta_name: str, name: str, data: List | np.ndarray):
         """
         Set meta data into the model.
 
         These meta data values override values set in the the component.
 
         Args:
-            expr (str): Name of the data
             meta_name (str): Name of the meta data argument
+            expr (str): Name of the data
             data (float, list, np.ndarray): Data values
         """
 
         if self._initialized:
             raise RuntimeError("Cannot set meta data values after initialization")
 
-        self._staged_meta_data((name, meta_name, data))
+        self._staged_meta_data.append((name, meta_name, data))
 
         return
 
@@ -913,6 +914,8 @@ class Model:
             self.links, self.output_index_pool, vtype="output"
         )
 
+        # Add the slack variables to the problem - only required if this
+        # is not from a serialized source
         if not self._slacks_initialized:
             self._initialize_slacks()
             self._slacks_initialized = True
@@ -920,23 +923,33 @@ class Model:
         # Now reorder the variables
         self._reorder_indices(order_type, order_for_block)
 
+        self.ineq_constraint_indices = self.comp[self.slack_comp_name].vars["res"]
+        self.slack_indices = self.comp[self.slack_comp_name].vars["s"]
+
         self.constraint_indices = self._get_constraint_indices()
         self.num_constraints = len(self.constraint_indices)
 
-        # Slack introduction for inequality constraints.
-        # self._allocate_slacks()
-
+        # The problem is now initialized
         self._initialized = True
         self.problem = self._create_opt_problem(comm=comm)
 
         # Now apply any staged data
         self._apply_staged_data()
 
-        self.slack_indices = self.comp[self.slack_comp_name].vars["s"]
-
         return
-    
+
     def _initialize_slacks(self):
+        """
+        Identify inequality constraints and allocate slack variable indices.
+
+        Each inequality constraint ``lbc <= c(x) <= ubc`` is reformulated as
+        the equality ``c(x) - s = 0`` with a bounded slack ``lbc <= s <= ubc``.
+
+        Slack meta data is stored so that ``get_values_from_meta`` returns
+        correct bounds and initial values for slacks without any post-processing
+        in the Optimizer.
+        """
+
         # Local slack component
         class LocalSlackComponent(Component):
             def __init__(self):
@@ -964,76 +977,28 @@ class Model:
         self.num_slacks = len(ineq_indices)
 
         # Manually add the slack group to the component
-        comp_obj = LocalSlackComponent()
-
-        # Set the slack component name
         self.slack_comp_name = "_slack_component"
         size = self.num_slacks
-        group = ComponentGroup(self.slack_comp_name, size, comp_obj, c_obj=SlackComponent)
+        comp_obj = LocalSlackComponent()
+        group = ComponentGroup(
+            self.slack_comp_name, size, comp_obj, c_obj=SlackComponent
+        )
 
-        # Manually set/link the slack variables
-        group.vars["s"] = np.arange(self.num_variables, self.num_variables + self.num_slacks)
+        # Set/link the slack variables and constraints
+        group.vars["s"] = np.arange(
+            self.num_variables, self.num_variables + self.num_slacks
+        )
         group.vars["res"] = ineq_indices
 
-        self.comp[self.slack_comp_name] = group 
-
-        self.slack_lower = lower[ineq_indices]
-        self.slack_upper = upper[ineq_indices]
+        # Set the component group object
+        self.comp[self.slack_comp_name] = group
 
         # Now adjust the number of variables
         self.num_variables += self.num_slacks
 
-
-    def _allocate_slacks(self):
-        """Identify inequality constraints and allocate slack variable indices.
-
-        Each inequality constraint ``lbc <= c(x) <= ubc`` is reformulated as
-        the equality ``c(x) - s = 0`` with a bounded slack ``lbc <= s <= ubc``.
-
-        Slack meta data is stored so that ``get_values_from_meta`` returns
-        correct bounds and initial values for slacks without any post-processing
-        in the Optimizer.
-        """
-        ineq_indices = []
-        slack_meta = []  # (lower, upper) per slack
-
-        for comp_name, comp in self.comp.items():
-            for con_name in comp.get_constraint_names():
-                meta = comp.get_meta(con_name)
-                lb = np.asarray(meta["lower"]).ravel()
-                ub = np.asarray(meta["upper"]).ravel()
-                idx = comp.get_var(con_name).ravel()
-                for j in range(len(idx)):
-                    lb_j = float(lb[j]) if lb.size > 1 else float(lb[0])
-                    ub_j = float(ub[j]) if ub.size > 1 else float(ub[0])
-                    is_eq = np.isfinite(lb_j) and np.isfinite(ub_j) and lb_j == ub_j
-                    if not is_eq:
-                        ineq_indices.append(idx[j])
-                        slack_meta.append((lb_j, ub_j))
-
-        self.ineq_constraint_indices = np.array(ineq_indices, dtype=np.int32)
-        self.num_slacks = len(ineq_indices)
-
-        self.slack_indices = np.arange(
-            self.num_variables,
-            self.num_variables + self.num_slacks,
-            dtype=np.int32,
-        )
-
-        # Meta data for each slack: bounds inherited from its inequality
-        # constraint, initial value = 0 (will be set to c(x) during init),
-        # and the constraint row becomes equality (lb = ub = 0).
-        self._slack_meta = []
-        for k in range(self.num_slacks):
-            self._slack_meta.append(
-                {
-                    "lower": slack_meta[k][0],
-                    "upper": slack_meta[k][1],
-                    "value": 0.0,
-                }
-            )
-
-        self.num_variables += self.num_slacks
+        # Store the constraint bounds
+        self.slack_lower = lower[ineq_indices]
+        self.slack_upper = upper[ineq_indices]
 
     def _get_expr_type(self, name: str):
         path, indices = _parse_var_expr(name)
@@ -1215,17 +1180,6 @@ class Model:
             if obj is not None:
                 objs.append(obj)
 
-        # Add the slack coupling component group.
-        # This declares the -I Jacobian sparsity between slacks and
-        # inequality constraints and adds the corresponding gradient
-        # and Hessian contributions during evaluation.
-        # if self.num_slacks > 0:
-        #     slack_coupling = SlackCouplingGroup(
-        #         np.ascontiguousarray(self.slack_indices, dtype=np.int32),
-        #         np.ascontiguousarray(self.ineq_constraint_indices, dtype=np.int32),
-        #     )
-        #     objs.append(slack_coupling)
-
         var_ranges = np.zeros(comm_size + 1, dtype=np.int32)
         var_ranges[1:] = self.num_variables
         var_owners = NodeOwners(comm, var_ranges)
@@ -1260,6 +1214,7 @@ class Model:
         fixed = VectorInt(len(fixed_vars))
         fixed.get_array()[:] = fixed_vars
 
+        # Create the optimization problem
         prob = OptimizationProblem(
             comm, data_owners, var_owners, output_owners, is_multiplier, objs, fixed
         )
@@ -1351,37 +1306,33 @@ class Model:
 
         if x is None:
             x = self.create_vector()
-    
+
+        # Set the entire vector to the default meta value
+        x[:] = Meta.get_default_value(meta_name)
+
+        # Get the meta data from values set in the components
         for comp_name, comp in self.comp.items():
             for var_name in comp.vars:
                 name = comp_name + "." + var_name
                 meta = self.get_meta(name)
-                value = meta[meta_name]
-                if value is None:
-                    value = 0.0
-                x[self.get_indices(name)] = value
+                if meta.is_value_set(meta_name):
+                    x[comp.vars[var_name]] = meta[meta_name]
 
+        # Get any staged meta data
         for name, meta_name_, data in self._staged_meta_data:
             if meta_name == meta_name_:
                 x[self.get_indices(name)] = data
 
+        # Deal with the slack variables
         if self._slacks_initialized and meta_name in ("lower", "upper"):
-            # Set bounds for the slack constraints
-            x[self.comp[self.slack_comp_name].vars["res"]] = 0.0
+            # Set bounds for the inequality constraints
+            x[self.ineq_constraint_indices] = 0.0
 
             # Set bounds on the slack variables
             if meta_name == "lower":
-                x[self.comp[self.slack_comp_name].vars["s"]] = self.slack_lower
+                x[self.slack_indices] = self.slack_lower
             elif meta_name == "upper":
-                x[self.comp[self.slack_comp_name].vars["s"]] = self.slack_upper
-
-        # # Fill slack variable meta and convert inequality constraints to equalities
-        # if self.num_slacks > 0 and meta_name in self._slack_meta[0]:
-        #     arr = x.get_vector().get_array()
-        #     for k in range(self.num_slacks):
-        #         arr[self.slack_indices[k]] = self._slack_meta[k][meta_name]
-        #         if meta_name in ("lower", "upper"):
-        #             arr[self.ineq_constraint_indices[k]] = 0.0
+                x[self.slack_indices] = self.slack_upper
 
         return x
 

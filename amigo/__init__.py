@@ -46,3 +46,5 @@ from .interfaces import (
     AmigoIndepVarComp,
 )
 from .trajectory import *
+
+inf = float("inf")
