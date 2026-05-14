@@ -182,9 +182,20 @@ class Meta:
             "label": self._serialize_value(self.label),
         }
 
+    @staticmethod
+    def _deserialize_value(name, x):
+        if name == "type":
+            return _str_to_type[x]
+        return x
+
     @classmethod
     def deserialize(cls, data):
-        name = data.pop("name")
-        var_type = data.pop("var_type")
-        data["type"] = _str_to_type[data["type"]]
-        return cls(name, var_type, **data)
+        name = data["name"]
+        var_type = data["var_type"]
+        kwargs = {}
+        for key in data:
+            if data[key] == None or key == "name" or key == "var_type":
+                continue
+            else:
+                kwargs[key] = Meta._deserialize_value(key, data[key])
+        return cls(name, var_type, **kwargs)

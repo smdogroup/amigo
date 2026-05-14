@@ -55,7 +55,7 @@ class CartComponent(am.Component):
         self.add_data("m1", value=1.0)
         self.add_data("m2", value=0.3)
 
-        self.add_input("x", label="control")
+        self.add_input("x", label="control", lower=-50, upper=50)
         self.add_input("q", shape=(4), label="state")
         self.add_input("qdot", shape=(4), label="rate")
 
@@ -212,42 +212,18 @@ def create_cart_model(module_name="cart_pole", final_time=2.0, num_time_steps=10
     # Link the outputs
     model.link("kin.ke[1:]", "kin.ke[0]")
 
+    # Set the initial point data
+    model.set_meta("value", "cart.q[:, 0]", np.linspace(0, 2.0, num_time_steps + 1))
+    model.set_meta("value", "cart.q[:, 1]", np.linspace(0, np.pi, num_time_steps + 1))
+    model.set_meta("value", "cart.q[:, 2]", 1.0)
+    model.set_meta("value", "cart.q[:, 3]", 1.0)
+
+    # Set the data
+    model.set_data("cart.L", 0.5)
+    model.set_data("cart.m1", 1.0)
+    model.set_data("cart.m2", 0.3)
+
     return model
-
-
-def check_post_optimality_derivative(
-    x, opt, opt_options={}, dh=1e-7, num_time_steps=100
-):
-    # Set the initial conditions based on the varaibles
-    x[:] = 0.0
-    x["cart.q[:, 0]"] = np.linspace(0, 2.0, num_time_steps + 1)
-    x["cart.q[:, 1]"] = np.linspace(0, np.pi, num_time_steps + 1)
-    x["cart.q[:, 2]"] = 1.0
-    x["cart.q[:, 3]"] = 1.0
-
-    opt.optimize(opt_options)
-    output = opt.compute_output()
-
-    dfdx, of_map, wrt_map = opt.compute_post_opt_derivatives(
-        of="kin.ke[0]", wrt=["cart.m1[0]", "cart.m2[0]", "cart.L[0]"], method="adjoint"
-    )
-
-    # Set the initial conditions based on the varaibles
-    x[:] = 0.0
-    x["cart.q[:, 0]"] = np.linspace(0, 2.0, num_time_steps + 1)
-    x["cart.q[:, 1]"] = np.linspace(0, np.pi, num_time_steps + 1)
-    x["cart.q[:, 2]"] = 1.0
-    x["cart.q[:, 3]"] = 1.0
-
-    # Compute the derivative wrt L
-    data["cart.L[0]"] += dh
-
-    opt.optimize(opt_options)
-    output2 = opt.compute_output()
-
-    ans = dfdx[0, wrt_map["cart.L[0]"]]
-    fd = (output2["kin.ke[0]"] - output["kin.ke[0]"]) / dh
-    print(ans, fd, (ans - fd) / fd)
 
 
 parser = argparse.ArgumentParser()
@@ -281,13 +257,6 @@ parser.add_argument(
     action="store_true",
     default=False,
     help="Distribute the problem",
-)
-parser.add_argument(
-    "--post-optimality",
-    dest="post_optimality",
-    action="store_true",
-    default=False,
-    help="Compute the post-optimality",
 )
 parser.add_argument(
     "--num-time-steps",
@@ -332,13 +301,6 @@ if comm_rank == 0:
     print(f"Num variables:              {model.num_variables}")
     print(f"Num constraints:            {model.num_constraints}")
 
-# Set the data
-data = model.get_data_vector()
-
-data["cart.L"] = 0.5
-data["cart.m1"] = 1.0
-data["cart.m2"] = 0.3
-
 opt_options = {
     "initial_barrier_param": 0.1,
     "convergence_tolerance": 5e-7,
@@ -349,32 +311,13 @@ opt_options = {
 
 for opt_iter in range(4):
     # Get the design variables
-    x = model.create_vector()
-    lower = model.create_vector()
-    upper = model.create_vector()
+    x = model.get_values_from_meta("value")
+    lower = model.get_values_from_meta("lower")
+    upper = model.get_values_from_meta("upper")
 
-    if comm_rank == 0:
-        # Set the initial conditions based on the varaibles
-        x["cart.q[:, 0]"] = np.linspace(0, 2.0, args.num_time_steps + 1)
-        x["cart.q[:, 1]"] = np.linspace(0, np.pi, args.num_time_steps + 1)
-        x["cart.q[:, 2]"] = 1.0
-        x["cart.q[:, 3]"] = 1.0
-
-        # Apply lower and upper bound constraints
-        lower["cart.q"] = -float("inf")
-        lower["cart.qdot"] = -float("inf")
-        lower["cart.x"] = -50
-
-        upper["cart.q"] = float("inf")
-        upper["cart.qdot"] = float("inf")
-        upper["cart.x"] = 50
-
-        # Serialize the model (requires serialize method)
-        with open("cart_pole_model.json", "w") as fp:
-            json.dump(model.serialize(), fp, indent=2)
-        vecs = {"data": data, "x": x, "lower": lower, "upper": upper}
-        with open("cart_pole_vectors.json", "w") as fp:
-            json.dump(model.serialize_vectors(vecs), fp, indent=2)
+    # Serialize the model (requires serialize method)
+    with open("cart_pole_model.json", "w") as fp:
+        json.dump(model.serialize(), fp, indent=2)
 
     # Set up the optimizer
     opt = am.Optimizer(
@@ -408,11 +351,6 @@ print(obj_value)
 
 with open(args.opt_filename, "w") as fp:
     json.dump(opt_data, fp, indent=2)
-
-if args.post_optimality:
-    check_post_optimality_derivative(
-        x, opt, opt_options, num_time_steps=args.num_time_steps
-    )
 
 
 if comm_rank == 0:

@@ -88,7 +88,10 @@ class ProblemSetup:
             elif solver_pref == "pardiso":
                 self.solver = PardisoSolver(self.problem)
             elif solver_pref == "mumps":
-                self.solver = MumpsSolver(self.problem)
+                try:
+                    self.solver = MumpsSolver(self.problem)
+                except:
+                    self.solver = AmigoSolver(self.problem)
             elif solver_pref == "amigo":
                 self.solver = AmigoSolver(self.problem)
             else:

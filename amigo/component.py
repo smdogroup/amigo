@@ -343,10 +343,13 @@ class ConstraintSet:
             d = data[name]
             obj.meta[name] = Meta.deserialize(d["meta"])
             obj.cons[name] = cls.ConstrExpr.deserialize(d["expr"])
-            if obj.cons[name].shape is None:
-                self.ncon += 1
+            shape = obj.cons[name].shape
+            if shape is None:
+                obj.ncon += 1
             else:
-                obj.ncon += np.prod(obj.cons[name].shape)
+                obj.ncon += np.prod(shape)
+            multiplier_name = obj._get_multiplier_name(name)
+            obj.multipliers[name] = Expr(VarNode(multiplier_name, shape=shape))
         return obj
 
 

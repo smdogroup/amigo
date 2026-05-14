@@ -2,11 +2,9 @@ import json
 import amigo as am
 from pathlib import Path
 
-source_dir = Path(__file__).resolve().parent
 
 # Set the filenames
 filename = "cart_pole_model.json"
-vecfile = "cart_pole_vectors.json"
 
 # Load the model
 with open(filename, "r") as fp:
@@ -14,24 +12,19 @@ with open(filename, "r") as fp:
 model = am.Model.deserialize(data)
 
 # Build the model module
-model.build_module(source_dir=source_dir)
+model.build_module()
 
 # Initialize everything
 model.initialize()
 
-# Extract the vectors
-with open(vecfile, "r") as fp:
-    data = json.load(fp)
-vecs = model.deserialize_vectors(data)
-
-# Set the data into the data vector itself
-data = model.get_data_vector()
-data[:] = vecs["data"][:]
-
 # Extract the other vectors for the initial point and lower/upper bounds
-x = vecs["x"]
-lower = vecs["lower"]
-upper = vecs["upper"]
+lower = model.create_vector()
+upper = model.create_vector()
+model.get_values_from_meta("lower", lower)
+model.get_values_from_meta("upper", upper)
+
+x = model.create_vector()
+model.get_values_from_meta("value", x)
 
 # Set up the optimizer
 opt = am.Optimizer(model, x, lower=lower, upper=upper)

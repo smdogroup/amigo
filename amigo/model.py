@@ -18,7 +18,6 @@ from .amigo import (
     NodeOwners,
     CSRMat,
     ExternalComponentGroup,
-    SlackCouplingGroup,
     SlackComponent,
 )
 from .cmake_helper import get_cmake_dir
@@ -152,6 +151,8 @@ def _to_list(obj):
         return None
     elif isinstance(obj, (int, np.integer)):
         return int(obj)
+    elif isinstance(obj, float):
+        return float(obj)
     elif isinstance(obj, np.ndarray):
         return obj.tolist()
     elif isinstance(obj, list):
@@ -459,6 +460,13 @@ class Model:
         self._staged_data = []
         self._staged_fixed_vars = []
         self._staged_meta_data = []
+
+        # Set slack information
+        self.num_slacks = 0
+        self.slack_names = None
+        self.ineq_names = None
+        self.slack_lower = []
+        self.slack_upper = []
 
         # Is this model initialized or not
         self._initialized = False
@@ -832,11 +840,11 @@ class Model:
         if self._initialized:
             raise RuntimeError("Cannot set meta data values after initialization")
 
-        self._staged_meta_data.append((name, meta_name, data))
+        self._staged_meta_data.append((meta_name, name, data))
 
         return
 
-    def _reorder_indices(self, order_type, order_for_block=False):
+    def _reorder_indices(self, order_type, con_indices, order_for_block=False):
         arrays = []
         num_cons = []
         for name, comp in self.comp.items():
@@ -848,8 +856,7 @@ class Model:
 
         num_cons = np.array(num_cons, dtype=int)
         if order_for_block:
-            constraint_indices = self._get_constraint_indices()
-            iperm = reorder_model(order_type, arrays, num_cons, constraint_indices)
+            iperm = reorder_model(order_type, arrays, num_cons, con_indices)
         else:
             iperm = reorder_model(order_type, arrays, num_cons)
 
@@ -914,20 +921,29 @@ class Model:
             self.links, self.output_index_pool, vtype="output"
         )
 
+        # Get the constraint indices
+        con_indices = self._get_constraint_indices()
+
         # Add the slack variables to the problem - only required if this
         # is not from a serialized source
         if not self._slacks_initialized:
-            self._initialize_slacks()
+            self.slack_names, self.ineq_names = self._initialize_slacks(con_indices)
             self._slacks_initialized = True
 
         # Now reorder the variables
-        self._reorder_indices(order_type, order_for_block)
+        self._reorder_indices(order_type, con_indices, order_for_block)
 
-        self.ineq_constraint_indices = self.comp[self.slack_comp_name].vars["res"]
-        self.slack_indices = self.comp[self.slack_comp_name].vars["s"]
-
+        # After reordering, get the constraint information
         self.constraint_indices = self._get_constraint_indices()
         self.num_constraints = len(self.constraint_indices)
+
+        # After reordering, get the slack and inequality constraint indices
+        if self.num_slacks > 0:
+            self.ineq_constraint_indices = self.get_indices(self.ineq_names)
+            self.slack_indices = self.get_indices(self.slack_names)
+        else:
+            self.ineq_constraint_indices = []
+            self.slack_indices = []
 
         # The problem is now initialized
         self._initialized = True
@@ -938,7 +954,7 @@ class Model:
 
         return
 
-    def _initialize_slacks(self):
+    def _initialize_slacks(self, con_indices):
         """
         Identify inequality constraints and allocate slack variable indices.
 
@@ -963,11 +979,23 @@ class Model:
         # Find the lower and upper values
         lower = np.zeros(self.num_variables)
         upper = np.zeros(self.num_variables)
-        self.get_values_from_meta("lower", lower)
-        self.get_values_from_meta("upper", upper)
 
-        # Get the constraint indices
-        con_indices = self._get_constraint_indices()
+        # Get the meta data from values set in the components
+        for comp_name, comp in self.comp.items():
+            for var_name in comp.vars:
+                name = comp_name + "." + var_name
+                meta = self.get_meta(name)
+                if meta.is_value_set("lower"):
+                    lower[comp.vars[var_name]] = meta["lower"]
+                if meta.is_value_set("upper"):
+                    upper[comp.vars[var_name]] = meta["upper"]
+
+        # Get any staged meta data
+        for meta_name, name, data in self._staged_meta_data:
+            if "lower" == meta_name:
+                lower[self.get_indices(name)] = data
+            if "upper" == meta_name:
+                upper[self.get_indices(name)] = data
 
         # Find those constraints corresponding to inequalities
         mask = lower[con_indices] < upper[con_indices]
@@ -976,29 +1004,41 @@ class Model:
         # Set the number of slack variables
         self.num_slacks = len(ineq_indices)
 
-        # Manually add the slack group to the component
-        self.slack_comp_name = "_slack_component"
-        size = self.num_slacks
-        comp_obj = LocalSlackComponent()
-        group = ComponentGroup(
-            self.slack_comp_name, size, comp_obj, c_obj=SlackComponent
-        )
+        slack_names = None
+        ineq_names = None
 
-        # Set/link the slack variables and constraints
-        group.vars["s"] = np.arange(
-            self.num_variables, self.num_variables + self.num_slacks
-        )
-        group.vars["res"] = ineq_indices
+        if self.num_slacks > 0:
+            # Manually add the slack group to the component
+            slack_comp_name = "_slack_component"
+            size = self.num_slacks
+            comp_obj = LocalSlackComponent()
+            group = ComponentGroup(
+                slack_comp_name, size, comp_obj, c_obj=SlackComponent
+            )
 
-        # Set the component group object
-        self.comp[self.slack_comp_name] = group
+            # Set/link the slack variables and constraints
+            group.vars["s"] = np.arange(
+                self.num_variables, self.num_variables + self.num_slacks
+            )
+            group.vars["res"] = ineq_indices
 
-        # Now adjust the number of variables
-        self.num_variables += self.num_slacks
+            # Set the component group object
+            self.comp[slack_comp_name] = group
 
-        # Store the constraint bounds
-        self.slack_lower = lower[ineq_indices]
-        self.slack_upper = upper[ineq_indices]
+            # Store the constraint bounds
+            self.slack_lower = lower[ineq_indices]
+            self.slack_upper = upper[ineq_indices]
+
+            # Now adjust the number of variables
+            self.num_variables += self.num_slacks
+
+            slack_names = slack_comp_name + ".s"
+            ineq_names = slack_comp_name + ".res"
+        else:
+            self.slack_lower = []
+            self.slack_upper = []
+
+        return slack_names, ineq_names
 
     def _get_expr_type(self, name: str):
         path, indices = _parse_var_expr(name)
@@ -1304,11 +1344,19 @@ class Model:
             x (ModelVector) : The meta values assigned to each component
         """
 
+        if not self._initialized:
+            raise RuntimeError("Must call initialize before get_values_from_meta")
+
         if x is None:
             x = self.create_vector()
 
         # Set the entire vector to the default meta value
         x[:] = Meta.get_default_value(meta_name)
+
+        # Modify the default values for all constraints so that they
+        # default to equalitie constraints
+        if meta_name in ("lower", "upper"):
+            x[self.constraint_indices] = 0.0
 
         # Get the meta data from values set in the components
         for comp_name, comp in self.comp.items():
@@ -1319,12 +1367,12 @@ class Model:
                     x[comp.vars[var_name]] = meta[meta_name]
 
         # Get any staged meta data
-        for name, meta_name_, data in self._staged_meta_data:
+        for meta_name_, name, data in self._staged_meta_data:
             if meta_name == meta_name_:
                 x[self.get_indices(name)] = data
 
         # Deal with the slack variables
-        if self._slacks_initialized and meta_name in ("lower", "upper"):
+        if meta_name in ("lower", "upper"):
             # Set bounds for the inequality constraints
             x[self.ineq_constraint_indices] = 0.0
 
@@ -1606,6 +1654,32 @@ amigo_add_python_module(
         # Set the path names
         model_data["links"] = link_data
 
+        # Serialize the staged data
+        staged_data = []
+        for name, data in self._staged_data:
+            staged_data.append((name, _to_list(data)))
+        model_data["staged_data"] = staged_data
+
+        fixed_vars = []
+        for name, indices in self._staged_fixed_vars:
+            fixed_vars.append((name, _to_list(indices)))
+        model_data["fixed_vars"] = fixed_vars
+
+        staged_meta = []
+        for meta_name, name, data in self._staged_meta_data:
+            staged_meta.append((meta_name, name, _to_list(data)))
+        model_data["staged_meta"] = staged_meta
+
+        # Serialize the slack data
+        slack_data = {}
+        slack_data["num_slacks"] = self.num_slacks
+        slack_data["slack_names"] = self.slack_names
+        slack_data["ineq_names"] = self.ineq_names
+        slack_data["slack_lower"] = _to_list(self.slack_lower)
+        slack_data["slack_upper"] = _to_list(self.slack_upper)
+
+        model_data["slacks"] = slack_data
+
         return model_data
 
     @classmethod
@@ -1628,6 +1702,28 @@ amigo_add_python_module(
             src = data["src"]
             tgt = data["tgt"]
             obj.link(src[0], tgt[0], src_indices=src[1], tgt_indices=tgt[1])
+
+        # Deserialize the staged information
+        staged_data = model_data["staged_data"]
+        for name, data in staged_data:
+            obj.set_data(name, data)
+
+        fixed_vars = model_data["fixed_vars"]
+        for name, indices in fixed_vars:
+            obj.add_fixed(name, indices)
+
+        staged_meta = model_data["staged_meta"]
+        for meta_name, name, data in staged_meta:
+            obj.set_meta(meta_name, name, data)
+
+        # Deserialize staged values
+        slack_data = model_data["slacks"]
+        obj.num_slacks = slack_data["num_slacks"]
+        obj.slack_names = slack_data["slack_names"]
+        obj.ineq_names = slack_data["ineq_names"]
+        obj.slack_lower = np.array(slack_data["slack_lower"])
+        obj.slack_upper = np.array(slack_data["slack_upper"])
+        obj._slacks_initialized = True
 
         return obj
 
