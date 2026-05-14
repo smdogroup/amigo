@@ -463,6 +463,7 @@ class Model:
 
         # Set slack information
         self.num_slacks = 0
+        self.slack_comp_name = None
         self.slack_names = None
         self.ineq_names = None
         self.slack_lower = []
@@ -470,7 +471,6 @@ class Model:
 
         # Is this model initialized or not
         self._initialized = False
-        self._slacks_initialized = False
 
         return
 
@@ -597,6 +597,9 @@ class Model:
 
         # Add all of the sub-model components
         for comp_name in model.comp:
+            # Skip the slack component
+            if comp_name == model.slack_comp_name:
+                continue
             sub_name = name + "." + comp_name
             sub_size = model.comp[comp_name].size
             sub_obj = model.comp[comp_name].comp_obj
@@ -629,13 +632,17 @@ class Model:
         ) in model.links:
             self.link(name + "." + src_expr, name + "." + tgt_expr, src_idx, tgt_idx)
 
-        # Add any staged data
+        # Add staged data
         for data_name, data in model._staged_data:
             self._staged_data.append(([name + "." + data_name], data))
 
-        # Add any fixed variables
+        # Add fixed variables
         for expr, indices in model._staged_fixed_vars:
             self._staged_fixed_vars.append((name + "." + expr, indices))
+
+        # Add staged meta data
+        for meta, expr, data in model._staged_meta_data:
+            self._staged_fixed_vars.append((meta, name + "." + expr, data))
 
         return
 
@@ -924,11 +931,8 @@ class Model:
         # Get the constraint indices
         con_indices = self._get_constraint_indices()
 
-        # Add the slack variables to the problem - only required if this
-        # is not from a serialized source
-        if not self._slacks_initialized:
-            self.slack_names, self.ineq_names = self._initialize_slacks(con_indices)
-            self._slacks_initialized = True
+        # Add the slack variables to the problem
+        self.slack_names, self.ineq_names = self._initialize_slacks(con_indices)
 
         # Now reorder the variables
         self._reorder_indices(order_type, con_indices, order_for_block)
@@ -1009,11 +1013,11 @@ class Model:
 
         if self.num_slacks > 0:
             # Manually add the slack group to the component
-            slack_comp_name = "_slack_component"
+            self.slack_comp_name = "_slack_component"
             size = self.num_slacks
             comp_obj = LocalSlackComponent()
             group = ComponentGroup(
-                slack_comp_name, size, comp_obj, c_obj=SlackComponent
+                self.slack_comp_name, size, comp_obj, c_obj=SlackComponent
             )
 
             # Set/link the slack variables and constraints
@@ -1023,7 +1027,7 @@ class Model:
             group.vars["res"] = ineq_indices
 
             # Set the component group object
-            self.comp[slack_comp_name] = group
+            self.comp[self.slack_comp_name] = group
 
             # Store the constraint bounds
             self.slack_lower = lower[ineq_indices]
@@ -1032,8 +1036,8 @@ class Model:
             # Now adjust the number of variables
             self.num_variables += self.num_slacks
 
-            slack_names = slack_comp_name + ".s"
-            ineq_names = slack_comp_name + ".res"
+            slack_names = self.slack_comp_name + ".s"
+            ineq_names = self.slack_comp_name + ".res"
         else:
             self.slack_lower = []
             self.slack_upper = []
@@ -1628,6 +1632,8 @@ amigo_add_python_module(
         # Serialize the components
         comp_list = []
         for name, comp in self.comp.items():
+            if name == self.slack_comp_name:
+                continue
             comp_data = {}
             comp_data["name"] = name
             comp_data["size"] = comp.size
@@ -1670,16 +1676,6 @@ amigo_add_python_module(
             staged_meta.append((meta_name, name, _to_list(data)))
         model_data["staged_meta"] = staged_meta
 
-        # Serialize the slack data
-        slack_data = {}
-        slack_data["num_slacks"] = self.num_slacks
-        slack_data["slack_names"] = self.slack_names
-        slack_data["ineq_names"] = self.ineq_names
-        slack_data["slack_lower"] = _to_list(self.slack_lower)
-        slack_data["slack_upper"] = _to_list(self.slack_upper)
-
-        model_data["slacks"] = slack_data
-
         return model_data
 
     @classmethod
@@ -1715,15 +1711,6 @@ amigo_add_python_module(
         staged_meta = model_data["staged_meta"]
         for meta_name, name, data in staged_meta:
             obj.set_meta(meta_name, name, data)
-
-        # Deserialize staged values
-        slack_data = model_data["slacks"]
-        obj.num_slacks = slack_data["num_slacks"]
-        obj.slack_names = slack_data["slack_names"]
-        obj.ineq_names = slack_data["ineq_names"]
-        obj.slack_lower = np.array(slack_data["slack_lower"])
-        obj.slack_upper = np.array(slack_data["slack_upper"])
-        obj._slacks_initialized = True
 
         return obj
 

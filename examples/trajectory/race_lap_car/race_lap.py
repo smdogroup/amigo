@@ -410,6 +410,9 @@ if args.build:
 model.initialize()
 print(f"Variables: {model.num_variables}, Constraints: {model.num_constraints}")
 
+with open("race_car_lap.json", "w") as fp:
+    json.dump(model.serialize(), fp, indent=2)
+
 # Bounds
 lower = model.create_vector()
 upper = model.create_vector()

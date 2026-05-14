@@ -316,8 +316,9 @@ for opt_iter in range(4):
     upper = model.get_values_from_meta("upper")
 
     # Serialize the model (requires serialize method)
-    with open("cart_pole_model.json", "w") as fp:
-        json.dump(model.serialize(), fp, indent=2)
+    if opt_iter == 0:
+        with open("cart_pole_model.json", "w") as fp:
+            json.dump(model.serialize(), fp, indent=2)
 
     # Set up the optimizer
     opt = am.Optimizer(

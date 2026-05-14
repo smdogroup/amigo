@@ -21,13 +21,21 @@ lower = model.get_values_from_meta("lower")
 upper = model.get_values_from_meta("upper")
 
 # Set up the optimizer
-opt = am.Optimizer(model, x, lower=lower, upper=upper)
+opt = am.Optimizer(model, x, lower=lower, upper=upper, solver="amigo")
 
 opt_options = {
-    "initial_barrier_param": 0.1,
-    "convergence_tolerance": 5e-7,
-    "max_line_search_iterations": 4,
-    "max_iterations": 500,
+    "initial_barrier_param": 1.0,
+    "max_iterations": 100,
+    "max_line_search_iterations": 30,
+    "convergence_tolerance": 1e-8,
+    "init_least_squares_multipliers": True,
+    "barrier_strategy": "quality_function",
+    "quality_function_predictor_corrector": False,
+    "quality_function_balancing_term": "cubic",
+    "adaptive_mu_safeguard_factor": 1e-1,
+    "filter_line_search": True,
+    "second_order_correction": False,
+    "verbose_barrier": False,
 }
 
 # Optimize
