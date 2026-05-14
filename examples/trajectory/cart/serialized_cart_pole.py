@@ -1,7 +1,5 @@
 import json
 import amigo as am
-from pathlib import Path
-
 
 # Set the filenames
 filename = "cart_pole_model.json"
@@ -18,13 +16,9 @@ model.build_module()
 model.initialize()
 
 # Extract the other vectors for the initial point and lower/upper bounds
-lower = model.create_vector()
-upper = model.create_vector()
-model.get_values_from_meta("lower", lower)
-model.get_values_from_meta("upper", upper)
-
-x = model.create_vector()
-model.get_values_from_meta("value", x)
+x = model.get_values_from_meta("value")
+lower = model.get_values_from_meta("lower")
+upper = model.get_values_from_meta("upper")
 
 # Set up the optimizer
 opt = am.Optimizer(model, x, lower=lower, upper=upper)
