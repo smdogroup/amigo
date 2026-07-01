@@ -142,15 +142,13 @@ class QualityFunctionBarrierStrategy(BarrierStrategy):
             mu_new = max(mu_new, self.mu_min, self._lower_safeguard(state))
             mu_new = min(mu_new, self.mu_max)
 
-            # Set the new barrier parameter
-            state.mu = mu_new
+            self.set_mu(state, mu_new)
 
             # Invalidate everything but the gradient, hessian and step
             state.invalidate(grad=False, hess=False, step=False)
 
         return
 
-    # def update_line_search_info(self, ctx):
     def update_after_line_search(self, info, evaluator, state):
         """If free mode rejects, fall back to monotone (unless never-monotone)."""
 
@@ -166,7 +164,7 @@ class QualityFunctionBarrierStrategy(BarrierStrategy):
             mu_candidate = max(mu_candidate, self._lower_safeguard(state), self.mu_min)
             mu_candidate = min(mu_candidate, self.mu_max)
 
-            state.mu = mu_candidate
+            self.set_mu(state, mu_candidate)
             self.free_mode = False
 
             self.monotone_mu = mu_candidate
@@ -197,23 +195,6 @@ class QualityFunctionBarrierStrategy(BarrierStrategy):
     def _monotone_reduce(self, state):
         """Monotone mu reduction when subproblem is solved."""
 
-        # relative_tol = self.options["barrier_progress_tol"]
-        # if state.kkt_error < relative_tol * state.mu:
-        #     opt_tol = self.options["convergence_tolerance"]
-        #     frac = self.options["monotone_barrier_fraction"]
-        #     mu_new = max(frac * state.mu, frac * opt_tol)
-
-        #     # Update the barrier parameter. Invalidate the residuals and the step
-        #     # (if any) because the barrier has changed
-        #     state.mu = mu_new
-
-        #     # Only the gradient and hessian retain their status
-        #     state.invalidate(grad=False, hess=False)
-
-        #     return True
-        # else:
-        #     return False
-
         btf = self.options["barrier_tol_factor"]
         barrier_err = state.kkt_error
         if barrier_err > btf * state.mu:
@@ -231,7 +212,7 @@ class QualityFunctionBarrierStrategy(BarrierStrategy):
         self.monotone_mu = mu_new
 
         # Invalidate the residual and step since mu has changed
-        state.mu = mu_new
+        self.set_mu(state, mu_new)
         state.invalidate(grad=False, hess=False)
 
         return True
@@ -245,7 +226,7 @@ class QualityFunctionBarrierStrategy(BarrierStrategy):
         mu_new = max(mu_new, self._lower_safeguard(state), self.mu_min)
         mu_new = min(mu_new, self.mu_max)
 
-        state.mu = mu_new
+        self.set_mu(state, mu_new)
         self.monotone_mu = mu_new
         state.invalidate(grad=False, hess=False, step=False)
 
@@ -381,7 +362,7 @@ class QualityFunctionBarrierStrategy(BarrierStrategy):
             mu_nat, state.current, state.gradient, state.residual
         )
 
-        # Sove for the update with mu = mu_nat but the same left-hand-side
+        # Solve for the update with mu = mu_nat but the same left-hand-side
         solver.solve(state.residual, self.dpx)
 
         # Set dpx = px(mu = average) - px(mu = 0)
@@ -423,7 +404,7 @@ class QualityFunctionBarrierStrategy(BarrierStrategy):
                 f"a_aff=[{alpha_aff_x:.3f},{alpha_aff_z:.3f}])"
             )
 
-        # Compute the signa value
+        # Compute the sigma value
         sigma_eff = sigma
         if mu_nat > 0:
             sigma_eff = mu_new / mu_nat
@@ -533,7 +514,7 @@ class QualityFunctionBarrierStrategy(BarrierStrategy):
                 f"(comp={avg_comp:.3e})"
             )
 
-        # Compute the signa value
+        # Compute the sigma value
         sigma_eff = sigma_star
         if mu_nat > 0:
             sigma_eff = mu_new / mu_nat

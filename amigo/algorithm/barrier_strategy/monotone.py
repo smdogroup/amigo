@@ -12,22 +12,25 @@ class MonotoneBarrierStrategy(BarrierStrategy):
 
     def update_barrier(self, evaluator, state):
         info = BarrierInfo()
-        relative_tol = self.options["barrier_progress_tol"]
+        kappa_eps = self.options["barrier_progress_tol"]
 
-        if state.kkt_error < relative_tol * state.mu:
-            opt_tol = self.options["convergence_tolerance"]
-            frac = self.options["monotone_barrier_fraction"]
-            mu_new = max(frac * state.mu, frac * opt_tol)
+        # Reduce mu once the subproblem error is below kappa_eps*mu.
+        if state.kkt_error < kappa_eps * state.mu:
+            # Superlinear decrease, floored at the solver tolerance.
+            kappa_mu = self.options["mu_linear_decrease_factor"]
+            theta_mu = self.options["mu_superlinear_decrease_power"]
+            floor = (
+                min(self.options["convergence_tolerance"], self.options["compl_inf_tol"])
+                / (kappa_eps + 1.0)
+            )
+            mu_new = min(kappa_mu * state.mu, state.mu**theta_mu)
+            mu_new = max(mu_new, floor, self.options["mu_min"])
 
             info.new_barrier = True
             info.mu_old = state.mu
             info.mu_new = mu_new
 
-            # Update the barrier parameter. Invalidate the residuals and the step
-            # (if any) because the barrier has changed
-            state.mu = mu_new
-
-            # Only the gradient and hessian retain their status
+            self.set_mu(state, mu_new)
             state.invalidate(grad=False, hess=False)
 
         return info

@@ -44,8 +44,7 @@ class HeuristicBarrierStrategy(BarrierStrategy):
             info.mu_new = mu_new
             info.mu_old = state.mu
 
-            # Update the barrier parameter
-            state.mu = mu_new
+            self.set_mu(state, mu_new)
 
             # Invalidate everything but the gradient and Hessian
             state.invalidate(grad=False, hess=False)
