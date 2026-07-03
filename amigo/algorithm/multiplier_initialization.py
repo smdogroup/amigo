@@ -13,6 +13,7 @@ class MultiplierInitializer:
         self.model = model
         self.problem = problem
         self.optimizer = optimizer
+        self.temp_con = problem.create_constraint_vector()
 
     def initialize_multipliers(self, evaluator, solver, state):
         """Initialize the constraint multipliers in state.current."""
@@ -58,9 +59,8 @@ class MultiplierInitializer:
         x.fill_at(con_indices, 0.0)
         state.invalidate()
 
-        # Objective gradient (obj_scale=1), constraint Hessian (obj_scale=0)
+        # Objective gradient at the current obj_scale, constraint Hessian at obj_scale=0
         obj_scale_store = state.obj_scale
-        state.obj_scale = 1.0
         evaluator.evaluate_gradient(state)
         state.obj_scale = 0.0
         evaluator.evaluate_hessian(state)
@@ -80,7 +80,11 @@ class MultiplierInitializer:
 
         update = state.step.get_solution()
         solver.solve(state.residual, update)
-        x.copy_at(con_indices, update)
+
+        # Adopt the estimate only when its magnitude is within the cap, else keep the dual at zero
+        update.get_values_at(con_indices, self.temp_con)
+        if self.problem.maxabs(self.temp_con) <= self.options["constr_mult_init_max"]:
+            x.copy_at(con_indices, update)
 
         state.invalidate()
         return

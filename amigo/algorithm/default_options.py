@@ -40,6 +40,8 @@ def get_default_options(options={}):
         # Recompute constraint multipliers from the least-squares estimate near feasibility
         "recompute_multipliers": True,
         "recompute_multiplier_tol": 1e-1,
+        # Reject the initial multiplier estimate if its max magnitude exceeds this
+        "constr_mult_init_max": 1e3,
         # Solver options
         "solver": "amigo",
         # Heuristic barrier parameter options
