@@ -1,0 +1,1 @@
+"""Local Amigo application modules."""

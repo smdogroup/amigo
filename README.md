@@ -8,6 +8,67 @@ Integration with other MDO libraries is key for flexibility. Amigo contains inte
 
 A tutorial on how to use amigo and documentation can be found here: [https://smdogroup.github.io/amigo/](https://smdogroup.github.io/amigo/).
 
+## Local FEM problem builder
+
+The local Streamlit app lets you upload an Amigo-compatible mesh, define the
+solution, geometry, and data spaces, enter an integrand map and boundary
+condition map, and provide Python functions for the integrands and custom
+boundary-condition callbacks. It includes Poisson and 2D source-sink
+potential-flow templates, supports potential and weak formulations, solves
+with Amigo, and displays scalar solution fields using PyVista. The potential
+flow template also offers vector glyphs for the potential gradient (velocity).
+
+Problem definitions can be downloaded as JSON and loaded later. Presets include
+the mesh as compressed data by default, so they can be moved between machines.
+Only load presets and Python function code you trust: the app executes the
+provided functions locally.
+
+The editors use the same structures as `amigo.fem.Problem`. For example, a
+scalar Poisson potential can use:
+
+```json
+{
+  "solution_space": {"soln": {"u": "H1"}},
+  "geometry_space": {"geo": {"x,y": "H1"}},
+  "data_space": {"data": {"Jz": "const"}},
+  "data_values": {"data.Jz": 10.0},
+  "integrand_map": {
+    "air": {"target": ["SURFACE1"], "integrand": "potential"}
+  },
+  "bc_map": {
+    "fixed_edges": {
+      "type": "dirichlet",
+      "target": ["LEFT", "RIGHT", "BOTTOM", "TOP"],
+      "input": ["u"]
+    }
+  }
+}
+```
+
+Mesh targets must match the element-set/domain names shown under **Mesh
+details**. Each function-space component contains one field group and space;
+group multiple fields with comma-separated names (for example, `"u,v"`).
+Integrand map values refer to function names in the Python editor. Non-Dirichlet
+boundary conditions can refer to a callback function defined there as well.
+Click **Apply settings** before downloading a preset to include the latest
+editor values.
+
+With Pixi installed, create the app environment and build Amigo:
+
+```
+pixi install -e app
+pixi run -e app install-amigo
+pixi run -e app poisson-gui
+```
+
+The app opens at `http://127.0.0.1:8501` and is only bound to the local
+machine. Supported mesh formats are Abaqus INP and Nastran BDF, NAS, and DAT.
+The first solve compiles the generated Amigo model module. The default preset
+is a Poisson potential problem; the sidebar can also generate a small sample
+rectangular mesh. The source/sink template expects a 2D mesh whose domain names
+match the configured integrand and boundary targets; edit the maps for other
+mesh naming conventions.
+
 ## Installing Amigo using pixi
 
 The quickest way to get a working build on Linux, macOS or Windows is [pixi](https://pixi.sh), which installs the compiler toolchain, MPI, BLAS/LAPACK, METIS and MUMPS into a project-local environment:

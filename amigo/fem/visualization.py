@@ -16,6 +16,13 @@ _PV_CELL_TYPES = {
     (CellType.TRIANGLE, 6): pv.CellType.QUADRATIC_TRIANGLE,
     (CellType.QUADRILATERAL, 4): pv.CellType.QUAD,
     (CellType.QUADRILATERAL, 9): pv.CellType.QUADRATIC_QUAD,
+    (CellType.TETRAHEDRON, 4): pv.CellType.TETRA,
+    (CellType.TETRAHEDRON, 10): pv.CellType.QUADRATIC_TETRA,
+    (CellType.HEXAHEDRON, 8): pv.CellType.HEXAHEDRON,
+    (CellType.HEXAHEDRON, 20): pv.CellType.QUADRATIC_HEXAHEDRON,
+    (CellType.PRISM, 6): pv.CellType.WEDGE,
+    (CellType.PRISM, 15): pv.CellType.QUADRATIC_WEDGE,
+    (CellType.PYRAMID, 5): pv.CellType.PYRAMID,
 }
 
 
@@ -67,6 +74,55 @@ def _p1_shape_functions(cell_type: CellType, pts: np.ndarray) -> np.ndarray:
         # Vertices at -1, 1; linear basis.
         xi = pts[:, 0]
         return 0.5 * np.stack([1.0 - xi, 1.0 + xi], axis=1)
+
+    if cell_type == CellType.TETRAHEDRON:
+        xi, eta, zeta = pts[:, 0], pts[:, 1], pts[:, 2]
+        return np.stack([1.0 - xi - eta - zeta, xi, eta, zeta], axis=1)
+
+    if cell_type == CellType.HEXAHEDRON:
+        xi, eta, zeta = pts[:, 0], pts[:, 1], pts[:, 2]
+        return 0.125 * np.stack(
+            [
+                (1.0 - xi) * (1.0 - eta) * (1.0 - zeta),
+                (1.0 + xi) * (1.0 - eta) * (1.0 - zeta),
+                (1.0 + xi) * (1.0 + eta) * (1.0 - zeta),
+                (1.0 - xi) * (1.0 + eta) * (1.0 - zeta),
+                (1.0 - xi) * (1.0 - eta) * (1.0 + zeta),
+                (1.0 + xi) * (1.0 - eta) * (1.0 + zeta),
+                (1.0 + xi) * (1.0 + eta) * (1.0 + zeta),
+                (1.0 - xi) * (1.0 + eta) * (1.0 + zeta),
+            ],
+            axis=1,
+        )
+
+    if cell_type == CellType.PRISM:
+        xi, eta, zeta = pts[:, 0], pts[:, 1], pts[:, 2]
+        lower = 0.5 * (1.0 - zeta)
+        upper = 0.5 * (1.0 + zeta)
+        return np.stack(
+            [
+                (1.0 - xi - eta) * lower,
+                xi * lower,
+                eta * lower,
+                (1.0 - xi - eta) * upper,
+                xi * upper,
+                eta * upper,
+            ],
+            axis=1,
+        )
+
+    if cell_type == CellType.PYRAMID:
+        xi, eta, zeta = pts[:, 0], pts[:, 1], pts[:, 2]
+        return 0.25 * np.stack(
+            [
+                (1.0 - xi) * (1.0 - eta) * (1.0 - zeta),
+                (1.0 + xi) * (1.0 - eta) * (1.0 - zeta),
+                (1.0 + xi) * (1.0 + eta) * (1.0 - zeta),
+                (1.0 - xi) * (1.0 + eta) * (1.0 - zeta),
+                4.0 * zeta,
+            ],
+            axis=1,
+        )
 
     raise NotImplementedError(
         f"Degree-1 geometry shape functions are not implemented for {cell_type.name}."
