@@ -7,4 +7,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: psf/black@24.8.0
+
+      # Run Black with an explicit target-version that matches the runner's Python
+      - name: Run black
+        uses: psf/black@24.8.0
+        with:
+          args: --check --diff --target-version py313 .

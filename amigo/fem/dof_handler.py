@@ -307,8 +307,14 @@ class DofHandler:
             block = self.mesh.blocks[block_id]
             block_conn = block.connectivity
             source_dofs = block.element_type.get_entity_dofs()
+            if dof_conn.shape[1] > len(source_dofs):
+                raise ValueError(
+                    f"Function space has {dof_conn.shape[1]} local DOFs, but mesh "
+                    f"element type {block.source_type} provides only "
+                    f"{len(source_dofs)} source nodes."
+                )
 
-            for i, source_dof in enumerate(source_dofs):
+            for i, source_dof in enumerate(source_dofs[: dof_conn.shape[1]]):
                 mapping[dof_conn[:, i]] = block_conn[:, source_dof]
 
         return mapping
