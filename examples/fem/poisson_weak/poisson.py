@@ -1,7 +1,7 @@
 import argparse
 import amigo as am
 import numpy as np
-from amigo.fem import SolutionSpace, Mesh, Problem, FunctionSpace, Space
+from amigo.fem import SolutionSpace, Mesh, Problem, IntegrandFormulation
 from scipy.sparse.linalg import spsolve
 import matplotlib.pyplot as plt
 from amigo.fem.visualization import build_grid
@@ -55,7 +55,7 @@ problem = Problem(
     soln_space,
     geo_space,
     integrand_map=integrand_map,
-    integrand_formulation="weak",
+    integrand_formulation=IntegrandFormulation.WEAK,
     bc_map=bc_map,
 )
 model = problem.create_model("poisson")

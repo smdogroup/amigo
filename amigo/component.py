@@ -1,7 +1,7 @@
 import numpy as np
 from .expressions import *
 from .expressions import _normalize_shape, _type_to_str, _str_to_type
-from .meta import Meta
+from .meta import Meta, VarType
 
 _cpp_type_map = {int: "int", float: "double", complex: "std::complex<double>"}
 
@@ -84,7 +84,7 @@ class InputSet:
 
     def add(self, name, shape=None, **kwargs):
         self.inputs[name] = Expr(VarNode(name, shape=shape, active=True))
-        self.meta[name] = Meta(name, "input", shape=shape, **kwargs)
+        self.meta[name] = Meta(name, VarType.INPUT, shape=shape, **kwargs)
         return
 
     def __len__(self):
@@ -137,7 +137,7 @@ class ConstantSet:
             raise ValueError("Constants must be scalars")
         self.consts[name] = Expr(ConstNode(name=name, value=value, type=type))
         self.meta[name] = Meta(
-            name, "constant", value=value, shape=None, type=type, **kwargs
+            name, VarType.CONSTANT, value=value, shape=None, type=type, **kwargs
         )
         return
 
@@ -194,7 +194,7 @@ class DataSet:
 
     def add(self, name, shape=None, type=float, **kwargs):
         self.data[name] = Expr(VarNode(name, shape=shape, type=type, active=False))
-        self.meta[name] = Meta(name, "data", shape=shape, type=type, **kwargs)
+        self.meta[name] = Meta(name, VarType.DATA, shape=shape, type=type, **kwargs)
 
     def __len__(self):
         return len(self.data)
@@ -267,7 +267,9 @@ class ConstraintSet:
     def add(self, name, shape=None, type=float, **kwargs):
         # Add the constraint
         self.cons[name] = self.ConstrExpr(name, shape=shape, type=type)
-        self.meta[name] = Meta(name, "constraint", shape=shape, type=type, **kwargs)
+        self.meta[name] = Meta(
+            name, VarType.CONSTRAINT, shape=shape, type=type, **kwargs
+        )
         if shape is None:
             self.ncon += 1
         else:
@@ -392,7 +394,9 @@ class ObjectiveSet:
         if "scale" in kwargs:
             raise ValueError("Objective function cannot be scaled through kwargs")
         self.obj[name] = self.ObjExpr(name, type=type)
-        self.meta[name] = Meta(name, "objective", shape=shape, type=type, **kwargs)
+        self.meta[name] = Meta(
+            name, VarType.OBJECTIVE, shape=shape, type=type, **kwargs
+        )
         return
 
     def __len__(self):
@@ -471,7 +475,7 @@ class OutputSet:
         if "scale" in kwargs:
             raise ValueError("Output values cannot be scaled through kwargs")
         self.outputs[name] = self.OutputExpr(name, type=type, shape=shape)
-        self.meta[name] = Meta(name, "output", shape=shape, type=type, **kwargs)
+        self.meta[name] = Meta(name, VarType.OUTPUT, shape=shape, type=type, **kwargs)
 
     def __len__(self):
         return len(self.outputs)
@@ -843,7 +847,11 @@ class Component:
         return using
 
     def _generate_cpp_class_types(
-        self, class_name, template_name="T__", using_template="R__"
+        self,
+        class_name,
+        template_name="T__",
+        using_template="R__",
+        is_linear=False,
     ):
         cpp = ""
 
@@ -878,7 +886,10 @@ class Component:
             cpp += "  " + "static constexpr int nconstraints = 0;\n"
 
         # For now nothing is linear
-        cpp += "  " + "static constexpr bool is_linear = false;\n"
+        if is_linear:
+            cpp += "  " + "static constexpr bool is_linear = true;\n"
+        else:
+            cpp += "  " + "static constexpr bool is_linear = false;\n"
 
         # Add the data statement
         if len(self.data) > 0:
@@ -974,10 +985,6 @@ class Component:
             else:
                 class_name = self.name + str(index) + "__"
 
-            cpp += self._generate_cpp_class_types(
-                class_name, template_name=template_name, using_template=using_template
-            )
-
             # Get the expression for the Lagrangian
             rhs = self.lagrangian[index]
             lhs = Expr(VarNode("lagrangian__"))
@@ -990,6 +997,17 @@ class Component:
             # Create the expression builder
             vars = []
             builder = ExprBuilder(consts, data, inputs, vars, rhs=rhs, lhs=lhs)
+
+            # Use the builder class to check if the expressions are linear
+            design_vars = [self.inputs[name] for name in self.inputs]
+            is_linear = builder.is_linear(design_vars)
+
+            cpp += self._generate_cpp_class_types(
+                class_name,
+                template_name=template_name,
+                using_template=using_template,
+                is_linear=is_linear,
+            )
 
             for mode in ["eval", "grad", "hprod"]:
                 cpp += self._generate_compute_cpp(

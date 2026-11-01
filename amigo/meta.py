@@ -1,5 +1,16 @@
 import numpy as np
 from .expressions import _type_to_str, _str_to_type, _normalize_shape
+from enum import IntEnum, auto
+
+
+class VarType(IntEnum):
+    INPUT = auto()
+    CONSTRAINT = auto()
+    OUTPUT = auto()
+    DATA = auto()
+    MULTIPLIER = auto()
+    CONSTANT = auto()
+    OBJECTIVE = auto()
 
 
 class Meta:
@@ -21,13 +32,9 @@ class Meta:
         else:
             raise ValueError(f"Unknown meta name {name}")
 
-    def __init__(self, name, var_type, **kwargs):
+    def __init__(self, name: str, var_type: VarType, **kwargs):
         self.UNSET = object()
         self.name = name
-
-        options = ["input", "constraint", "output", "data", "objective", "constant"]
-        if var_type not in options:
-            raise ValueError(f"{var_type} not one of {options}")
         self.var_type = var_type
 
         # Extract the values and normalize the shapes

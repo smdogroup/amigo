@@ -1,3 +1,12 @@
+from enum import IntEnum, auto
+
+
+class Linearity(IntEnum):
+    CONSTANT = 0
+    LINEAR = 1
+    NONLINEAR = 2
+
+
 # Convert from/to strings to/from type
 _type_to_str = {float: "float", int: "int"}
 _str_to_type = {"float": float, "int": int}
@@ -45,6 +54,9 @@ class ExprNode:
     def compute_cost(self):
         raise NotImplementedError
 
+    def get_linearity(self, active_vars):
+        raise NotImplementedError
+
 
 class ConstNode(ExprNode):
     def __init__(self, name=None, value=None, type=float):
@@ -73,6 +85,9 @@ class ConstNode(ExprNode):
     def compute_cost(self):
         return 0
 
+    def get_linearity(self, active_vars):
+        return Linearity.CONSTANT
+
 
 class VarNode(ExprNode):
     def __init__(self, name, shape=None, type=float, active=True):
@@ -96,6 +111,11 @@ class VarNode(ExprNode):
 
     def compute_cost(self):
         return 0
+
+    def get_linearity(self, active_vars):
+        if self in active_vars:
+            return Linearity.LINEAR
+        return Linearity.CONSTANT
 
 
 class IndexNode(ExprNode):
@@ -123,6 +143,9 @@ class IndexNode(ExprNode):
     def compute_cost(self):
         return 0
 
+    def get_linearity(self, active_vars):
+        return self.expr.get_linearity(active_vars)
+
 
 class PassiveNode(ExprNode):
     def __init__(self, expr):
@@ -143,6 +166,9 @@ class PassiveNode(ExprNode):
 
     def compute_cost(self):
         return 0
+
+    def get_linearity(self, active_vars):
+        return Linearity.CONSTANT
 
 
 class UnaryNode(ExprNode):
@@ -210,6 +236,11 @@ class UnaryNode(ExprNode):
 
         return cost
 
+    def get_linearity(self, active_vars):
+        if self.expr.get_linearity(active_vars) == Linearity.CONSTANT:
+            return Linearity.CONSTANT
+        return Linearity.NONLINEAR
+
 
 class BinaryNode(ExprNode):
     binary_ops = ["+", "-", "*", "/", "**", "pow", "atan2", "min2", "max2"]
@@ -266,6 +297,28 @@ class BinaryNode(ExprNode):
             cost += 1
 
         return cost
+
+    def get_linearity(self, active_vars):
+        left = self.left.get_linearity(active_vars)
+        right = self.right.get_linearity(active_vars)
+
+        if self.op in ("+", "-"):
+            return max(left, right)
+
+        elif self.op == "*":
+            if left == Linearity.CONSTANT:
+                return right
+            elif right == Linearity.CONSTANT:
+                return left
+            else:
+                return Linearity.NONLINEAR
+        elif self.op == "/":
+            if right == Linearity.CONSTANT:
+                return left
+            else:
+                return Linearity.NONLINEAR
+        else:
+            return Linearity.NONLINEAR
 
 
 def _to_expr(val):
@@ -430,6 +483,9 @@ class Expr:
 
     def compute_cost(self):
         return self.node.compute_cost()
+
+    def get_linearity(self, active_vars):
+        return self.node.get_linearity(active_vars)
 
 
 class ExprBuilder:
@@ -682,6 +738,40 @@ class ExprBuilder:
             if shape is None and scalar_reference:
                 return f"A2D::A2DObj<{decl}&>"
             return f"A2D::A2DObj<{decl}>"
+
+    def is_linear(self, active_expr):
+        active_vars = []
+        for expr in active_expr:
+            if isinstance(expr, Expr):
+                active_vars.append(expr.node)
+            elif isinstance(expr, ExprNode):
+                active_vars.append(expr)
+            else:
+                raise ValueError("Expected list of Expr or ExprNode objects")
+
+        # Check the linearity of the intermediate expressions. If a variable is
+        # linear, add it to the active varaibles
+        linear = True
+        for var, rhs in self.temp_exprs:
+            if rhs is not None:
+                linearity = rhs.get_linearity(active_vars)
+                if linearity == Linearity.LINEAR:
+                    active_vars.append(var.node)
+                elif linearity == Linearity.NONLINEAR:
+                    linear = False
+                    break
+
+        # Check that the final expressions are nonlinear, only if the intermediate
+        # variables are linear.
+        if linear:
+            for rhs in self.new_rhs:
+                if rhs is not None:
+                    linearity = rhs.get_linearity(active_vars)
+                    if linearity == Linearity.NONLINEAR:
+                        linear = False
+                        break
+
+        return linear
 
     def get_declarations(
         self, inputs, scalar_reference=True, mode="eval", template_name="T__"
