@@ -43,6 +43,7 @@ pip = "*"
 [pypi-dependencies]
 # niceplots is only published on PyPI.
 niceplots = "*"
+pyvista = ">=0.43"
 
 # ---------------------------------------------------------------------------
 # Build toolchain: CMake / scikit-build-core / pybind11 / C++ compiler.
@@ -152,6 +153,14 @@ git = "*"
 [feature.openmdao.dependencies]
 openmdao = ">=3.29"
 
+[feature.app.dependencies]
+numpy = "<2"
+
+[feature.app.pypi-dependencies]
+streamlit = ">=1.57"
+pyNastran = ">=1.4"
+stpyvista = ">=0.2.1"
+
 # ---------------------------------------------------------------------------
 # Optional CUDA / cuDSS build (linux-64 only).
 # cuDSS lives on the nvidia channel; drop `libcudss-dev` and build with
@@ -177,6 +186,7 @@ libcudss-dev = "*"
 default = ["build", "mpi", "blas", "sparse"]
 dev = ["build", "mpi", "blas", "sparse", "dev", "openmdao"]
 cuda = ["build", "mpi", "blas", "sparse", "dev", "cuda"]
+app = ["build", "mpi", "blas", "sparse", "app"]
 
 # ---------------------------------------------------------------------------
 # Tasks
@@ -189,6 +199,7 @@ test = { cmd = "pytest tests/ -v", depends-on = ["install-amigo"] }
 lint = "black --check ."
 format = "black ."
 clean = "python -c \"import shutil, glob; [shutil.rmtree(p, ignore_errors=True) for p in glob.glob('build*') + glob.glob('_skbuild') + glob.glob('**/__pycache__', recursive=True)]\""
+poisson-gui = "streamlit run apps/poisson_app.py --server.address 127.0.0.1"
 
 # --- editable installs, one per platform (paths and flags differ) ----------
 

@@ -1,6 +1,7 @@
 import numpy as np
 import os
 import ast
+import hashlib
 import sys
 import sysconfig
 import importlib
@@ -26,6 +27,8 @@ from .amigo import (
 from .cmake_helper import get_cmake_dir
 from .component import Component
 from .meta import Meta
+
+_BUILT_MODULE_DIGESTS: dict[str, str] = {}
 
 try:
     from mpi4py.MPI import COMM_WORLD
@@ -456,6 +459,12 @@ class MetaView:
 
     def __setitem__(self, key, value):
         self.model.set_meta(self.meta_name, key, value, vtype=self.vtype)
+
+
+def _write_text_if_changed(path: Path, contents: str) -> None:
+    if path.exists() and path.read_text(encoding="utf-8") == contents:
+        return
+    path.write_text(contents, encoding="utf-8")
 
 
 class Model:
@@ -1190,7 +1199,32 @@ class Model:
                 source_dir = self._guess_source_dir()
 
             self.generate_cpp()
-            self._build_module(source_dir=source_dir, build_dir=build_dir, debug=debug)
+            source_digest = hashlib.sha256()
+            for suffix in (".h", ".cpp"):
+                source_digest.update(Path(f"{self.module_name}{suffix}").read_bytes())
+            source_directory = Path(source_dir).resolve()
+            build_directory = (
+                Path(build_dir).resolve()
+                if build_dir is not None
+                else source_directory
+                / ("_amigo_build_debug" if debug else "_amigo_build")
+            )
+            source_digest.update(str(source_directory).encode())
+            source_digest.update(str(build_directory).encode())
+            source_digest.update(str(debug).encode())
+            fingerprint = source_digest.hexdigest()
+            built_fingerprint = _BUILT_MODULE_DIGESTS.get(self.module_name)
+            if built_fingerprint is None:
+                self._build_module(
+                    source_dir=source_dir, build_dir=build_dir, debug=debug
+                )
+                _BUILT_MODULE_DIGESTS[self.module_name] = fingerprint
+            elif built_fingerprint != fingerprint:
+                raise RuntimeError(
+                    f"Module '{self.module_name}' was already built in this "
+                    "Python process from different generated source or build "
+                    "settings. Use a unique module name for each model."
+                )
 
         if comm is not None:
             comm.Barrier()
@@ -1258,13 +1292,8 @@ class Model:
         cpp += "}\n"
         py11 += "}\n"
 
-        filename = self.module_name + ".h"
-        with open(filename, "w") as fp:
-            fp.write(cpp)
-
-        filename = self.module_name + ".cpp"
-        with open(filename, "w") as fp:
-            fp.write(py11)
+        _write_text_if_changed(Path(self.module_name + ".h"), cpp)
+        _write_text_if_changed(Path(self.module_name + ".cpp"), py11)
 
         return
 
@@ -1313,7 +1342,7 @@ amigo_add_python_module(
     SOURCES {self.module_name}.cpp
 )
 """
-        cmakelists.write_text(cfg_str)
+        _write_text_if_changed(cmakelists, cfg_str)
 
         # Locate the installed Amigo CMake package inside the Python package
         amigo_cmake_dir = get_cmake_dir()
@@ -1359,6 +1388,11 @@ amigo_add_python_module(
             print(line, end="")
 
         p.wait()
+        if p.returncode != 0:
+            raise RuntimeError(
+                f"Failed to configure generated Amigo module "
+                f"'{self.module_name}' (exit code {p.returncode})."
+            )
 
         # Build
         p = subprocess.Popen(
@@ -1373,6 +1407,11 @@ amigo_add_python_module(
             print(line, end="")
 
         p.wait()
+        if p.returncode != 0:
+            raise RuntimeError(
+                f"Failed to build generated Amigo module "
+                f"'{self.module_name}' (exit code {p.returncode})."
+            )
 
         return
 

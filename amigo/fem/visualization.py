@@ -15,7 +15,15 @@ _PV_CELL_TYPES = {
     (CellType.TRIANGLE, 3): pv.CellType.TRIANGLE,
     (CellType.TRIANGLE, 6): pv.CellType.QUADRATIC_TRIANGLE,
     (CellType.QUADRILATERAL, 4): pv.CellType.QUAD,
-    (CellType.QUADRILATERAL, 9): pv.CellType.QUADRATIC_QUAD,
+    (CellType.QUADRILATERAL, 8): pv.CellType.QUADRATIC_QUAD,
+    (CellType.QUADRILATERAL, 9): pv.CellType.BIQUADRATIC_QUAD,
+    (CellType.TETRAHEDRON, 4): pv.CellType.TETRA,
+    (CellType.TETRAHEDRON, 10): pv.CellType.QUADRATIC_TETRA,
+    (CellType.HEXAHEDRON, 8): pv.CellType.HEXAHEDRON,
+    (CellType.HEXAHEDRON, 20): pv.CellType.QUADRATIC_HEXAHEDRON,
+    (CellType.PRISM, 6): pv.CellType.WEDGE,
+    (CellType.PRISM, 15): pv.CellType.QUADRATIC_WEDGE,
+    (CellType.PYRAMID, 5): pv.CellType.PYRAMID,
 }
 
 
@@ -68,9 +76,70 @@ def _p1_shape_functions(cell_type: CellType, pts: np.ndarray) -> np.ndarray:
         xi = pts[:, 0]
         return 0.5 * np.stack([1.0 - xi, 1.0 + xi], axis=1)
 
+    if cell_type == CellType.TETRAHEDRON:
+        xi, eta, zeta = pts[:, 0], pts[:, 1], pts[:, 2]
+        return np.stack([1.0 - xi - eta - zeta, xi, eta, zeta], axis=1)
+
+    if cell_type == CellType.HEXAHEDRON:
+        xi, eta, zeta = pts[:, 0], pts[:, 1], pts[:, 2]
+        return 0.125 * np.stack(
+            [
+                (1.0 - xi) * (1.0 - eta) * (1.0 - zeta),
+                (1.0 + xi) * (1.0 - eta) * (1.0 - zeta),
+                (1.0 + xi) * (1.0 + eta) * (1.0 - zeta),
+                (1.0 - xi) * (1.0 + eta) * (1.0 - zeta),
+                (1.0 - xi) * (1.0 - eta) * (1.0 + zeta),
+                (1.0 + xi) * (1.0 - eta) * (1.0 + zeta),
+                (1.0 + xi) * (1.0 + eta) * (1.0 + zeta),
+                (1.0 - xi) * (1.0 + eta) * (1.0 + zeta),
+            ],
+            axis=1,
+        )
+
+    if cell_type == CellType.PRISM:
+        xi, eta, zeta = pts[:, 0], pts[:, 1], pts[:, 2]
+        lower = 0.5 * (1.0 - zeta)
+        upper = 0.5 * (1.0 + zeta)
+        return np.stack(
+            [
+                (1.0 - xi - eta) * lower,
+                xi * lower,
+                eta * lower,
+                (1.0 - xi - eta) * upper,
+                xi * upper,
+                eta * upper,
+            ],
+            axis=1,
+        )
+
+    if cell_type == CellType.PYRAMID:
+        xi, eta, zeta = pts[:, 0], pts[:, 1], pts[:, 2]
+        return 0.25 * np.stack(
+            [
+                (1.0 - xi) * (1.0 - eta) * (1.0 - zeta),
+                (1.0 + xi) * (1.0 - eta) * (1.0 - zeta),
+                (1.0 + xi) * (1.0 + eta) * (1.0 - zeta),
+                (1.0 - xi) * (1.0 + eta) * (1.0 - zeta),
+                4.0 * zeta,
+            ],
+            axis=1,
+        )
+
     raise NotImplementedError(
         f"Degree-1 geometry shape functions are not implemented for {cell_type.name}."
     )
+
+
+def select_grid_domains(
+    grid: pv.UnstructuredGrid, domains: list[str]
+) -> pv.UnstructuredGrid:
+    """Return a grid containing only cells whose mesh-domain labels are selected."""
+    if "mesh_domain" not in grid.cell_data:
+        raise ValueError("The result grid is missing its mesh-domain labels.")
+    labels = np.asarray(grid.cell_data["mesh_domain"])
+    if labels.shape != (grid.n_cells,):
+        raise ValueError("Mesh-domain labels do not match the result grid cells.")
+    return grid.extract_cells(np.isin(labels, domains))
 
 
 def build_grid(
@@ -99,7 +168,9 @@ def build_grid(
     -------
     grid : pyvista.UnstructuredGrid
         Grid whose points are the solution DOF locations and whose
-        ``point_data[name]`` holds the solution field.
+        ``point_data[name]`` holds the solution field and whose
+        ``cell_data["mesh_domain"]`` identifies the source mesh domain of each
+        cell.
     """
     # Geometry: degree-1 H1 space + its DOF handler (used for nodal coords).
     geo_space = problem.geo_space.get_spaces()[0]
@@ -136,6 +207,7 @@ def build_grid(
     # avoids the flat VTK "[npts, p0, p1, ...]" packing and the parallel
     # cell-type array entirely.
     conn_by_type: dict["pv.CellType", list[np.ndarray]] = {}
+    domain_by_type: dict["pv.CellType", list[np.ndarray]] = {}
 
     block_ids = problem.mesh.get_block_ids(domains)
 
@@ -169,8 +241,10 @@ def build_grid(
         phys = N @ vcoords  # (nelem, ndof_local, dim)
         points[soln_conn, :dim] = phys
 
-        # If the pv_type is not in conn_type, add it to the dict
         conn_by_type.setdefault(pv_type, []).append(soln_conn)
+        domain_by_type.setdefault(pv_type, []).append(
+            np.repeat(problem.mesh.get_domain_name(block_id), soln_conn.shape[0])
+        )
 
     if not conn_by_type:
         raise ValueError(f"No blocks found for domain(s) {domains!r}.")
@@ -179,6 +253,9 @@ def build_grid(
 
     # Build the PyVista grid and attach the solution field.
     grid = pv.UnstructuredGrid(cells, points)
+    grid.cell_data["mesh_domain"] = np.concatenate(
+        [np.concatenate(domain_by_type[pv_type]) for pv_type in conn_by_type]
+    )
     grid.point_data[name] = u
 
     return grid
