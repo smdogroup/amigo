@@ -1,4 +1,14 @@
-from .expressions import Expr, VarNode, UnaryNode, BinaryNode, ConstNode, PassiveNode
+from .expressions import (
+    Expr,
+    VarNode,
+    UnaryNode,
+    BinaryNode,
+    ConstNode,
+    PassiveNode,
+    BSplineNode,
+    BSplineBasisNode,
+    _to_expr,
+)
 
 
 def abs(expr: Expr):
@@ -106,6 +116,31 @@ def max2(a: Expr, b: Expr):
         return Expr(BinaryNode("max2", a, b))
     else:
         raise TypeError("Types not recognized for max2")
+
+
+def bspline(table, t, order, column=None):
+    """B-spline of order k with the coefficients of a table of component data at t
+
+    The m coefficients sit on the open uniform knots of the unit interval, the
+    knot 0 repeated k times, the interior knots j / (m - k + 1), and the knot 1
+    repeated k times. A 2D table is read along one column, and outside the unit
+    interval the end spans extend the spline.
+    """
+    return Expr(BSplineNode(table, _to_expr(t), order, column))
+
+
+def bspline_basis(t, index, size, order):
+    """Basis function index of the B-spline of order k with size coefficients at t"""
+    return Expr(BSplineBasisNode(_to_expr(t), index, size, order))
+
+
+def bspline_inverse(table, x, order, column=None):
+    """Parameter where the coordinate spline with increasing coefficients takes the value x
+
+    An x below the first or above the last coefficient holds the parameter at 0
+    or 1 with zero derivatives.
+    """
+    return Expr(BSplineNode(table, _to_expr(x), order, column, inverse=True))
 
 
 def passive(expr: Expr):

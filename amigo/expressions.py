@@ -321,6 +321,163 @@ class BinaryNode(ExprNode):
             return Linearity.NONLINEAR
 
 
+class BSplineNode(ExprNode):
+    """B-spline of a table of component data or the inverse of a coordinate spline"""
+
+    def __init__(self, table, expr, order, column=None, inverse=False):
+        super().__init__()
+
+        # The coefficients are component data that come in an array
+        node = None
+
+        if isinstance(table, Expr):
+            node = table.node
+
+        if not isinstance(node, VarNode) or node.active:
+            raise TypeError("bspline reads its coefficients from component data")
+
+        if node.shape is None:
+            raise ValueError("B-spline coefficients come in an array")
+
+        # A 2D table is read along one column
+        if len(node.shape) == 2:
+            if column is None or not 0 <= int(column) < node.shape[1]:
+                raise ValueError(
+                    f"A table of shape {node.shape} needs a column below {node.shape[1]}"
+                )
+
+            column = int(column)
+
+        elif column is not None:
+            raise ValueError("Only a 2D table takes a column")
+
+        # A spline of order k needs at least k coefficients and a scalar argument
+        order = int(order)
+
+        if not 1 <= order <= node.shape[0]:
+            raise ValueError(
+                f"A spline of order {order} needs at least {order} coefficients"
+            )
+
+        if expr.shape is not None:
+            raise ValueError("bspline takes a scalar argument")
+
+        self.table = table
+        self.expr = expr
+        self.order = order
+        self.column = column
+        self.inverse = bool(inverse)
+        self.shape = None
+
+    def is_zero(self):
+        return False
+
+    def serialize(self):
+        return (
+            "bspline",
+            self.table.serialize(),
+            self.expr.serialize(),
+            self.order,
+            self.column,
+            self.inverse,
+        )
+
+    def to_cpp(self):
+        # A column sits between the table and the argument
+        args = [self.table.to_cpp()]
+
+        if self.column is not None:
+            args.append(str(self.column))
+
+        args.append(self.expr.to_cpp())
+
+        # The inverse shares the arguments of the spline
+        name = "bspline"
+
+        if self.inverse:
+            name = "bspline_inverse"
+
+        return f"A2D::{name}<{self.order}>({', '.join(args)})"
+
+    def is_active(self):
+        return self.expr.is_active()
+
+    def compute_cost(self):
+        # The inverse runs a Newton search on the spline
+        if self.inverse:
+            return self.expr.compute_cost() + 60
+
+        return self.expr.compute_cost() + 20
+
+    def get_linearity(self, active_vars):
+        # A spline is constant in a constant argument and nonlinear otherwise
+        if self.expr.get_linearity(active_vars) == Linearity.CONSTANT:
+            return Linearity.CONSTANT
+
+        return Linearity.NONLINEAR
+
+
+class BSplineBasisNode(ExprNode):
+    """One basis function of a B-spline"""
+
+    def __init__(self, expr, index, size, order):
+        super().__init__()
+
+        # The order and the index fit the number of coefficients
+        index = int(index)
+        size = int(size)
+        order = int(order)
+
+        if not 1 <= order <= size:
+            raise ValueError(
+                f"A spline of order {order} needs at least {order} coefficients"
+            )
+
+        if not 0 <= index < size:
+            raise ValueError(
+                f"Basis index {index} out of range for {size} coefficients"
+            )
+
+        if expr.shape is not None:
+            raise ValueError("bspline_basis takes a scalar argument")
+
+        self.expr = expr
+        self.index = index
+        self.size = size
+        self.order = order
+        self.shape = None
+
+    def is_zero(self):
+        return False
+
+    def serialize(self):
+        return (
+            "bspline_basis",
+            self.expr.serialize(),
+            self.index,
+            self.size,
+            self.order,
+        )
+
+    def to_cpp(self):
+        arg = self.expr.to_cpp()
+
+        return f"A2D::bspline_basis<{self.order}, {self.size}>({self.index}, {arg})"
+
+    def is_active(self):
+        return self.expr.is_active()
+
+    def compute_cost(self):
+        return self.expr.compute_cost() + 20
+
+    def get_linearity(self, active_vars):
+        # A basis function is constant in a constant argument and nonlinear otherwise
+        if self.expr.get_linearity(active_vars) == Linearity.CONSTANT:
+            return Linearity.CONSTANT
+
+        return Linearity.NONLINEAR
+
+
 def _to_expr(val):
     if isinstance(val, Expr):
         return val
@@ -466,6 +623,14 @@ class Expr:
             return cls(UnaryNode(d[1], cls.deserialize(d[2])))
         elif d[0] == "binary":
             return cls(BinaryNode(d[1], cls.deserialize(d[2]), cls.deserialize(d[3])))
+        elif d[0] == "bspline":
+            return cls(
+                BSplineNode(
+                    cls.deserialize(d[1]), cls.deserialize(d[2]), d[3], d[4], d[5]
+                )
+            )
+        elif d[0] == "bspline_basis":
+            return cls(BSplineBasisNode(cls.deserialize(d[1]), d[2], d[3], d[4]))
         else:
             return ValueError("Unrecognized operation type in deserialize")
 
@@ -547,7 +712,7 @@ class ExprBuilder:
         # Count up the references to each node, locating temporaries
         for i in range(len(self.nodes)):
             node = self.nodes[i]
-            if node["type"] == "unary":
+            if node["type"] in ("unary", "bspline", "bspline_basis"):
                 self.counts[node["expr"]] += 1
             elif node["type"] == "binary":
                 self.counts[node["left"]] += 1
@@ -556,7 +721,7 @@ class ExprBuilder:
         # Add the temporaries to the list
         for idx in range(len(self.counts)):
             node = self.nodes[idx]
-            if node["type"] == "unary" or node["type"] == "binary":
+            if node["type"] in ("unary", "binary", "bspline", "bspline_basis"):
                 if self.counts[idx] > 1:
                     self.temp_list.append(idx)
                     name = make_temp_name(idx)
@@ -649,6 +814,26 @@ class ExprBuilder:
                 "left": left_id,
                 "right": right_id,
             }
+        elif isinstance(node, BSplineNode):
+            table_id = self._serialize_expr(node.table)
+            expr_id = self._serialize_expr(node.expr)
+            options = (node.order, node.column, node.inverse)
+            key = ("bspline", table_id, expr_id) + options
+            info = {
+                "type": "bspline",
+                "table": table_id,
+                "expr": expr_id,
+                "options": options,
+            }
+        elif isinstance(node, BSplineBasisNode):
+            expr_id = self._serialize_expr(node.expr)
+            options = (node.index, node.size, node.order)
+            key = ("bspline_basis", expr_id) + options
+            info = {
+                "type": "bspline_basis",
+                "expr": expr_id,
+                "options": options,
+            }
         else:
             raise TypeError(type(node))
 
@@ -699,6 +884,18 @@ class ExprBuilder:
                     self._build_expr_index(node["left"]),
                     self._build_expr_index(node["right"]),
                 )
+            )
+        elif node["type"] == "bspline":
+            expr = Expr(
+                BSplineNode(
+                    self._build_expr_index(node["table"]),
+                    self._build_expr_index(node["expr"]),
+                    *node["options"],
+                )
+            )
+        elif node["type"] == "bspline_basis":
+            expr = Expr(
+                BSplineBasisNode(self._build_expr_index(node["expr"]), *node["options"])
             )
 
         return expr
